@@ -1,0 +1,25 @@
+[package]
+name = "sdi-db"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SDI storage adapter (SQLite via rusqlite + r2d2). FTS5 keyword search; vector search deferred."
+
+[dependencies]
+sdi-core = { workspace = true }
+rusqlite = { workspace = true }
+r2d2 = { workspace = true }
+r2d2_sqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+tracing = { workspace = true }
+once_cell = { workspace = true }
+
+[dev-dependencies]
+ulid = { workspace = true }

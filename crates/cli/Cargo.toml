@@ -1,0 +1,36 @@
+[package]
+name = "sdi-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "SDI command-line entry point (also hosts the `mcp` subcommand for stdio MCP server)."
+
+[lib]
+name = "sdi_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sdi"
+path = "src/main.rs"
+
+[dependencies]
+sdi-core = { workspace = true }
+sdi-db = { workspace = true }
+sdi-mcp = { workspace = true }
+clap = { workspace = true }
+clap_complete = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+ulid = { workspace = true }
+tempfile = "3"

@@ -1,0 +1,24 @@
+[package]
+name = "sdi-mcp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "SDI MCP server (stdio). Embedded into the `sdi` cli as the `mcp` subcommand."
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+sdi-db = { workspace = true }
+
+[dev-dependencies]
+sdi-daemon = { path = "../daemon" }
+ulid = { workspace = true }
+axum = { workspace = true }

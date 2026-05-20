@@ -1,0 +1,994 @@
+//! HTTP integration: scenario → round → task → evidence → done.
+//!
+//! Covers:
+//! - D5 GWT-strict POST /scenarios rejection on empty `then`
+//! - D8 approve gate (plan can't approve until ≥1 confirmed scenario)
+//! - R2+ auto-regression carry-over on round activation under strict-regression
+//! - PRD §6.6 evidence required: /tasks/:id/status with status=done -> 400 EVIDENCE_REQUIRED
+//! - /tasks/:id/complete with full evidence flips status -> done
+
+use sdi_daemon::AppState;
+use sdi_db::Paths;
+use std::sync::Arc;
+use std::time::Duration;
+
+async fn spawn_server() -> (String, tokio::task::JoinHandle<()>) {
+    let tmp = std::env::temp_dir().join(format!(
+        "sdid-it2-{}-{}",
+        std::process::id(),
+        ulid::Ulid::new()
+    ));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let paths = Arc::new(Paths {
+        data: tmp.clone(),
+        cache: tmp.clone(),
+        config: tmp.clone(),
+        state: tmp.clone(),
+        db_file: tmp.join("sdi.db"),
+        pid_file: tmp.join("sdid.pid"),
+        port_file: tmp.join("sdid.port"),
+        socket_file: tmp.join("sdid.sock"),
+        log_file: tmp.join("sdid.log"),
+    });
+    let pool = sdi_db::open(&paths).expect("open db");
+    let state = AppState::new(pool, paths);
+    let app = sdi_daemon::router::build(state);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let base = format!("http://{}", addr);
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    (base, handle)
+}
+
+fn c() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap()
+}
+
+async fn mk_plan(base: &str, suffix: &str) -> (String, String) {
+    let cli = c();
+    let key = format!("F{}", &suffix[..4]);
+    let slug = format!("f-{}", &suffix[..6].to_lowercase());
+    let project: serde_json::Value = cli
+        .post(format!("{}/projects", base))
+        .json(&serde_json::json!({"key": key, "name": "Flow", "slug": slug}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let project_id = project["id"].as_str().unwrap().to_string();
+
+    let plan_code = format!("F-{}", &suffix[..6]);
+    let plan: serde_json::Value = cli
+        .post(format!("{}/plans", base))
+        .json(&serde_json::json!({
+            "project_id": project_id,
+            "short_code": plan_code,
+            "title": "v",
+            "body": ""
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let plan_id = plan["id"].as_str().unwrap().to_string();
+    (project_id, plan_id)
+}
+
+#[tokio::test]
+async fn scenario_gwt_strict_d5() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    // Empty `then` -> 400 GWT_EMPTY
+    let r = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-{}", &suffix[..6]),
+            "given": "logged in",
+            "when": "click",
+            "then": "  "
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let body: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "GWT_EMPTY");
+}
+
+#[tokio::test]
+async fn plan_approve_unlocks_after_scenario_confirmed() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    let scn: serde_json::Value = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-{}", &suffix[..6]),
+            "given": "logged in",
+            "when": "click checkout",
+            "then": "order is created",
+            "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(scn["status"], "confirmed");
+
+    let r = cli
+        .post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let plan: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(plan["status"], "active");
+}
+
+#[tokio::test]
+async fn r2_auto_regression_carries_results() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    // 2 confirmed scenarios
+    let mut scn_ids = vec![];
+    for i in 0..2 {
+        let scn: serde_json::Value = cli
+            .post(format!("{}/scenarios", base))
+            .json(&serde_json::json!({
+                "plan_id": plan_id,
+                "short_code": format!("SCN-{}-{i}", &suffix[..6]),
+                "given": "user state",
+                "when": format!("action {i}"),
+                "then": "outcome",
+                "confirmed": true
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        scn_ids.push(scn["id"].as_str().unwrap().to_string());
+    }
+    // approve plan
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+
+    // round 1 (strict-regression default)
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R1-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+    // verdicts: scn[0]=passing, scn[1]=failing
+    for (i, sid) in scn_ids.iter().enumerate() {
+        cli.post(format!("{}/rounds/{}/results", base, r1_id))
+            .json(&serde_json::json!({
+                "scenario_id": sid,
+                "result": if i == 0 { "passing" } else { "failing" }
+            }))
+            .send()
+            .await
+            .unwrap();
+    }
+    cli.post(format!("{}/rounds/{}/complete", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    // round 2 (default strict-regression) — activation should carry results
+    let r2: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R2-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r2_id = r2["id"].as_str().unwrap().to_string();
+    let act: serde_json::Value = cli
+        .post(format!("{}/rounds/{}/activate", base, r2_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(act["carried_results"], 2);
+    let results: serde_json::Value = cli
+        .get(format!("{}/rounds/{}/results", base, r2_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let arr = results["results"].as_array().unwrap();
+    let mut got: Vec<(String, String)> = arr
+        .iter()
+        .map(|r| {
+            (
+                r["scenario_id"].as_str().unwrap().to_string(),
+                r["result"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    got.sort();
+    let mut want = vec![
+        (scn_ids[0].clone(), "passing".into()),
+        (scn_ids[1].clone(), "failing".into()),
+    ];
+    want.sort();
+    assert_eq!(got, want);
+}
+
+#[tokio::test]
+async fn task_done_requires_evidence_prd_6_6() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    // 1 scenario + plan approve + round1 active
+    let scn: serde_json::Value = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-{}", &suffix[..6]),
+            "given": "g", "when": "w", "then": "t",
+            "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scn_id = scn["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R1-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    let task: serde_json::Value = cli
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": r1_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "wire CLI",
+            "parent_scenario_ids": [scn_id.clone()]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let task_id = task["id"].as_str().unwrap().to_string();
+
+    // todo -> in_progress (allowed, no evidence needed)
+    let r = cli
+        .post(format!("{}/tasks/{}/status", base, task_id))
+        .json(&serde_json::json!({"status":"in_progress"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+
+    // attempt done via /status — should be rejected with EVIDENCE_REQUIRED
+    let r = cli
+        .post(format!("{}/tasks/{}/status", base, task_id))
+        .json(&serde_json::json!({"status":"done"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let body: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "EVIDENCE_REQUIRED");
+
+    // /tasks/:id/complete with empty evidence still rejected
+    let r = cli
+        .post(format!("{}/tasks/{}/complete", base, task_id))
+        .json(&serde_json::json!({"evidence": {}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+
+    // /tasks/:id/complete with valid evidence accepted
+    let r = cli
+        .post(format!("{}/tasks/{}/complete", base, task_id))
+        .json(&serde_json::json!({
+            "evidence": {
+                "scenarios": [{
+                    "scenario_id": scn_id,
+                    "result": "passing",
+                    "evidence_ref": "src/lib.rs:42"
+                }],
+                "summary": "all green"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let done: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(done["status"], "done");
+    assert!(done["evidence_at"].is_string());
+}
+
+/// PRD §6 #5 — In-flight Task pause. When R(N+1) is activated and its
+/// `in_flight_policy = pause` (the daemon default), every task in the same
+/// plan that is currently `in_progress` MUST transition to `blocked`. The
+/// activate response surfaces the policy, the action taken, and the affected
+/// task IDs so the LLM caller can confirm the disruption set.
+#[tokio::test]
+async fn round_activate_pauses_in_flight_tasks_prd_6_5() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    // 1 confirmed scenario, approve plan
+    let scn: serde_json::Value = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-{}", &suffix[..6]),
+            "given": "g", "when": "w", "then": "t",
+            "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scn_id = scn["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+
+    // R1 active, task in R1 moves to in_progress
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R1-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    let task: serde_json::Value = cli
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": r1_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "wire CLI",
+            "parent_scenario_ids": [scn_id.clone()]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let task_id = task["id"].as_str().unwrap().to_string();
+
+    let r = cli
+        .post(format!("{}/tasks/{}/status", base, task_id))
+        .json(&serde_json::json!({"status": "in_progress"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+
+    // R1 must be completed before R2 can activate (round lifecycle invariant).
+    cli.post(format!("{}/rounds/{}/complete", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    // R2 with default in-flight policy (pause)
+    let r2: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R2-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r2_id = r2["id"].as_str().unwrap().to_string();
+
+    let act: serde_json::Value = cli
+        .post(format!("{}/rounds/{}/activate", base, r2_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(act["in_flight"]["policy"], "pause");
+    assert_eq!(act["in_flight"]["action"], "paused");
+    let affected = act["in_flight"]["affected_task_ids"].as_array().unwrap();
+    assert!(
+        affected.iter().any(|v| v.as_str() == Some(&task_id)),
+        "task {task_id} should appear in affected_task_ids, got {affected:?}"
+    );
+
+    // The in-flight task is now blocked.
+    let task_after: serde_json::Value = cli
+        .get(format!("{}/tasks/{}", base, task_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(task_after["status"], "blocked");
+}
+
+/// PRD §6 #5 — `in_flight_policy = abort` cancels every in-flight task in the
+/// plan when the next round activates.
+#[tokio::test]
+async fn round_activate_abort_cancels_in_flight_tasks_prd_6_5() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    let scn: serde_json::Value = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-{}", &suffix[..6]),
+            "given": "g", "when": "w", "then": "t",
+            "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scn_id = scn["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R1-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    let task: serde_json::Value = cli
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": r1_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "wire CLI",
+            "parent_scenario_ids": [scn_id]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let task_id = task["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/tasks/{}/status", base, task_id))
+        .json(&serde_json::json!({"status": "in_progress"}))
+        .send()
+        .await
+        .unwrap();
+    cli.post(format!("{}/rounds/{}/complete", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    let r2: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R2-{}", &suffix[..6]),
+            "in_flight_policy": "abort"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r2_id = r2["id"].as_str().unwrap().to_string();
+    let act: serde_json::Value = cli
+        .post(format!("{}/rounds/{}/activate", base, r2_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(act["in_flight"]["policy"], "abort");
+    assert_eq!(act["in_flight"]["action"], "aborted");
+
+    let task_after: serde_json::Value = cli
+        .get(format!("{}/tasks/{}", base, task_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(task_after["status"], "cancelled");
+}
+
+/// PRD §6 #5 — `in_flight_policy = continue-on-noimpact` leaves in-progress
+/// tasks alone when the next round activates. The action label is `continued`
+/// and affected_task_ids still surfaces the running set so the LLM can
+/// double-check intent against the disruption review trail (PRD §6 #4).
+#[tokio::test]
+async fn round_activate_continue_on_noimpact_leaves_tasks_prd_6_5() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    let scn: serde_json::Value = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-{}", &suffix[..6]),
+            "given": "g", "when": "w", "then": "t",
+            "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scn_id = scn["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R1-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    let task: serde_json::Value = cli
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": r1_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "wire CLI",
+            "parent_scenario_ids": [scn_id]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let task_id = task["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/tasks/{}/status", base, task_id))
+        .json(&serde_json::json!({"status": "in_progress"}))
+        .send()
+        .await
+        .unwrap();
+    cli.post(format!("{}/rounds/{}/complete", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    let r2: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R2-{}", &suffix[..6]),
+            "in_flight_policy": "continue-on-noimpact"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r2_id = r2["id"].as_str().unwrap().to_string();
+    let act: serde_json::Value = cli
+        .post(format!("{}/rounds/{}/activate", base, r2_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(act["in_flight"]["policy"], "continue-on-noimpact");
+    assert_eq!(act["in_flight"]["action"], "continued");
+    let affected = act["in_flight"]["affected_task_ids"].as_array().unwrap();
+    assert!(
+        affected.iter().any(|v| v.as_str() == Some(&task_id)),
+        "task {task_id} should still surface in affected_task_ids"
+    );
+
+    let task_after: serde_json::Value = cli
+        .get(format!("{}/tasks/{}", base, task_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        task_after["status"], "in_progress",
+        "continue-on-noimpact must NOT mutate the task status"
+    );
+}
+
+/// PRD §6 #6 (D6) — Task evidence is the canonical write surface for per-
+/// scenario verdicts. When /tasks/:id/complete succeeds, the daemon mirrors
+/// every `evidence.scenarios[]` entry into `round.scenario_results` so
+/// /rounds/:id/results reflects the verdict without a separate call.
+#[tokio::test]
+async fn task_complete_mirrors_evidence_into_round_results_d6() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    // Two confirmed scenarios.
+    let mut scn_ids = vec![];
+    for i in 0..2 {
+        let scn: serde_json::Value = cli
+            .post(format!("{}/scenarios", base))
+            .json(&serde_json::json!({
+                "plan_id": plan_id,
+                "short_code": format!("SCN-{}-{i}", &suffix[..6]),
+                "given": "g",
+                "when": format!("w{i}"),
+                "then": format!("t{i}"),
+                "confirmed": true
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        scn_ids.push(scn["id"].as_str().unwrap().to_string());
+    }
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R1-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    let task: serde_json::Value = cli
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": r1_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "wire login + checkout",
+            "parent_scenario_ids": [scn_ids[0].clone(), scn_ids[1].clone()]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let task_id = task["id"].as_str().unwrap().to_string();
+
+    cli.post(format!("{}/tasks/{}/status", base, task_id))
+        .json(&serde_json::json!({"status":"in_progress"}))
+        .send()
+        .await
+        .unwrap();
+
+    let r = cli
+        .post(format!("{}/tasks/{}/complete", base, task_id))
+        .json(&serde_json::json!({
+            "evidence": {
+                "scenarios": [
+                    {
+                        "scenario_id": scn_ids[0],
+                        "result": "passing",
+                        "evidence_ref": "tests/login.rs:42",
+                        "note": "happy path verified"
+                    },
+                    {
+                        "scenario_id": scn_ids[1],
+                        "result": "failing",
+                        "evidence_ref": "tests/checkout.rs:118",
+                        "note": "expected ORDER_CREATED, got DRAFT"
+                    }
+                ],
+                "summary": "1 pass / 1 fail"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+
+    let results: serde_json::Value = cli
+        .get(format!("{}/rounds/{}/results", base, r1_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let arr = results["results"].as_array().unwrap();
+    assert_eq!(
+        arr.len(),
+        2,
+        "task evidence must mirror both scenarios into round.scenario_results"
+    );
+    let mut got: Vec<(String, String, String)> = arr
+        .iter()
+        .map(|r| {
+            (
+                r["scenario_id"].as_str().unwrap().to_string(),
+                r["result"].as_str().unwrap().to_string(),
+                r["evidence_ref"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    got.sort();
+    let mut want = vec![
+        (
+            scn_ids[0].clone(),
+            "passing".into(),
+            "tests/login.rs:42".into(),
+        ),
+        (
+            scn_ids[1].clone(),
+            "failing".into(),
+            "tests/checkout.rs:118".into(),
+        ),
+    ];
+    want.sort();
+    assert_eq!(got, want);
+}
+
+/// PRD §6 #3 — carry-over must NOT silently auto-pass a scenario that was
+/// added after the prior round completed (no prev verdict → must remain
+/// unevaluated in the new round). The fix swaps the old
+/// `COALESCE(sr.result,'passing')` for an inner-join on scenario_results so
+/// only scenarios with an explicit prior verdict are carried.
+#[tokio::test]
+async fn carry_over_excludes_unevaluated_scenarios_prd_6_3() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    // SCN-A exists before R1 — gets a verdict.
+    let scn_a: serde_json::Value = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-A-{}", &suffix[..6]),
+            "given": "g", "when": "w", "then": "t",
+            "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scn_a_id = scn_a["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R1-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+    cli.post(format!("{}/rounds/{}/results", base, r1_id))
+        .json(&serde_json::json!({
+            "scenario_id": scn_a_id,
+            "result": "passing"
+        }))
+        .send()
+        .await
+        .unwrap();
+    cli.post(format!("{}/rounds/{}/complete", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+
+    // SCN-B is created AFTER R1 completes. It must NOT auto-pass in R2.
+    let scn_b: serde_json::Value = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-B-{}", &suffix[..6]),
+            "given": "g2", "when": "w2", "then": "t2",
+            "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scn_b_id = scn_b["id"].as_str().unwrap().to_string();
+
+    let r2: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R2-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r2_id = r2["id"].as_str().unwrap().to_string();
+    let act: serde_json::Value = cli
+        .post(format!("{}/rounds/{}/activate", base, r2_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        act["carried_results"], 1,
+        "only SCN-A should carry (SCN-B is unevaluated)"
+    );
+
+    let results: serde_json::Value = cli
+        .get(format!("{}/rounds/{}/results", base, r2_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let arr = results["results"].as_array().unwrap();
+    assert_eq!(arr.len(), 1, "R2 must contain exactly SCN-A; SCN-B unevaluated");
+    assert_eq!(arr[0]["scenario_id"], scn_a_id);
+    assert!(
+        arr.iter().all(|r| r["scenario_id"] != scn_b_id),
+        "SCN-B must NOT be auto-passed in R2",
+    );
+}

@@ -1,0 +1,36 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Local databases / runtime artifacts (defensive — actual data lives in XDG paths)
+*.sqlite
+*.sqlite3
+*.db
+
+# Plugin distribution binaries (populated on the dist branch / by install gate
+# at runtime). PRD §5.1: main carries src; dist carries built binaries.
+plugin/bin/*
+!plugin/bin/.gitkeep
+plugin/daemon/bin/*
+!plugin/daemon/bin/.gitkeep
+
+# Local install marker written by ensureInstalled (LM-8: lives under pluginRoot)
+plugin/.sdi-version
