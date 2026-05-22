@@ -38,6 +38,15 @@ struct CreateScenarioBody {
     origin_round_id: Option<String>,
     #[serde(default)]
     confirmed: bool,
+    /// M4 contract — DAG predecessor edges (Scenario short_codes).
+    #[serde(default)]
+    depends_on: Vec<String>,
+    /// M4 contract — producing agent.
+    #[serde(default)]
+    produced_by: Option<String>,
+    /// M4 contract — verifying agent.
+    #[serde(default)]
+    verified_by: Option<String>,
 }
 
 async fn create(
@@ -58,6 +67,9 @@ async fn create(
         } else {
             ScenarioStatus::Draft
         },
+        depends_on: b.depends_on,
+        produced_by: b.produced_by,
+        verified_by: b.verified_by,
         created_at: now(),
         updated_at: now(),
     };
