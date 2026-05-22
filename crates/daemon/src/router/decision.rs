@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use sdi_core::decision::{Decision, DecisionStatus};
+use sdi_core::decision::{Decision, DecisionKind, DecisionStatus};
 use sdi_core::error::DomainError;
 use sdi_core::ids::{now, Id, IdKind};
 use sdi_db::repo::decision as repo;
@@ -33,6 +33,15 @@ struct CreateDecisionBody {
     status: Option<String>,
     #[serde(default)]
     supersedes_id: Option<String>,
+    /// D20 — M3 stage classifier. Defaults to `proposal` for compatibility.
+    #[serde(default)]
+    kind: Option<String>,
+    /// D20 — required when kind ∈ {critique, consensus, dissensus}.
+    #[serde(default)]
+    proposal_id: Option<String>,
+    /// D20 — Layer-2 specialist that emitted this row.
+    #[serde(default)]
+    agent_name: Option<String>,
 }
 
 async fn create(
@@ -43,6 +52,15 @@ async fn create(
         Some(s) => DecisionStatus::from_str(s)?,
         None => DecisionStatus::Accepted,
     };
+    let kind = match b.kind.as_deref() {
+        Some(s) => DecisionKind::from_str(s)?,
+        None => DecisionKind::Proposal,
+    };
+    let escalated_at = if matches!(kind, DecisionKind::Dissensus) {
+        Some(now())
+    } else {
+        None
+    };
     let decision = Decision {
         id: Id::new(IdKind::Decision),
         plan_id: Id::from(b.plan_id),
@@ -51,13 +69,22 @@ async fn create(
         body: b.body,
         status,
         supersedes_id: b.supersedes_id.map(Id::from),
+        kind,
+        proposal_id: b.proposal_id.map(Id::from),
+        agent_name: b.agent_name,
+        escalated_at,
         created_at: now(),
     };
     let conn = state.conn()?;
     repo::insert(&conn, &decision)?;
     let fresh = repo::get(&conn, &decision.id)?;
+    let event_kind = match fresh.kind {
+        DecisionKind::Consensus => "consensus.reached",
+        DecisionKind::Dissensus => "dissensus.escalated",
+        _ => "decision.created",
+    };
     state.publish(EventEnvelope {
-        kind: "decision.created".into(),
+        kind: event_kind.into(),
         entity_id: Some(fresh.id.to_string()),
         payload: serde_json::to_value(&fresh).unwrap_or(Value::Null),
     });
