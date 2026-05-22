@@ -19,19 +19,30 @@ fn row_to_scenario(row: &Row<'_>) -> rusqlite::Result<Scenario> {
         tags: json::<Vec<String>>(row, 6)?,
         origin_round_id: s_opt(row, 7)?.map(Id::from),
         status: parsed::<ScenarioStatus>(row, 8)?,
-        created_at: ts(row, 9)?,
-        updated_at: ts(row, 10)?,
+        depends_on: json::<Vec<String>>(row, 9)?,
+        produced_by: s_opt(row, 10)?,
+        verified_by: s_opt(row, 11)?,
+        created_at: ts(row, 12)?,
+        updated_at: ts(row, 13)?,
     })
 }
 
-const COLS: &str = "id, plan_id, short_code, given, when_clause, then_clause, tags, origin_round_id, status, created_at, updated_at";
+const COLS: &str = "id, plan_id, short_code, given, when_clause, then_clause, tags, \
+                    origin_round_id, status, depends_on, produced_by, verified_by, \
+                    created_at, updated_at";
 
 pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
     Scenario::validate_gwt(&scenario.given, &scenario.when_clause, &scenario.then_clause)?;
+    Scenario::validate_depends_on(&scenario.short_code, &scenario.depends_on)?;
     let tags = serde_json::to_string(&scenario.tags)
         .map_err(|e| DomainError::Validation(format!("encode tags: {e}")))?;
+    let depends_on = serde_json::to_string(&scenario.depends_on)
+        .map_err(|e| DomainError::Validation(format!("encode depends_on: {e}")))?;
     conn.execute(
-        &format!("INSERT INTO scenarios({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
+        &format!(
+            "INSERT INTO scenarios({COLS}) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"
+        ),
         params![
             scenario.id.as_str(),
             scenario.plan_id.as_str(),
@@ -42,6 +53,9 @@ pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
             tags,
             scenario.origin_round_id.as_ref().map(|i| i.as_str().to_string()),
             scenario.status.to_string(),
+            depends_on,
+            scenario.produced_by,
+            scenario.verified_by,
             fmt_ts(scenario.created_at),
             fmt_ts(scenario.updated_at),
         ],
@@ -126,7 +140,8 @@ pub fn search(conn: &Connection, plan_id: &Id, query: &str, limit: usize) -> Dom
     let mut stmt = conn
         .prepare(
             "SELECT s.id, s.plan_id, s.short_code, s.given, s.when_clause, s.then_clause, \
-                    s.tags, s.origin_round_id, s.status, s.created_at, s.updated_at \
+                    s.tags, s.origin_round_id, s.status, s.depends_on, s.produced_by, \
+                    s.verified_by, s.created_at, s.updated_at \
              FROM scenarios s JOIN scenarios_fts f ON f.rowid = s.rowid \
              WHERE s.plan_id = ?1 AND scenarios_fts MATCH ?2 \
              ORDER BY rank LIMIT ?3",
@@ -199,6 +214,9 @@ mod tests {
             tags: vec!["checkout".into(), "happy".into()],
             origin_round_id: None,
             status: ScenarioStatus::Draft,
+            depends_on: vec![],
+            produced_by: None,
+            verified_by: None,
             created_at: now(),
             updated_at: now(),
         }

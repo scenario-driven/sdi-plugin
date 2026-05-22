@@ -4,9 +4,9 @@
 //! to `superseded`.
 
 use crate::map_sqlite_err;
-use crate::repo::{fmt_ts, parsed, s, s_opt, ts};
+use crate::repo::{fmt_ts, parsed, s, s_opt, ts, ts_opt};
 use rusqlite::{params, Connection, Row};
-use sdi_core::decision::{Decision, DecisionStatus};
+use sdi_core::decision::{Decision, DecisionKind, DecisionStatus};
 use sdi_core::error::{DomainError, DomainResult};
 use sdi_core::ids::{now, Id};
 
@@ -19,15 +19,42 @@ fn row_to_decision(row: &Row<'_>) -> rusqlite::Result<Decision> {
         body: s(row, 4)?,
         status: parsed::<DecisionStatus>(row, 5)?,
         supersedes_id: s_opt(row, 6)?.map(Id::from),
-        created_at: ts(row, 7)?,
+        kind: parsed::<DecisionKind>(row, 7)?,
+        proposal_id: s_opt(row, 8)?.map(Id::from),
+        agent_name: s_opt(row, 9)?,
+        escalated_at: ts_opt(row, 10)?,
+        created_at: ts(row, 11)?,
     })
 }
 
-const COLS: &str = "id, plan_id, short_code, title, body, status, supersedes_id, created_at";
+const COLS: &str = "id, plan_id, short_code, title, body, status, supersedes_id, \
+                    kind, proposal_id, agent_name, escalated_at, created_at";
 
 pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
+    // D20 — enforce M3 ordering for non-proposal stages.
+    if !matches!(decision.kind, DecisionKind::Proposal) {
+        let existing = list_kinds_by_proposal(
+            conn,
+            decision
+                .proposal_id
+                .as_ref()
+                .ok_or_else(|| DomainError::Validation(format!(
+                    "{} decision requires proposal_id",
+                    decision.kind
+                )))?,
+        )?;
+        Decision::validate_stage_transition(
+            decision.kind,
+            &existing,
+            decision.proposal_id.as_ref(),
+        )?;
+    } else if decision.proposal_id.is_some() {
+        return Err(DomainError::Validation(
+            "proposal decision must not carry proposal_id".into(),
+        ));
+    }
     conn.execute(
-        &format!("INSERT INTO decisions({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"),
+        &format!("INSERT INTO decisions({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
         params![
             decision.id.as_str(),
             decision.plan_id.as_str(),
@@ -36,6 +63,10 @@ pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
             decision.body,
             decision.status.to_string(),
             decision.supersedes_id.as_ref().map(|i| i.as_str().to_string()),
+            decision.kind.to_string(),
+            decision.proposal_id.as_ref().map(|i| i.as_str().to_string()),
+            decision.agent_name,
+            decision.escalated_at.map(fmt_ts),
             fmt_ts(decision.created_at),
         ],
     )
@@ -48,6 +79,32 @@ pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
         .map_err(map_sqlite_err)?;
     }
     Ok(())
+}
+
+/// Returns every Decision.kind already recorded against a proposal, in
+/// insertion order. Used by `insert` to enforce M3 ordering.
+pub fn list_kinds_by_proposal(
+    conn: &Connection,
+    proposal_id: &Id,
+) -> DomainResult<Vec<DecisionKind>> {
+    let mut stmt = conn
+        .prepare("SELECT kind FROM decisions WHERE proposal_id = ?1 ORDER BY created_at")
+        .map_err(map_sqlite_err)?;
+    let rows = stmt
+        .query_map([proposal_id.as_str()], |r| {
+            let raw: String = r.get(0)?;
+            Ok(raw)
+        })
+        .map_err(map_sqlite_err)?;
+    let mut out = Vec::new();
+    for r in rows {
+        let raw = r.map_err(map_sqlite_err)?;
+        let kind: DecisionKind = raw
+            .parse()
+            .map_err(|e: DomainError| map_sqlite_err(rusqlite::Error::ToSqlConversionFailure(Box::new(e))))?;
+        out.push(kind);
+    }
+    Ok(out)
 }
 
 pub fn get(conn: &Connection, id: &Id) -> DomainResult<Decision> {
@@ -160,6 +217,10 @@ mod tests {
             body: "b".into(),
             status: DecisionStatus::Accepted,
             supersedes_id: supersedes,
+            kind: DecisionKind::Proposal,
+            proposal_id: None,
+            agent_name: None,
+            escalated_at: None,
             created_at: now(),
         }
     }
