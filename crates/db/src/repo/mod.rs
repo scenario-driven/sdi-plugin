@@ -15,6 +15,9 @@ pub mod disruption;
 pub mod collab;
 pub mod run;
 pub mod usage;
+pub mod autonomy_policy;
+pub mod agent_note;
+pub mod agent_spec;
 
 use chrono::{DateTime, Utc};
 use rusqlite::types::FromSql;

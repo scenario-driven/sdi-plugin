@@ -26,6 +26,9 @@ pub enum IdKind {
     Run,
     TaskRelation,
     UsageRecord,
+    AutonomyPolicy,
+    AgentNote,
+    AgentSpec,
 }
 
 impl IdKind {
@@ -47,6 +50,9 @@ impl IdKind {
             IdKind::Run => "RUN",
             IdKind::TaskRelation => "TREL",
             IdKind::UsageRecord => "USG",
+            IdKind::AutonomyPolicy => "APOL",
+            IdKind::AgentNote => "ANOTE",
+            IdKind::AgentSpec => "ASPEC",
         }
     }
 }
