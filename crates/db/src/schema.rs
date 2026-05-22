@@ -15,6 +15,7 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
     (3, "collaboration: comments + questions + activity", MIGRATION_003_COLLAB),
     (4, "runs + task hierarchy + lease", MIGRATION_004_RUNS),
     (5, "usage accounting", MIGRATION_005_USAGE),
+    (6, "v0.4 multi-agent governance", MIGRATION_006_V04_MULTI_AGENT),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -22,6 +23,7 @@ const MIGRATION_002_DISRUPTION: &str = include_str!("./migrations/002_disruption
 const MIGRATION_003_COLLAB: &str = include_str!("./migrations/003_collab.sql");
 const MIGRATION_004_RUNS: &str = include_str!("./migrations/004_runs_hierarchy.sql");
 const MIGRATION_005_USAGE: &str = include_str!("./migrations/005_usage.sql");
+const MIGRATION_006_V04_MULTI_AGENT: &str = include_str!("./migrations/006_v04_multi_agent.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {
@@ -47,12 +49,28 @@ pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {
             continue;
         }
         tracing::info!(version, label, "applying SDI schema migration");
-        conn.execute_batch(sql).map_err(map_sqlite_err)?;
-        conn.execute(
-            "INSERT INTO schema_migrations(version, label) VALUES (?1, ?2)",
-            rusqlite::params![version, label],
-        )
-        .map_err(map_sqlite_err)?;
+        // Wrap each migration in a transaction so partial failures (e.g. an
+        // ALTER TABLE that runs after some CREATEs) leave the schema intact
+        // and a retry sees the same starting state.
+        conn.execute_batch("BEGIN").map_err(map_sqlite_err)?;
+        let apply = conn
+            .execute_batch(sql)
+            .and_then(|_| {
+                conn.execute(
+                    "INSERT INTO schema_migrations(version, label) VALUES (?1, ?2)",
+                    rusqlite::params![version, label],
+                )
+                .map(|_| ())
+            });
+        match apply {
+            Ok(()) => {
+                conn.execute_batch("COMMIT").map_err(map_sqlite_err)?;
+            }
+            Err(err) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(map_sqlite_err(err));
+            }
+        }
     }
     Ok(())
 }
@@ -95,8 +113,38 @@ mod tests {
             "events",
             "disruption_reviews",
             "schema_migrations",
+            "autonomy_policies",
+            "agent_notes",
+            "agent_specs",
         ] {
             assert!(tables.iter().any(|t| t == must), "missing table {must}");
+        }
+        // v0.4 columns on existing tables
+        let scenario_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(scenarios)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        for col in ["depends_on", "produced_by", "verified_by"] {
+            assert!(
+                scenario_cols.iter().any(|c| c == col),
+                "scenarios missing column {col}"
+            );
+        }
+        let decision_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(decisions)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        for col in ["kind", "proposal_id", "agent_name", "escalated_at"] {
+            assert!(
+                decision_cols.iter().any(|c| c == col),
+                "decisions missing column {col}"
+            );
         }
         let _ = std::fs::remove_file(&tmp);
     }
