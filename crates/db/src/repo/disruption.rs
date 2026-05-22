@@ -210,6 +210,9 @@ mod tests {
             tags: vec![],
             origin_round_id: None,
             status: ScenarioStatus::Confirmed,
+            depends_on: vec![],
+            produced_by: None,
+            verified_by: None,
             created_at: now(),
             updated_at: now(),
         };
