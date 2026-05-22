@@ -124,7 +124,7 @@ test('lint: every adapters/claude/*.cjs is a thin shim (≤ 8 lines)', () => {
 
 test('lint: every commands/*.md has a YAML frontmatter block with description', () => {
   const cmds = listFiles(COMMANDS_DIR, '.md');
-  assert.equal(cmds.length, 6, `expected 6 command files, got ${cmds.length}`);
+  assert.equal(cmds.length, 9, `expected 9 command files, got ${cmds.length}`);
   for (const file of cmds) {
     const raw = fs.readFileSync(file, 'utf8');
     assert.match(raw, /^---\n[\s\S]+?\n---\n/, `${path.basename(file)} missing frontmatter block`);
@@ -135,7 +135,10 @@ test('lint: every commands/*.md has a YAML frontmatter block with description', 
 
 test('lint: command file names match the slash-command vocabulary', () => {
   const cmds = listFiles(COMMANDS_DIR, '.md').map((f) => path.basename(f, '.md'));
-  const expected = ['scenario', 'round', 'plan', 'req', 'decide', 'sdi-status'];
+  const expected = [
+    'scenario', 'round', 'plan', 'req', 'decide', 'sdi-status',
+    'autonomy', 'agent-note', 'consensus',
+  ];
   for (const name of expected) assert.ok(cmds.includes(name), `missing command: /${name}`);
 });
 
