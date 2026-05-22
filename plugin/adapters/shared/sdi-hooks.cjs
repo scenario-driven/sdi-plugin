@@ -521,8 +521,13 @@ async function runUserPromptSubmit(input) {
   );
 }
 
-// PreToolUse: block Edit/Write/Bash if no active task in_progress.
-function runPreToolUse(input) {
+// PreToolUse: two gates.
+//   1. Active-task gate — block Edit/Write/Bash without a task in_progress.
+//   2. Autonomy gate (D14/D17/D18) — consult `/autonomy_policies/resolve`
+//      for the active plan and downgrade to `permissionDecision: 'ask'`
+//      when the effective mode is L3. The communication substrate (M1~M5)
+//      stays mode-independent (D19); only the user-gate position moves.
+async function runPreToolUse(input) {
   if (process.env[BYPASS_ENV] === '1') return;
   const toolName = (input && input.tool_name) || '';
   const watched = /^(Edit|Write|MultiEdit|Bash|NotebookEdit|Agent|Task|TeamCreate|SendMessage)$/.test(toolName);
@@ -542,6 +547,47 @@ function runPreToolUse(input) {
       }) + '\n',
     );
     appendHookLog('pre_tool_use_blocked', { tool: toolName, reason: 'no-active-task' });
+    return;
+  }
+
+  // Autonomy gate. Best-effort: if the daemon can't resolve a policy (no
+  // project, no active plan, no policy rows yet) we silently allow — the
+  // gate exists to *raise* friction, never to invent it.
+  const cwd = (input && input.cwd) || process.cwd();
+  const project = await projectByCwd(cwd).catch(() => null);
+  const plan = project ? await activePlanForProject(project.id).catch(() => null) : null;
+  if (project && plan) {
+    const resolved = await getJson(
+      `/autonomy_policies/resolve?project_id=${encodeURIComponent(project.id)}` +
+        `&plan_id=${encodeURIComponent(plan.id)}`,
+    ).catch(() => null);
+    const mode = resolved && resolved.policy && resolved.policy.mode;
+    if (mode === 'L3') {
+      process.stdout.write(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'ask',
+            permissionDecisionReason:
+              `[sdi] autonomy=L3 on plan ${plan.id} — confirm before applying ${toolName}. ` +
+              `Lift with \`/autonomy set ${project.id} --scope plan --mode L4 --plan-id ${plan.id}\`.`,
+          },
+        }) + '\n',
+      );
+      appendHookLog('pre_tool_use_ask', {
+        tool: toolName,
+        task_id: activeTaskId,
+        mode,
+        plan_id: plan.id,
+      });
+      return;
+    }
+    appendHookLog('pre_tool_use_allow', {
+      tool: toolName,
+      task_id: activeTaskId,
+      mode: mode || 'unspecified',
+      plan_id: plan.id,
+    });
     return;
   }
   appendHookLog('pre_tool_use_allow', { tool: toolName, task_id: activeTaskId });
@@ -651,7 +697,7 @@ module.exports = {
   // Hook bodies
   runSessionStart: () => dispatchAsync(runSessionStart),
   runUserPromptSubmit: () => dispatchAsync(runUserPromptSubmit),
-  runPreToolUse: () => dispatchSync(runPreToolUse),
+  runPreToolUse: () => dispatchAsync(runPreToolUse),
   runPostToolUse: () => dispatchAsync(runPostToolUse),
   runSubagentStart: () => dispatchAsync(runSubagentStart),
   runSubagentStop: () => dispatchAsync(runSubagentStop),
