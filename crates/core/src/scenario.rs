@@ -81,6 +81,12 @@ pub struct Scenario {
     pub tags: Vec<String>,
     pub origin_round_id: Option<Id>,
     pub status: ScenarioStatus,
+    /// M4 contract — DAG predecessor edges (Scenario short_codes).
+    pub depends_on: Vec<String>,
+    /// M4 contract — agent responsible for satisfying this scenario.
+    pub produced_by: Option<String>,
+    /// M4 contract — agent responsible for verifying this scenario.
+    pub verified_by: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -96,6 +102,18 @@ impl Scenario {
         }
         if then_clause.trim().is_empty() {
             return Err(DomainError::GwtEmpty { field: "then" });
+        }
+        Ok(())
+    }
+
+    /// M4 — depends_on must not reference the scenario's own short_code
+    /// (immediate cycle). Full transitive cycle detection lives in the
+    /// regression-runner where the per-plan DAG is materialized.
+    pub fn validate_depends_on(short_code: &str, depends_on: &[String]) -> DomainResult<()> {
+        if depends_on.iter().any(|d| d == short_code) {
+            return Err(DomainError::Validation(format!(
+                "scenario {short_code} depends_on cannot include itself"
+            )));
         }
         Ok(())
     }
@@ -120,5 +138,17 @@ mod tests {
     #[test]
     fn gwt_all_present_passes() {
         Scenario::validate_gwt("ctx", "act", "result").unwrap();
+    }
+
+    #[test]
+    fn depends_on_rejects_self_reference() {
+        let err =
+            Scenario::validate_depends_on("US-A-001", &["US-A-001".into()]).unwrap_err();
+        assert!(matches!(err, DomainError::Validation(_)));
+    }
+
+    #[test]
+    fn depends_on_allows_other_short_codes() {
+        Scenario::validate_depends_on("US-A-002", &["US-A-001".into()]).unwrap();
     }
 }

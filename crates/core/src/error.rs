@@ -40,6 +40,23 @@ pub enum DomainError {
 
     #[error("conflict: {0}")]
     Conflict(String),
+
+    // ─── v0.4 multi-agent governance ─────────────────────────────────────
+    #[error("consensus stage requires ≥ 1 prior critique against proposal {proposal_id}")]
+    ConsensusMissingCritique { proposal_id: String },
+
+    #[error("dissensus escalated to human gate (mode-agnostic, per D20)")]
+    DissensusEscalated,
+
+    #[error("autonomy gate blocked: decision-kind {kind} requires mode {required} but policy is {actual}")]
+    AutonomyGateBlocked {
+        kind: String,
+        required: String,
+        actual: String,
+    },
+
+    #[error("circuit breaker active — all autonomy modes demoted to L3; explicit user approval required")]
+    CircuitBreakerActive,
 }
 
 pub type DomainResult<T> = Result<T, DomainError>;
@@ -60,6 +77,10 @@ impl DomainError {
             DomainError::InFlightTaskPause => "IN_FLIGHT_TASK_PAUSE",
             DomainError::SnapshotViolation(_) => "SNAPSHOT_VIOLATION",
             DomainError::Conflict(_) => "CONFLICT",
+            DomainError::ConsensusMissingCritique { .. } => "CONSENSUS_MISSING_CRITIQUE",
+            DomainError::DissensusEscalated => "DISSENSUS_ESCALATED",
+            DomainError::AutonomyGateBlocked { .. } => "AUTONOMY_GATE_BLOCKED",
+            DomainError::CircuitBreakerActive => "CIRCUIT_BREAKER_ACTIVE",
         }
     }
 
@@ -67,6 +88,9 @@ impl DomainError {
         match self {
             DomainError::NotFound(_) => 404,
             DomainError::Conflict(_) => 409,
+            DomainError::DissensusEscalated => 409,
+            DomainError::AutonomyGateBlocked { .. } => 403,
+            DomainError::CircuitBreakerActive => 423,
             _ => 400,
         }
     }

@@ -12,18 +12,13 @@ pub type UsageRecordId = Id;
 
 /// Cost tier the run was charged at. Mirrors `tasks.tier`; advisory in v3,
 /// hard-enforced in v4.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UsageTier {
     Low,
+    #[default]
     Med,
     High,
-}
-
-impl Default for UsageTier {
-    fn default() -> Self {
-        UsageTier::Med
-    }
 }
 
 impl fmt::Display for UsageTier {
