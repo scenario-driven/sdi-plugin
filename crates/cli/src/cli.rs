@@ -11,6 +11,9 @@
 //! - task     — D3 runtime tasks + D7 evidence gate
 //! - decision — D12 append-only ADR log
 //! - knowledge — RAG / reference / archive scopes
+//! - autonomy — D14/D17/D18 per-scope policy (L3 / L4 / L5)
+//! - agent-note — M1 blackboard + M2 hand-off receipts
+//! - consensus — M3 4-stage negotiation status (proposal/critique/consensus/dissensus)
 //! - mcp      — stdio MCP server (PRD §5.4)
 
 use clap::{Args, Parser, Subcommand};
@@ -100,6 +103,15 @@ pub enum Cmd {
     /// JSON import (matching `export` shape).
     #[command(subcommand)]
     Import(ImportCmd),
+    /// Autonomy: D14/D17/D18 per-scope L3/L4/L5 policy.
+    #[command(subcommand)]
+    Autonomy(AutonomyCmd),
+    /// AgentNote: M1 blackboard + M2 hand-off receipts.
+    #[command(subcommand, name = "agent-note")]
+    AgentNote(AgentNoteCmd),
+    /// Consensus: M3 4-stage negotiation status (D20).
+    #[command(subcommand)]
+    Consensus(ConsensusCmd),
     /// MCP server (stdio JSON-RPC, exposes scope=rag only).
     Mcp,
     /// Initialise a project anchored to the current cwd (idempotent).
@@ -863,4 +875,145 @@ pub struct ImportKnowledgeArgs {
     pub input: String,
     #[arg(long)]
     pub project_id: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Autonomy (D14 / D17 / D18)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Subcommand)]
+pub enum AutonomyCmd {
+    /// Set a policy (scope = global | plan | decision_kind). Upsert semantics.
+    Set(AutonomySetArgs),
+    /// Resolve the effective policy at a scope (plan > decision_kind > global).
+    Get(AutonomyGetArgs),
+    /// List every policy on a project.
+    List { project_id: String },
+    /// D18 circuit breaker — demote every policy in a project to L3.
+    CircuitBreaker(AutonomyCircuitBreakerArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct AutonomySetArgs {
+    pub project_id: String,
+    /// global | plan | decision_kind.
+    #[arg(long)]
+    pub scope: String,
+    /// L3 | L4 | L5.
+    #[arg(long)]
+    pub mode: String,
+    /// Required when scope=plan.
+    #[arg(long)]
+    pub plan_id: Option<String>,
+    /// Required when scope=decision_kind (architecture | schema | naming-canonical | …).
+    #[arg(long)]
+    pub decision_kind: Option<String>,
+    /// Who set it (default: agent).
+    #[arg(long, default_value = "agent")]
+    pub set_by: String,
+    #[arg(long)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct AutonomyGetArgs {
+    pub project_id: String,
+    #[arg(long)]
+    pub plan_id: Option<String>,
+    #[arg(long)]
+    pub decision_kind: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct AutonomyCircuitBreakerArgs {
+    pub project_id: String,
+    /// Required — the panic-switch always records a reason.
+    #[arg(long)]
+    pub reason: String,
+    #[arg(long, default_value = "user")]
+    pub actor: String,
+}
+
+// ---------------------------------------------------------------------------
+// AgentNote (M1 blackboard / M2 hand-off)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Subcommand)]
+pub enum AgentNoteCmd {
+    /// Append a note to the blackboard. `--kind handoff` plus `--to` triggers
+    /// the hand-off receipt path.
+    Append(AgentNoteAppendArgs),
+    /// List active notes anchored at a scope.
+    List(AgentNoteListArgs),
+    /// List pending hand-offs addressed to an agent.
+    Handoffs { to_agent: String },
+    /// Acknowledge a hand-off (clears it from pending queue).
+    Ack { id: String },
+    /// Retire a note (non-destructive; reason required).
+    Retire(AgentNoteRetireArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct AgentNoteAppendArgs {
+    pub project_id: String,
+    /// Scope of the note (plan | round | scenario | task | global).
+    #[arg(long)]
+    pub scope: String,
+    /// Note kind (handoff | observation | question | answer | warning | summary).
+    #[arg(long)]
+    pub kind: String,
+    /// Agent emitting the note.
+    #[arg(long)]
+    pub from: String,
+    /// Anchor ids — set whichever matches the scope.
+    #[arg(long)]
+    pub plan_id: Option<String>,
+    #[arg(long)]
+    pub round_id: Option<String>,
+    #[arg(long)]
+    pub scenario_id: Option<String>,
+    #[arg(long)]
+    pub task_id: Option<String>,
+    /// Target agent (required when kind=handoff).
+    #[arg(long)]
+    pub to: Option<String>,
+    pub body: String,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentNoteListArgs {
+    /// Scope (plan | round | scenario | task | global).
+    #[arg(long)]
+    pub scope: String,
+    /// Anchor id matching the scope.
+    #[arg(long)]
+    pub anchor: String,
+    /// Optional kind filter.
+    #[arg(long)]
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentNoteRetireArgs {
+    pub id: String,
+    #[arg(long)]
+    pub reason: String,
+}
+
+// ---------------------------------------------------------------------------
+// Consensus (D20 — M3 4-stage)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Subcommand)]
+pub enum ConsensusCmd {
+    /// Group a plan's decisions by proposal and report 4-stage progress.
+    Status(ConsensusStatusArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ConsensusStatusArgs {
+    pub plan_id: String,
+    /// Filter to a single proposal id.
+    #[arg(long)]
+    pub proposal_id: Option<String>,
 }

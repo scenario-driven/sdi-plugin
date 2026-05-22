@@ -23,7 +23,13 @@ pub fn all(client: Arc<DaemonClient>) -> Vec<Arc<dyn Tool>> {
         Arc::new(GetPlanContext {
             client: client.clone(),
         }),
-        Arc::new(GetRecentDecisions { client }),
+        Arc::new(GetRecentDecisions {
+            client: client.clone(),
+        }),
+        Arc::new(GetAutonomyState {
+            client: client.clone(),
+        }),
+        Arc::new(ListAgentNotes { client }),
     ]
 }
 
@@ -247,12 +253,137 @@ impl Tool for GetRecentDecisions {
     }
 }
 
+// ─── get_autonomy_state ────────────────────────────────────────────────────
+
+pub struct GetAutonomyState {
+    pub client: Arc<DaemonClient>,
+}
+
+#[async_trait]
+impl Tool for GetAutonomyState {
+    fn descriptor(&self) -> ToolDescriptor {
+        ToolDescriptor {
+            name: "get_autonomy_state",
+            description:
+                "D14/D17 autonomy snapshot for a project: every policy row plus \
+                 the resolved effective policy at the caller-supplied scope. The \
+                 resolve order is plan > decision_kind > global (PRD §3).",
+            input_schema: json!({
+                "type": "object",
+                "required": ["project_id"],
+                "properties": {
+                    "project_id": { "type": "string" },
+                    "plan_id": { "type": "string" },
+                    "decision_kind": { "type": "string" }
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn call(&self, args: Value) -> ToolCallResult {
+        let project_id = match args.get("project_id").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return ToolCallResult::err_text("missing required arg: project_id"),
+        };
+        let list_path = format!("/autonomy_policies?project_id={}", urlencode(project_id));
+        let policies = match self.client.get_json(&list_path).await {
+            Ok(v) => v.get("policies").cloned().unwrap_or(json!([])),
+            Err(e) => return ToolCallResult::err_text(e),
+        };
+        let mut resolve_path = format!(
+            "/autonomy_policies/resolve?project_id={}",
+            urlencode(project_id)
+        );
+        if let Some(p) = args.get("plan_id").and_then(|v| v.as_str()) {
+            resolve_path.push_str(&format!("&plan_id={}", urlencode(p)));
+        }
+        if let Some(k) = args.get("decision_kind").and_then(|v| v.as_str()) {
+            resolve_path.push_str(&format!("&decision_kind={}", urlencode(k)));
+        }
+        let resolved = match self.client.get_json(&resolve_path).await {
+            Ok(v) => v.get("policy").cloned().unwrap_or(Value::Null),
+            Err(e) => return ToolCallResult::err_text(e),
+        };
+        ToolCallResult::ok_json(&json!({
+            "policies": policies,
+            "resolved": resolved,
+        }))
+    }
+}
+
+// ─── list_agent_notes ──────────────────────────────────────────────────────
+
+pub struct ListAgentNotes {
+    pub client: Arc<DaemonClient>,
+}
+
+#[async_trait]
+impl Tool for ListAgentNotes {
+    fn descriptor(&self) -> ToolDescriptor {
+        ToolDescriptor {
+            name: "list_agent_notes",
+            description:
+                "M1 blackboard view. Either `to_agent` (pending hand-offs addressed \
+                 to that agent) or the pair `scope_kind` + `anchor_id` (active notes \
+                 on a plan/round/scenario/task). Mutually exclusive.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "to_agent": { "type": "string" },
+                    "scope_kind": {
+                        "type": "string",
+                        "enum": ["plan", "round", "scenario", "task", "global"]
+                    },
+                    "anchor_id": { "type": "string" },
+                    "kind": { "type": "string" }
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+    async fn call(&self, args: Value) -> ToolCallResult {
+        if let Some(to) = args.get("to_agent").and_then(|v| v.as_str()) {
+            let path = format!("/agent_notes/handoffs?to_agent={}", urlencode(to));
+            return match self.client.get_json(&path).await {
+                Ok(v) => ToolCallResult::ok_json(&v),
+                Err(e) => ToolCallResult::err_text(e),
+            };
+        }
+        let scope = match args.get("scope_kind").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => {
+                return ToolCallResult::err_text(
+                    "either `to_agent` or `scope_kind`+`anchor_id` is required",
+                );
+            }
+        };
+        let anchor = match args.get("anchor_id").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => {
+                return ToolCallResult::err_text("`anchor_id` is required with `scope_kind`");
+            }
+        };
+        let mut path = format!(
+            "/agent_notes?scope_kind={}&anchor_id={}",
+            urlencode(scope),
+            urlencode(anchor)
+        );
+        if let Some(k) = args.get("kind").and_then(|v| v.as_str()) {
+            path.push_str(&format!("&kind={}", urlencode(k)));
+        }
+        match self.client.get_json(&path).await {
+            Ok(v) => ToolCallResult::ok_json(&v),
+            Err(e) => ToolCallResult::err_text(e),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn read_tools_register_all_four_with_unique_names() {
+    fn read_tools_register_all_six_with_unique_names() {
         let client = Arc::new(DaemonClient::new("http://127.0.0.1:1".to_string()));
         let tools = all(client);
         let names: Vec<&'static str> = tools.iter().map(|t| t.descriptor().name).collect();
@@ -262,7 +393,9 @@ mod tests {
                 "search_knowledge",
                 "search_scenarios",
                 "get_plan_context",
-                "get_recent_decisions"
+                "get_recent_decisions",
+                "get_autonomy_state",
+                "list_agent_notes"
             ]
         );
     }
@@ -275,6 +408,19 @@ mod tests {
         let schema = t.descriptor().input_schema;
         assert_eq!(schema["required"], json!(["project_id", "q"]));
         assert_eq!(schema["properties"]["limit"]["maximum"], 50);
+    }
+
+    #[tokio::test]
+    async fn list_agent_notes_rejects_when_neither_to_agent_nor_anchor_is_set() {
+        let t = ListAgentNotes {
+            client: Arc::new(DaemonClient::new("http://127.0.0.1:1".to_string())),
+        };
+        let r = t.call(json!({})).await;
+        assert!(r.is_error);
+        let text = match &r.content[0] {
+            crate::protocol::ContentBlock::Text { text } => text.clone(),
+        };
+        assert!(text.contains("to_agent") || text.contains("scope_kind"));
     }
 
     #[tokio::test]
