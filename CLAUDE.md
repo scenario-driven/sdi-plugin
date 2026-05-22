@@ -26,7 +26,7 @@ Full design spec (until migrated into this repo's `docs/`): `../../clawket/plans
 | # | Decision | Where enforced |
 |---|---|---|
 | D1 | Tool identity = Scenario-Driven Implementation engine | README, this file |
-| D2 | Five first-class entities: Plan / Requirement (snapshot) / Decision (append-only) / Scenario (GWT) / Round | `crates/core/` |
+| D2 | Six first-class entities: Plan / Requirement (snapshot) / Decision (append-only) / Scenario (GWT) / Round / AutonomyPolicy | `crates/core/` |
 | D3 | Task is a runtime artifact; LLM decomposes, humans do not author tasks directly | daemon API surface |
 | D4 | Unit removed (→ scenario tag). Cycle renamed Round with redefined semantics | `crates/core/`, daemon API |
 | D5 | GWT format strict: every scenario must have non-empty Given / When / Then. No free-form option | scenario CRUD validation |
@@ -37,6 +37,14 @@ Full design spec (until migrated into this repo's `docs/`): `../../clawket/plans
 | D10 | In-flight Task on `round start` defaults to pause. Flags: `--abort`, `--continue-on-noimpact` | round start API |
 | D11 | Slash commands: `/scenario`, `/round`, `/plan`, `/req`, `/decide`. `/goal` is Claude Code built-in, orthogonal — do not intercept | plugin shell |
 | D12 | SNAPSHOT-ONLY documents (no in-body history). Decision artifact is the only history surface | documentation policy |
+| D13 | Multi-agent orchestration is the body. Single-`@main` solo flow is anti-pattern; every new flow considers multi-agent collaboration as first-class | PRD §2, §4, §5 |
+| D14 | AutonomyPolicy is the sixth first-class entity. Per-scope (plan / unit / decision-kind) autonomy mode persisted, gates Decision application | `crates/core/` (v0.4+), PRD §3 |
+| D15 | Four multi-agent patterns built in (Workflow / Graph / Swarm / Agents-as-Tools). External A2A protocol excluded from v1 | PRD §4 matrix, §5 |
+| D16 | Default = act with policy, not default = ask. User toggles intervention windows; L4 ↔ L5 switchable mid-flow | PRD §5 Layer 0, AutonomyPolicy entity |
+| D17 | Mode default: new plan = L5; plan with external surface = L4; decision-kind ∈ {architecture, schema, naming-canonical} forced L4 | PRD §2 D17, AutonomyPolicy validation |
+| D18 | Circuit breaker always on. Single-action UI demotes all autonomy modes to L3 instantly; in-flight decisions apply at next gate | UI surface + daemon, PRD §2 D18 |
+| D19 | Communication substrate (M1~M5) runs mode-independent. Autonomy mode controls user gate position of consensus only, never blocks agent communication | PRD §5 Layer 2.5 |
+| D20 | Consensus / dissensus is the unit of autonomy gate. Single-agent = L3 max; multi-agent consensus unlocks L4 / L5; dissensus always escalates | PRD §3 Decision.kind, daemon gate logic |
 
 ---
 
