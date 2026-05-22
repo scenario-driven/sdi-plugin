@@ -117,7 +117,7 @@ pub fn config(paths: &Paths) -> Result<()> {
 pub fn log(paths: &Paths, args: LogArgs) -> Result<()> {
     let f = std::fs::File::open(&paths.log_file)
         .with_context(|| format!("open log {}", paths.log_file.display()))?;
-    let lines: Vec<String> = BufReader::new(f).lines().filter_map(|l| l.ok()).collect();
+    let lines: Vec<String> = BufReader::new(f).lines().map_while(Result::ok).collect();
     let start = lines.len().saturating_sub(args.lines);
     for line in &lines[start..] {
         println!("{line}");
