@@ -3,7 +3,10 @@
 //! goes through `crate::output::emit`.
 
 pub mod aggregate;
+pub mod agent_note;
+pub mod autonomy;
 pub mod comment;
+pub mod consensus;
 pub mod decision;
 pub mod impexp;
 pub mod knowledge;
