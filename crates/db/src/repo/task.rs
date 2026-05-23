@@ -244,6 +244,9 @@ mod tests {
             depends_on: vec![],
             produced_by: None,
             verified_by: None,
+            claimed_resources_json: "[]".into(),
+            claim_status: sdi_core::pattern::ClaimStatus::None,
+            produced_via_pattern_id: None,
             created_at: now(),
             updated_at: now(),
         };
