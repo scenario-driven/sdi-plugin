@@ -1,0 +1,309 @@
+<!doctype html>
+<!-- open with: open /Users/mzc01-swlee/dev/repository/github/scenario-driven/sdi-plugin/docs/v05-regression-report.html -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SDI v0.5 — Regression Sweep Report</title>
+<style>
+  :root {
+    --green: #16a34a;
+    --red: #dc2626;
+    --neutral: #64748b;
+    --bg: #ffffff;
+    --fg: #0f172a;
+    --muted: #475569;
+    --card: #f8fafc;
+    --border: #e2e8f0;
+    --code-bg: #f1f5f9;
+    --link: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1220;
+      --fg: #e2e8f0;
+      --muted: #94a3b8;
+      --card: #131c2e;
+      --border: #1f2a44;
+      --code-bg: #0f172a;
+      --link: #60a5fa;
+    }
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+          Arial, "Noto Sans", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 18px 0 8px; }
+  p, li { color: var(--fg); }
+  .meta { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 16px 0 8px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .card .status { font-size: 22px; font-weight: 700; margin: 4px 0 2px; }
+  .card .detail { font-size: 12px; color: var(--muted); }
+  .ok { color: var(--green); }
+  .fail { color: var(--red); }
+  .neutral { color: var(--neutral); }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--card); font-weight: 600; }
+  tbody tr:hover { background: var(--card); }
+  td.status-cell { white-space: nowrap; font-weight: 600; }
+  details {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 14px;
+    margin: 8px 0;
+  }
+  details summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 6px 0;
+    color: var(--fg);
+    list-style: revert;
+  }
+  details[open] summary { border-bottom: 1px solid var(--border); margin-bottom: 6px; padding-bottom: 8px; }
+  details ul { margin: 8px 0; padding-left: 22px; }
+  details li { margin: 3px 0; font-size: 13.5px; }
+  details li code { font-size: 12.5px; }
+  .footnote { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  a { color: var(--link); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>SDI v0.5 — Regression Sweep Report</h1>
+<p class="meta">Run timestamp (UTC): <code>2026-05-23T05:47:34Z</code> &nbsp;·&nbsp; Cycle <code>CYC-01KS9NQZXEDSB0W4VT2TVQ2QWP</code> &nbsp;·&nbsp; Task <code>SDI-129</code> &nbsp;·&nbsp; 5-way sweep, all green.</p>
+
+<!-- ─────────────────────────  Section 1 — Top summary banner  ───────────────────────── -->
+<h2>1. Summary</h2>
+<div class="cards">
+  <div class="card">
+    <div class="label">cargo (plugin)</div>
+    <div class="status ok">PASS</div>
+    <div class="detail">165 tests / 0 failed</div>
+  </div>
+  <div class="card">
+    <div class="label">plugin tests (node)</div>
+    <div class="status ok">PASS</div>
+    <div class="detail">34 tests / 0 failed</div>
+  </div>
+  <div class="card">
+    <div class="label">web (typecheck + lint + build)</div>
+    <div class="status ok">PASS</div>
+    <div class="detail">tsc + eslint clean, vite build OK</div>
+  </div>
+  <div class="card">
+    <div class="label">desktop (cargo)</div>
+    <div class="status ok">PASS</div>
+    <div class="detail">19 tests / 0 failed</div>
+  </div>
+  <div class="card">
+    <div class="label">overall</div>
+    <div class="status ok">PASS</div>
+    <div class="detail">5-of-5 green</div>
+  </div>
+</div>
+
+<!-- ─────────────────────────  Section 2 — Decision evidence table  ───────────────────────── -->
+<h2>2. Decision Evidence (D21 – D29)</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 80px;">Decision</th>
+      <th>Primary enforcement</th>
+      <th>Primary test</th>
+      <th style="width: 70px;">Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>D21</strong><br><span class="footnote">Mandatory<br>Delegation Gate</span></td>
+      <td><code>plugin/adapters/shared/sdi-hooks.cjs:788</code> — PreToolUse delegation gate blocks <code>Edit</code>/<code>Write</code>/<code>NotebookEdit</code> + mutating <code>Bash</code> when no <code>agent_id</code> is set.</td>
+      <td><code>plugin/tests/hooks.test.cjs:141</code> — <em>D21: PreToolUse blocks main session Edit (delegation gate)</em> + 5 sibling D21 cases (rogue specialist, bypass audit, orchestration tool pass-through).</td>
+      <td class="status-cell ok">✓</td>
+    </tr>
+    <tr>
+      <td><strong>D22</strong><br><span class="footnote">CollaborationPattern<br>7th entity</span></td>
+      <td><code>crates/db/src/migrations/007_v05_pattern_enforcement.sql:33</code> — <code>CREATE TABLE collaboration_patterns</code> (kind, applies_to, scope_id, parent_pattern_id, depth, lifecycle).</td>
+      <td><code>crates/db/src/repo/pattern.rs:285</code> — <em>insert_and_get_round_trip</em> + 5 sibling repo tests (unique short_code, lifecycle terminal stamping, list_active, list_children, scoped get_by_short_code).</td>
+      <td class="status-cell ok">✓</td>
+    </tr>
+    <tr>
+      <td><strong>D23</strong><br><span class="footnote">Pattern<br>provenance</span></td>
+      <td><code>crates/db/src/migrations/007_v05_pattern_enforcement.sql:67-72</code> — <code>produced_via_pattern_id</code> column added to all six work entities (plans / requirements / scenarios / tasks / decisions / rounds).</td>
+      <td><code>crates/daemon/tests/http_v05_pattern.rs:97</code> — <em>pattern_create_and_lifecycle_workflow_happy_path</em> verifies daemon stamps provenance + <code>direct</code> fallback exists.</td>
+      <td class="status-cell ok">✓</td>
+    </tr>
+    <tr>
+      <td><strong>D24</strong><br><span class="footnote">Recursion +<br>depth cap</span></td>
+      <td><code>crates/daemon/src/router/pattern.rs:88-104</code> — <code>resolve_depth_cap</code> + <code>cycle_blocked</code> walk on <code>parent_pattern_id</code>; depth = parent.depth + 1, rejected when over cap.</td>
+      <td><code>crates/daemon/tests/http_v05_pattern.rs:289</code> — <em>pattern_depth_cap_blocks_chain_over_limit</em> (depth_cap=2, chain to depth 3 rejected with HTTP 400).</td>
+      <td class="status-cell ok">✓</td>
+    </tr>
+    <tr>
+      <td><strong>D25</strong><br><span class="footnote">Pattern-scoped<br>autonomy</span></td>
+      <td><code>crates/core/src/autonomy_policy.rs:102</code> — <code>default_pattern_kind_mode</code> (workflow=L5, graph=L5, swarm=L4, agents-as-tools=L4, direct=L3) + <code>effective_mode</code>:<code>116</code> picks strictest of (plan, pattern).</td>
+      <td><code>crates/core/src/autonomy_policy.rs:379</code> — <em>default_pattern_kind_mode_defaults</em> + <em>effective_mode_picks_strictest</em>:<code>391</code>.</td>
+      <td class="status-cell ok">✓</td>
+    </tr>
+    <tr>
+      <td><strong>D26</strong><br><span class="footnote">4-pattern<br>shape gates +<br>sybil block</span></td>
+      <td><code>crates/core/src/pattern.rs:328</code> — <code>validate_pattern_shape</code>: workflow steps ≥ 2 / graph distinct (name, stance) tuples ≥ 2 / swarm fan_out ≥ 2 / agents-as-tools peer ≥ 1.</td>
+      <td><code>crates/daemon/tests/http_v05_pattern.rs:219</code> — <em>pattern_shape_gate_rejects_sybil_graph</em> (two reviewers with identical (name, stance) tuple → 400) + <em>workflow_requires_two_steps</em>:<code>crates/core/src/pattern.rs:458</code>.</td>
+      <td class="status-cell ok">✓</td>
+    </tr>
+    <tr>
+      <td><strong>D27</strong><br><span class="footnote">Shape &amp;<br>selection gate</span></td>
+      <td><code>crates/daemon/src/router/pattern.rs:192</code> — <code>transition_lifecycle</code> handler runs <code>validate_pattern_shape</code> only at <code>pending → active</code>; terminal lifecycles stamp <code>decided_at</code>.</td>
+      <td><code>crates/daemon/tests/http_v05_pattern.rs:182</code> — <em>pattern_shape_gate_rejects_underspec_workflow_at_activation</em> (1-step workflow blocked at pending→active transition).</td>
+      <td class="status-cell ok">✓</td>
+    </tr>
+    <tr>
+      <td><strong>D28</strong><br><span class="footnote">Reversibility<br>(Decision)</span></td>
+      <td><code>crates/db/src/repo/decision.rs:47</code> — <code>is_rollback = reversal_of.is_some()</code> skips M3 ordering gate (rollback is unilateral undo, not a consensus cycle) but still appends an immutable consensus row.</td>
+      <td><code>crates/daemon/tests/http_v05_pattern.rs:386</code> — <em>decision_rollback_appends_immutable_consensus_with_reversal_of</em> + <em>decision_rollback_rejects_malformed_reversal_plan</em>:<code>452</code>.</td>
+      <td class="status-cell ok">✓</td>
+    </tr>
+    <tr>
+      <td><strong>D29</strong><br><span class="footnote">Multi-session<br>resource claims</span></td>
+      <td><code>crates/daemon/src/router/scenario.rs:201</code> — <code>GET /scenarios/active-claims</code> + <code>POST /scenarios/:id/claim</code>/<code>release</code>. Hook side: <code>plugin/adapters/shared/sdi-hooks.cjs:644</code> — <code>claimOverlapGate</code> queries the ledger and blocks cross-session overlaps.</td>
+      <td><code>plugin/tests/hooks.test.cjs:460</code> — <em>D29: PreToolUse blocks Edit when another scenario claims the target path</em> + 3 sibling cases (empty ledger pass, daemon-unreachable warn-and-pass, <code>SDI_HOOK_V05_DISABLE=1</code> bypass).</td>
+      <td class="status-cell ok">✓</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ─────────────────────────  Section 3 — Per-repo file inventory  ───────────────────────── -->
+<h2>3. Per-Repo v0.5 File Inventory</h2>
+
+<details open>
+  <summary>sdi-plugin — Rust workspace + plugin shell (new + modified)</summary>
+  <h3>New files (D22 – D29 deliverables)</h3>
+  <ul>
+    <li><code>crates/db/src/migrations/007_v05_pattern_enforcement.sql</code> — <code>collaboration_patterns</code> table, <code>produced_via_pattern_id</code> on six entities, <code>claimed_resources_json</code>/<code>claim_status</code> on scenarios, <code>reversal_plan</code>/<code>blast_radius_score</code>/<code>reversal_of</code> on decisions.</li>
+    <li><code>crates/db/src/repo/pattern.rs</code> — pattern repo CRUD + lifecycle transitions (insert / get / list_active / list_children / by short_code / terminal-stamping update_lifecycle).</li>
+    <li><code>crates/core/src/pattern.rs</code> — domain types (PatternKind / Lifecycle / AppliesTo / Step / Reviewer / Stance / PeerLink) + <code>validate_pattern_shape</code>.</li>
+    <li><code>crates/daemon/src/router/pattern.rs</code> — <code>/patterns</code> router (create with D24 depth cap, list_active, lifecycle PATCH with D27 shape gate).</li>
+    <li><code>crates/daemon/tests/http_v05_pattern.rs</code> — 8 v0.5 HTTP integration tests (happy path, shape gates, sybil-block, depth cap, rollback, malformed reversal_plan, claim/release round-trip, SSE event emission).</li>
+    <li><code>crates/cli/src/commands/pattern.rs</code> — <code>sdi pattern</code> subcommand (create / lifecycle / list).</li>
+    <li><code>plugin/agents/pattern-orchestrator.md</code> — specialist that selects + transitions patterns.</li>
+    <li><code>plugin/agents/pattern-critic.md</code> — specialist that validates pattern shape against D26 rules.</li>
+    <li><code>plugin/agents/reversal-runner.md</code> — specialist that drives D28 rollback (append-only consensus with <code>reversal_of</code>).</li>
+    <li><code>plugin/commands/pattern.md</code> — <code>/pattern</code> slash command surface.</li>
+    <li><code>docs/PRD.md</code> — v0.5 canonical spec (D22 – D29 added; §3.9, §5 Layer 2.6 – 2.8, §6 #16 – #22).</li>
+  </ul>
+  <h3>Modified files</h3>
+  <ul>
+    <li><code>plugin/adapters/shared/sdi-hooks.cjs</code> — added D26 pattern-shape advisory + D29 claim-overlap gate in PreToolUse (lines 584-680, 855-905); honours <code>SDI_HOOK_V05_DISABLE=1</code>.</li>
+    <li><code>plugin/tests/hooks.test.cjs</code> — +4 D29 cases (overlap-blocks, empty-ledger-pass, daemon-unreachable, bypass-env).</li>
+    <li><code>crates/core/src/autonomy_policy.rs</code> — <code>default_pattern_kind_mode</code> + <code>effective_mode</code> (D25); <code>l5_threshold</code>, <code>pattern_depth_cap</code> fields.</li>
+    <li><code>crates/core/src/decision.rs</code> — <code>reversal_plan</code> / <code>blast_radius_score</code> / <code>reversal_of</code> fields (D28).</li>
+    <li><code>crates/core/src/scenario.rs</code> — <code>claimed_resources_json</code> / <code>claim_status</code> fields (D29) + <code>produced_via_pattern_id</code> (D23).</li>
+    <li><code>crates/core/src/agent_spec.rs</code> — <code>Stance</code> enum (D26 sybil distinctness).</li>
+    <li><code>crates/db/src/repo/decision.rs</code> — D28 rollback path: skip M3 when <code>reversal_of</code> set, require <code>reversal_of</code> resolves.</li>
+    <li><code>crates/db/src/repo/scenario.rs</code> — D29 <code>set_claim_status</code> + <code>list_active_claims</code>.</li>
+    <li><code>crates/db/src/repo/autonomy_policy.rs</code>, <code>crates/db/src/repo/round.rs</code>, <code>crates/db/src/repo/task.rs</code>, <code>crates/db/src/repo/agent_spec.rs</code>, <code>crates/db/src/repo/disruption.rs</code>, <code>crates/db/src/repo/mod.rs</code>, <code>crates/db/src/schema.rs</code> — v0.5 column threading.</li>
+    <li><code>crates/daemon/src/router/scenario.rs</code> — D29 routes (<code>/scenarios/active-claims</code>, <code>POST /scenarios/:id/claim</code>, <code>POST /scenarios/:id/release</code>).</li>
+    <li><code>crates/daemon/src/router/decision.rs</code> — D28 <code>POST /decisions/:id/rollback</code> + <code>validate_reversal_plan_json</code>.</li>
+    <li><code>crates/daemon/src/router/autonomy_policy.rs</code>, <code>crates/daemon/src/router/mod.rs</code> — pattern-kind policy threading + new <code>/patterns</code> sub-router.</li>
+    <li><code>crates/cli/src/cli.rs</code>, <code>commands/mod.rs</code>, <code>commands/decision.rs</code>, <code>commands/scenario.rs</code>, <code>main.rs</code> — pattern subcommand wiring + rollback / claim CLI surface.</li>
+    <li><code>docs/ARCHITECTURE.md</code>, <code>CLAUDE.md</code>, <code>README.md</code> — D22 – D29 snapshot text.</li>
+  </ul>
+</details>
+
+<details>
+  <summary>sdi-web — dashboard SPA (D22 / D28 / D29 visualisation)</summary>
+  <h3>New views</h3>
+  <ul>
+    <li><code>src/views/PatternsView.tsx</code> — top-level Patterns dashboard.</li>
+    <li><code>src/components/PatternTree.tsx</code> — recursive parent / child pattern DAG visualisation (D24).</li>
+    <li><code>src/components/PatternTimeline.tsx</code> — lifecycle event timeline (pattern_created → active → converged / dissensus / aborted).</li>
+    <li><code>src/components/ReversibilityView.tsx</code> — D28 rollback surface: decision + reversal_plan + blast_radius_score + rollback action.</li>
+    <li><code>src/components/ClaimsLedger.tsx</code> — D29 active scenario claims ledger (which paths are held by which scenario).</li>
+  </ul>
+  <h3>Modified</h3>
+  <ul>
+    <li><code>src/App.tsx</code>, <code>src/components/shell/Topbar.tsx</code> — Patterns route + nav entry.</li>
+    <li><code>src/lib/api.ts</code> — pattern / claim / rollback endpoints.</li>
+    <li><code>src/lib/sse.ts</code> — new event kinds: <code>pattern_created</code>, <code>pattern_lifecycle</code>, <code>claim_status_changed</code>, <code>rollback_initiated</code>, <code>rollback_completed</code>.</li>
+    <li><code>src/types/entities.ts</code> — Pattern / PatternStep / Reviewer / Stance / ClaimStatus / ReversalPlan types.</li>
+    <li><code>README.md</code> — v0.5 view set.</li>
+  </ul>
+</details>
+
+<details>
+  <summary>sdi-desktop — Tauri shell (D22 pattern projection)</summary>
+  <ul>
+    <li><code>src/patterns.rs</code> — sidecar event projector keeping a snapshot of active patterns; consumes <code>pattern_created</code> / <code>pattern_lifecycle</code> SSE events and exposes via Tauri command. 19 unit tests cover bootstrap, insert, terminal-removal, <code>direct</code> kind marking, malformed event handling.</li>
+    <li><code>src/lib.rs</code> — wires the pattern projector into the Tauri runtime.</li>
+    <li><code>README.md</code> — desktop v0.5 capabilities note.</li>
+  </ul>
+</details>
+
+<!-- ─────────────────────────  Section 4 — Test counts  ───────────────────────── -->
+<h2>4. Test Counts</h2>
+<table>
+  <thead>
+    <tr><th>Repo</th><th>Suite</th><th>Tests</th><th class="status-cell">Pass</th><th class="status-cell">Fail</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>sdi-plugin</td><td>cargo workspace (5 crates, lib + integration + doc)</td><td>165</td><td class="ok">165</td><td class="ok">0</td></tr>
+    <tr><td>sdi-plugin</td><td>plugin node tests (lint + hooks + e2e)</td><td>34</td><td class="ok">34</td><td class="ok">0</td></tr>
+    <tr><td>sdi-web</td><td>typecheck (<code>tsc -b</code>)</td><td>—</td><td class="ok">clean</td><td class="ok">0</td></tr>
+    <tr><td>sdi-web</td><td>lint (<code>eslint --max-warnings 0</code>)</td><td>—</td><td class="ok">clean</td><td class="ok">0</td></tr>
+    <tr><td>sdi-web</td><td>build (<code>vite build</code>)</td><td>—</td><td class="ok">OK</td><td class="ok">0</td></tr>
+    <tr><td>sdi-desktop</td><td>cargo (lib + bin + doc)</td><td>19</td><td class="ok">19</td><td class="ok">0</td></tr>
+    <tr style="font-weight: 700; background: var(--card);"><td colspan="2">Total executable tests</td><td>218</td><td class="ok">218</td><td class="ok">0</td></tr>
+  </tbody>
+</table>
+
+<!-- ─────────────────────────  Section 5 — Architecture context  ───────────────────────── -->
+<h2>5. What Shipped — Architecture Context</h2>
+<p>
+v0.5 extends the SDI engine from a 6-entity model (D2 + D14 AutonomyPolicy) to the canonical
+<strong>7-entity model</strong> by promoting <strong>CollaborationPattern</strong> to first-class status (D22). Every work entity now carries a non-null
+<code>produced_via_pattern_id</code> (D23) — <code>direct</code> is the explicit solo-flow marker, not an escape hatch — and the four pattern kinds
+(<em>workflow</em>, <em>graph</em>, <em>swarm</em>, <em>agents-as-tools</em>) each ship with a mechanical shape gate enforced at the
+<code>pending → active</code> lifecycle transition (D26, D27). Graph consensus is sybil-blocked by counting distinct
+<code>(AgentSpec.name, Stance)</code> tuples instead of bare names.
+</p>
+<p>
+Pattern recursion forms a DAG via <code>parent_pattern_id</code> bounded by <code>AutonomyPolicy.pattern_depth_cap</code> with explicit
+cycle detection (D24), and autonomy itself becomes pattern-scoped: the strictest of (plan-mode, pattern-mode) wins (D25, defaults
+workflow=L5 / graph=L5 / swarm=L4 / agents-as-tools=L4 / direct=L3-forced). On top of that, <strong>reversibility</strong> is
+first-class on Decision via <code>reversal_plan</code> + <code>blast_radius_score</code> + append-only <code>reversal_of</code>
+consensus rows (D28), and <strong>multi-session resource claims</strong> live in a daemon-centric ledger (<code>claimed_resources_json</code>
++ <code>claim_status</code>) queried by PreToolUse hooks to block cross-session path overlaps (D29).
+</p>
+<p>
+Canonical references: <code>docs/PRD.md</code> §2 D22 – D29 (decisions), §3.9 (CollaborationPattern entity),
+§5 Layer 2.6 (4-pattern integrity gates), §5 Layer 2.7 (reversibility &amp; rollback), §5 Layer 2.8 (multi-session resource claims),
+§6 #16 – #22 (mechanical hook + daemon enforcement matrix).
+</p>
+
+<!-- ─────────────────────────  Section 6 — How to open  ───────────────────────── -->
+<h2>6. How to View</h2>
+<p>This file is fully self-contained (no JS, no external CSS). Open with:</p>
+<pre><code>open /Users/mzc01-swlee/dev/repository/github/scenario-driven/sdi-plugin/docs/v05-regression-report.html</code></pre>
+<p class="footnote">macOS uses the default browser. Dark-mode CSS auto-engages with the system theme. The file is offline-viewable and can be archived alongside the cycle artifacts.</p>
+
+</main>
+</body>
+</html>
