@@ -22,7 +22,24 @@ const { spawn, spawnSync } = require('child_process');
 
 const BIN_ENV = 'SDI_BIN';
 const BYPASS_ENV = 'SDI_BYPASS_HOOKS';
+const DELEGATION_BYPASS_ENV = 'SDI_DELEGATION_BYPASS';
+// v0.5 — disables the D26 pattern-shape advisory + D29 claim-overlap block.
+// Routine bypass is a protocol violation (audit log records every use).
+const V05_DISABLE_ENV = 'SDI_HOOK_V05_DISABLE';
 const HOME_ENV = 'SDI_HOME';
+// Heuristic: tool prompts that mention any of these tokens are presumed to
+// be intentional multi-agent dispatch. The D26 advisory checks for an
+// active pattern only when the orchestrator's intent is multi-agent.
+const PATTERN_INTENT_TOKENS = [
+  'specialist team',
+  'parallel',
+  'swarm',
+  'graph review',
+  'fan-out',
+  'fan out',
+  'agents-as-tools',
+  'multi-agent',
+];
 
 function xdgHome() {
   return process.env[HOME_ENV] || os.homedir();
@@ -435,6 +452,237 @@ function readActiveTaskHint() {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// D21 — Mandatory delegation gate
+//
+// Orchestrator (main session, no agent_id in hook payload) is forbidden from
+// calling execution tools. PreToolUse blocks Edit/Write/MultiEdit/NotebookEdit
+// outright, and blocks Bash unless the command matches a read-only whitelist.
+// Sub-agents (agent_id present) are allowed if their agent_type is registered
+// in plugin/agents/. PRD §2 D21 + §5 Layer 1.5.
+
+function isExecutionTool(toolName) {
+  return /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(toolName);
+}
+
+// Read-only Bash whitelist. Conservative on purpose: shell metacharacters
+// (`;`, `&`, `|`, `<`, `>`, `` ` ``, `$`, `(`, `)`) disqualify the command —
+// compound or substituting commands must go through a specialist. The verb
+// (first token) must match an allow-list, and verb-specific subcommand
+// restrictions apply (e.g. `cargo check` allowed, `cargo build` not — builds
+// produce artifacts and should be delegated to test-runner).
+function isReadOnlyBash(cmd) {
+  if (!cmd || typeof cmd !== 'string') return false;
+  const trimmed = cmd.trim();
+  if (!trimmed) return false;
+  // Disallow any shell metacharacter that can chain, substitute, or redirect.
+  if (/[;&|<>`$()]/.test(trimmed)) return false;
+  const tokens = trimmed.split(/\s+/);
+  const verb = tokens[0];
+  if (verb === 'git') {
+    return /^(status|log|diff|show|branch|remote|config|rev-parse|describe|ls-files|blame|tag)$/.test(
+      tokens[1] || '',
+    );
+  }
+  if (verb === 'cargo') {
+    return /^(check|clippy|fmt|tree|metadata|--version|-V)$/.test(tokens[1] || '');
+  }
+  if (verb === 'pnpm' || verb === 'npm') {
+    // Only allow read-only/analysis subcommands. Script runners (run/exec/etc.)
+    // can do anything, so they must be delegated.
+    return /^(list|ls|view|outdated|--version|-v)$/.test(tokens[1] || '');
+  }
+  if (verb === 'find') {
+    return !/-(delete|exec|execdir|ok|okdir)\b/.test(trimmed);
+  }
+  if (verb === 'node') {
+    return /^(--version|-v)$/.test(tokens[1] || '');
+  }
+  return /^(ls|cat|head|tail|grep|rg|wc|file|which|pwd|echo|stat|env|printenv|date|uname|hostname|whoami|tree)$/.test(
+    verb,
+  );
+}
+
+const _agentRegistryCache = new Map();
+function loadAgentSpecRegistry(root) {
+  if (_agentRegistryCache.has(root)) return _agentRegistryCache.get(root);
+  const result = new Set();
+  const dir = path.join(root, 'agents');
+  try {
+    if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+      for (const entry of fs.readdirSync(dir)) {
+        if (!entry.endsWith('.md')) continue;
+        try {
+          const raw = fs.readFileSync(path.join(dir, entry), 'utf8');
+          const fm = raw.match(/^---[\r\n]+([\s\S]*?)^---/m);
+          if (!fm) continue;
+          const nameMatch = fm[1].match(/^name:\s*(\S+)\s*$/m);
+          if (nameMatch) result.add(nameMatch[1]);
+        } catch {}
+      }
+    }
+  } catch {}
+  _agentRegistryCache.set(root, result);
+  return result;
+}
+
+function emitDeny(reason) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason,
+      },
+    }) + '\n',
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// D26 — Pattern shape advisory (PRD §5 Layer 2.6)
+//
+// When the orchestrator spawns specialists via Agent/Task, we ask the daemon
+// whether an active CollaborationPattern row exists. We do NOT block: D27's
+// server-side gate auto-creates a `direct` row if absent. The advisory just
+// surfaces the auto-fallback to the user so the L3 cap (and red badge) isn't
+// silently inherited.
+//
+// Pattern shape validation (steps ≥ 2, (name, stance) distinct ≥ 2, fan_out
+// ≥ 2, peers ≥ 1) is enforced by the daemon at `pending → active`. The hook
+// stays minimal — no client-side mirroring of the validator.
+
+function looksLikePatternIntent(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object') return false;
+  const prompt = String(toolInput.prompt || toolInput.description || '');
+  if (toolInput.pattern_id) return true;
+  if (!prompt) return false;
+  const lc = prompt.toLowerCase();
+  return PATTERN_INTENT_TOKENS.some((tok) => lc.includes(tok));
+}
+
+async function patternShapeAdvisory(toolName, toolInput) {
+  if (!/^(Agent|Task)$/.test(toolName)) return;
+  if (!looksLikePatternIntent(toolInput)) return;
+  const active = await getJson('/patterns/active').catch(() => null);
+  const rows = (active && Array.isArray(active.patterns) ? active.patterns : []) || [];
+  if (rows.length === 0) {
+    process.stderr.write(
+      '[sdi] D26 advisory: no active CollaborationPattern found for this dispatch. ' +
+        'Daemon will auto-create a `direct` row (anti-pattern marker, L3 cap). ' +
+        'Materialise the right pattern first via /pattern create.\n',
+    );
+    appendHookLog('pre_tool_use_pattern_advisory', { tool: toolName, hint: 'no-active-pattern' });
+  } else {
+    appendHookLog('pre_tool_use_pattern_advisory', {
+      tool: toolName,
+      hint: 'active-pattern-found',
+      pattern_count: rows.length,
+    });
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// D29 — Resource claim gate (PRD §5 Layer 2.8)
+//
+// Edit/Write/NotebookEdit calls compute target_path then query the daemon's
+// `/scenarios/active-claims` ledger. If any holding scenario_id differs from
+// the agent's own active scenario, BLOCK with a structured JSON payload
+// (`block: 'sdi_claim_overlap'`).
+//
+// Failure modes are PROCEED, not BLOCK:
+// - daemon unreachable → warn on stderr, allow
+// - no active claim on the calling agent → warn, allow (D26 advisory regime)
+// - no overlap detected → audit "allow", allow
+
+function targetPathOf(toolName, toolInput) {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  if (toolName === 'NotebookEdit') return toolInput.notebook_path || null;
+  return toolInput.file_path || null;
+}
+
+async function resolveAgentScenarioId(agentId) {
+  if (!agentId) return null;
+  // Cheapest available path: the daemon does not yet index "agent → active
+  // scenario", so we honor an explicit env override first. Real binding will
+  // arrive when the daemon gains the AgentRun↔Scenario edge.
+  if (process.env.SDI_ACTIVE_SCENARIO) return process.env.SDI_ACTIVE_SCENARIO;
+  return null;
+}
+
+function pathOverlaps(targetPath, claimedResourcesJson) {
+  // claimed_resources_json is an array of path globs (PRD §3.4). We do a
+  // string-prefix + suffix-glob match — enough to catch the common
+  // `crates/db/migrations/*.sql` shape without pulling in micromatch.
+  if (!targetPath) return false;
+  let globs = [];
+  try {
+    globs = JSON.parse(claimedResourcesJson || '[]');
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(globs) || globs.length === 0) return false;
+  for (const g of globs) {
+    if (typeof g !== 'string' || !g) continue;
+    if (g === targetPath) return true;
+    if (g.endsWith('/*')) {
+      const dir = g.slice(0, -2);
+      if (targetPath.startsWith(dir + '/')) return true;
+    } else if (g.endsWith('/**')) {
+      const dir = g.slice(0, -3);
+      if (targetPath.startsWith(dir + '/')) return true;
+    } else if (g.includes('*')) {
+      const re = new RegExp(
+        '^' + g.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$',
+      );
+      if (re.test(targetPath)) return true;
+    } else if (targetPath.startsWith(g + '/') || targetPath === g) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function claimOverlapGate(toolName, toolInput, agentId) {
+  if (!/^(Edit|Write|NotebookEdit)$/.test(toolName)) return { block: false };
+  const targetPath = targetPathOf(toolName, toolInput);
+  if (!targetPath) return { block: false };
+
+  const mine = await resolveAgentScenarioId(agentId);
+  const ledger = await getJson('/scenarios/active-claims').catch(() => 'unreachable');
+  if (ledger === 'unreachable' || ledger === null) {
+    process.stderr.write(
+      '[sdi] D29 advisory: daemon unreachable — claim overlap check skipped.\n',
+    );
+    appendHookLog('pre_tool_use_claim_skipped', { tool: toolName, reason: 'daemon-unreachable' });
+    return { block: false };
+  }
+  const scenarios = (ledger && Array.isArray(ledger.scenarios) ? ledger.scenarios : []) || [];
+  const holders = [];
+  for (const s of scenarios) {
+    const sid = s && (s.id || (s.scenario_id ?? null));
+    if (!sid) continue;
+    if (mine && sid === mine) continue;
+    const cj = s.claimed_resources_json || (s.claimed_resources ? JSON.stringify(s.claimed_resources) : '[]');
+    if (pathOverlaps(targetPath, cj)) {
+      holders.push({ scenario_id: sid, claimed_resources_json: cj });
+    }
+  }
+  if (holders.length === 0) {
+    appendHookLog('pre_tool_use_claim_allow', { tool: toolName, file: targetPath });
+    return { block: false };
+  }
+  return {
+    block: true,
+    payload: {
+      block: 'sdi_claim_overlap',
+      target_path: targetPath,
+      my_scenario: mine,
+      holders,
+      hint: 'Wait or coordinate via /note handoff',
+    },
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Hook handlers
 //
 // The shims in adapters/claude/*.cjs are 2 lines and call these. Each handler
@@ -521,9 +769,13 @@ async function runUserPromptSubmit(input) {
   );
 }
 
-// PreToolUse: two gates.
-//   1. Active-task gate — block Edit/Write/Bash without a task in_progress.
-//   2. Autonomy gate (D14/D17/D18) — consult `/autonomy_policies/resolve`
+// PreToolUse: three gates, evaluated in order.
+//   1. D21 delegation gate — main session (no agent_id) cannot call execution
+//      tools. Edit/Write/MultiEdit/NotebookEdit always blocked; Bash blocked
+//      unless command matches the read-only whitelist. Sub-agents must have an
+//      agent_type registered in plugin/agents/ (rogue-specialist guard).
+//   2. Active-task gate — block Edit/Write/Bash without a task in_progress.
+//   3. Autonomy gate (D14/D17/D18) — consult `/autonomy_policies/resolve`
 //      for the active plan and downgrade to `permissionDecision: 'ask'`
 //      when the effective mode is L3. The communication substrate (M1~M5)
 //      stays mode-independent (D19); only the user-gate position moves.
@@ -532,22 +784,125 @@ async function runPreToolUse(input) {
   const toolName = (input && input.tool_name) || '';
   const watched = /^(Edit|Write|MultiEdit|Bash|NotebookEdit|Agent|Task|TeamCreate|SendMessage)$/.test(toolName);
   if (!watched) return;
+
+  // D21 — delegation gate.
+  const agentId = (input && input.agent_id) || null;
+  const agentType = (input && input.agent_type) || null;
+  const isMain = !agentId;
+  if (isMain && (isExecutionTool(toolName) || toolName === 'Bash')) {
+    let bashCmd = null;
+    let blocked = true;
+    if (toolName === 'Bash') {
+      bashCmd = String((input && input.tool_input && input.tool_input.command) || '');
+      if (isReadOnlyBash(bashCmd)) {
+        blocked = false;
+        appendHookLog('pre_tool_use_delegation_allow', {
+          tool: toolName,
+          reason: 'read-only-bash',
+          cmd: bashCmd.slice(0, 200),
+        });
+      }
+    }
+    if (blocked) {
+      if (process.env[DELEGATION_BYPASS_ENV] === '1') {
+        process.stderr.write(
+          `[sdi] WARNING: ${DELEGATION_BYPASS_ENV}=1 — main session executing ${toolName}` +
+            (bashCmd ? ` (cmd preview: "${bashCmd.slice(0, 80)}")` : '') +
+            `. Routine bypass is a D21 protocol violation; audit log records every use.\n`,
+        );
+        appendHookLog('pre_tool_use_delegation_bypass', {
+          tool: toolName,
+          bash_cmd: bashCmd ? bashCmd.slice(0, 200) : null,
+        });
+      } else {
+        const reason = bashCmd != null
+          ? `[sdi] D21 delegation gate: main session may not run mutating Bash. ` +
+            `Delegate to a specialist sub-agent via the Agent tool. ` +
+            `cmd preview: "${bashCmd.slice(0, 80)}". ` +
+            `One-shot override (audited): ${DELEGATION_BYPASS_ENV}=1.`
+          : `[sdi] D21 delegation gate: main session may not call ${toolName}. ` +
+            `Delegate to a specialist sub-agent via the Agent tool. ` +
+            `One-shot override (audited): ${DELEGATION_BYPASS_ENV}=1.`;
+        emitDeny(reason);
+        appendHookLog('pre_tool_use_blocked', {
+          tool: toolName,
+          reason: 'delegation-gate',
+          bash_cmd: bashCmd ? bashCmd.slice(0, 200) : null,
+        });
+        return;
+      }
+    }
+  }
+  // D21 — rogue specialist guard. Sub-agents must come from a registered spec.
+  if (!isMain && agentType) {
+    const registry = loadAgentSpecRegistry(pluginRoot());
+    if (registry.size > 0 && !registry.has(agentType)) {
+      emitDeny(
+        `[sdi] D21 rogue-specialist: agent_type "${agentType}" is not registered in ` +
+          `plugin/agents/. Register an AgentSpec entry or use one of: ` +
+          `${Array.from(registry).sort().join(', ')}.`,
+      );
+      appendHookLog('pre_tool_use_blocked', {
+        tool: toolName,
+        reason: 'rogue-specialist',
+        agent_id: agentId,
+        agent_type: agentType,
+      });
+      return;
+    }
+  }
+
+  // D26 advisory — non-blocking, surfaces missing pattern row to stderr so the
+  // L3 auto-fallback isn't silently inherited. Honored even before the
+  // active-task gate so the warning lands alongside any subsequent block.
+  // SDI_HOOK_V05_DISABLE=1 turns off both v0.5 gates (D26 advisory, D29 block).
+  const v05Disabled = process.env[V05_DISABLE_ENV] === '1';
+  if (!v05Disabled) {
+    await patternShapeAdvisory(toolName, (input && input.tool_input) || {}).catch(() => {});
+  }
+
   const activeTaskId = readActiveTaskHint();
   if (!activeTaskId) {
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'deny',
-          permissionDecisionReason:
-            `[sdi] no active task — set one before mutating files. ` +
-            `Run \`sdi task list\` and \`sdi task update <TASK-ID> --status in_progress\`, ` +
-            `or set ${BYPASS_ENV}=1 to bypass.`,
-        },
-      }) + '\n',
+    emitDeny(
+      `[sdi] no active task — set one before mutating files. ` +
+        `Run \`sdi task list\` and \`sdi task update <TASK-ID> --status in_progress\`, ` +
+        `or set ${BYPASS_ENV}=1 to bypass.`,
     );
     appendHookLog('pre_tool_use_blocked', { tool: toolName, reason: 'no-active-task' });
     return;
+  }
+
+  // D29 — Resource claim overlap gate. Blocks Edit/Write/NotebookEdit when a
+  // different scenario's active claim covers the target file path. Daemon
+  // unreachable / no claim / no overlap → proceed.
+  if (!v05Disabled) {
+    const gate = await claimOverlapGate(toolName, (input && input.tool_input) || {}, agentId).catch(
+      () => ({ block: false }),
+    );
+    if (gate && gate.block) {
+      process.stdout.write(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason:
+              `[sdi] D29 claim overlap on ${gate.payload.target_path}. ` +
+              `Holders: ${gate.payload.holders.map((h) => h.scenario_id).join(', ')}. ` +
+              `${gate.payload.hint}.`,
+          },
+          sdiBlock: gate.payload,
+        }) + '\n',
+      );
+      appendHookLog('pre_tool_use_blocked', {
+        tool: toolName,
+        reason: 'claim-overlap',
+        task_id: activeTaskId,
+        target_path: gate.payload.target_path,
+        my_scenario: gate.payload.my_scenario,
+        holders: gate.payload.holders,
+      });
+      process.exit(2);
+    }
   }
 
   // Autonomy gate. Best-effort: if the daemon can't resolve a policy (no
