@@ -236,13 +236,24 @@ test(
       const taskEnv = shimEnv(home, { SDI_ACTIVE_TASK: taskId });
 
       const filePath = path.join(projectCwd, 'src/lib.rs');
+      // D21: Edit must come from a registered specialist sub-agent. Simulate
+      // the impl-coder spawning Edit; main-session Edit would be denied
+      // before the active-task gate is even reached.
+      const subAgentEnv = {
+        agent_id: '00000000-0000-0000-0000-0000000000aa',
+        agent_type: 'impl-coder',
+      };
       const preEdit = runShim(
         'pre-tool-use.cjs',
         taskEnv,
-        JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: filePath } }),
+        JSON.stringify({
+          tool_name: 'Edit',
+          tool_input: { file_path: filePath },
+          ...subAgentEnv,
+        }),
       );
       assert.equal(preEdit.status, 0, `pre-tool-use stderr=${preEdit.stderr}`);
-      // Active task is pinned — must NOT emit a deny payload.
+      // Active task is pinned + delegation gate passes — no deny payload.
       assert.doesNotMatch(preEdit.stdout, /permissionDecision.*deny/);
 
       const postEdit = runShim(
@@ -269,10 +280,16 @@ test(
       // Sanity: PreToolUse without an active task pinned still denies, even
       // though the daemon and project exist. This proves the gate's source
       // of truth is the env hint, not daemon state — the documented contract.
+      // D21: also use a registered sub-agent so the delegation gate passes
+      // first, isolating the active-task gate behaviour here.
       const preNoTask = runShim(
         'pre-tool-use.cjs',
         shimEnv(home, {}),
-        JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: filePath } }),
+        JSON.stringify({
+          tool_name: 'Edit',
+          tool_input: { file_path: filePath },
+          ...subAgentEnv,
+        }),
       );
       assert.equal(preNoTask.status, 0);
       assert.match(preNoTask.stdout, /permissionDecision.*deny/);
