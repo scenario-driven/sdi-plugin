@@ -11,6 +11,7 @@ pub mod decision;
 pub mod impexp;
 pub mod knowledge;
 pub mod ops;
+pub mod pattern;
 pub mod plan;
 pub mod project;
 pub mod question;
