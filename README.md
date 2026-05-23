@@ -69,9 +69,11 @@ The full L3/L4/L5 semantics, scope matrix, circuit-breaker triggers, delegation-
 | `/plan` | this plugin | Create plan, manage Requirements, approve gate. |
 | `/req` | this plugin | Snapshot requirements (SNAPSHOT-ONLY). |
 | `/decide` | this plugin | Append Decision with `kind` (proposal → critique → consensus / dissensus). Carries `reversal_plan` + `blast_radius_score` (D28). |
+| `/consensus` | this plugin | Drive a multi-agent consensus round — proposal / critique / convergence — gated by the active CollaborationPattern's shape (D20, D26). |
 | `/autonomy` | this plugin | Inspect / change AutonomyPolicy per scope; surface circuit breaker. Includes `pattern_kind`, `l5_threshold`, `pattern_depth_cap`, `plan_single_session_lock`. |
-| `/note` | this plugin | Append AgentNote (M1 blackboard) — hypothesis / observation / question / handoff. |
+| `/agent-note` | this plugin | Append AgentNote (M1 blackboard) — hypothesis / observation / question / handoff / dissent / evidence. |
 | `/pattern` *(D22, v0.5)* | this plugin | Create / list / advance CollaborationPattern. Sub-commands for workflow / graph / swarm / agents-as-tools manifests. |
+| `/sdi-status` | this plugin | Snapshot the daemon's resolved state — active plan, scenarios, autonomy mode, active patterns, claim ledger. |
 | `/goal` | Claude Code built-in | Orthogonal. SDI does not intercept it. |
 
 ---
@@ -106,8 +108,9 @@ sdi-plugin/
 
 Add-on repositories (separate org repos):
 
-- [`sdi-web`](https://github.com/scenario-driven/sdi-web) — Vite/React dashboard SPA. Consumes the `sdid` HTTP API + `/events` SSE. Surfaces the autonomy panel, decision timeline, and agent-notes blackboard.
-- [`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) — Tauri 2 shell. Bundles `sdi-web/dist` and spawns `sdid` as a sidecar. Mirrors the resolved autonomy mode into the window title and tray, and exposes the circuit breaker as a global shortcut (Cmd+Shift+L / Ctrl+Shift+L).
+- [`sdi-web`](https://github.com/scenario-driven/sdi-web) — Vite/React dashboard SPA. Consumes the `sdid` HTTP API + `/events` SSE. Surfaces the autonomy panel, decision timeline, agent-notes blackboard, and pattern views.
+- [`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) — Tauri 2 shell. Bundles `sdi-web/dist` and spawns `sdid` as a sidecar. Mirrors the resolved autonomy mode + active-pattern badge into the window title and tray, and exposes the circuit breaker as a global shortcut (Cmd+Shift+L / Ctrl+Shift+L).
+- [`sdi-docs`](https://github.com/scenario-driven/sdi-docs) — Astro/Starlight landing + bilingual (ko / en) guide site. Presentation layer mirroring this repo's `docs/PRD.md` to a navigable site at `https://scenario-driven.github.io/sdi-docs/`.
 
 ---
 
