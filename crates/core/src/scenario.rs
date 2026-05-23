@@ -1,5 +1,6 @@
 use crate::error::{DomainError, DomainResult};
 use crate::ids::{Id, Timestamp};
+use crate::pattern::ClaimStatus;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -87,8 +88,28 @@ pub struct Scenario {
     pub produced_by: Option<String>,
     /// M4 contract — agent responsible for verifying this scenario.
     pub verified_by: Option<String>,
+    /// D29 — JSON array of path globs this scenario claims while active.
+    /// Stored as raw JSON string for additive evolution; `validate_claimed_resources`
+    /// parses + validates. Defaults to `"[]"`.
+    #[serde(default = "default_claimed_resources_json")]
+    pub claimed_resources_json: String,
+    /// D29 — multi-session resource claim status.
+    #[serde(default = "default_claim_status")]
+    pub claim_status: ClaimStatus,
+    /// D23 — pattern this scenario was produced under. NULL allowed for
+    /// migrated rows; daemon write paths backfill `direct` at creation.
+    #[serde(default)]
+    pub produced_via_pattern_id: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+}
+
+fn default_claimed_resources_json() -> String {
+    "[]".to_string()
+}
+
+fn default_claim_status() -> ClaimStatus {
+    ClaimStatus::None
 }
 
 impl Scenario {
@@ -117,6 +138,36 @@ impl Scenario {
         }
         Ok(())
     }
+}
+
+/// D29 — parse + validate a stored `claimed_resources_json` blob. Returns the
+/// glob list. Validation rules: must parse to a JSON array of strings; every
+/// entry must be non-empty after trim; entries that contain only path
+/// separators / glob wildcards are rejected (must carry at least one literal
+/// character so the daemon claim ledger can compare overlaps meaningfully).
+pub fn validate_claimed_resources(s: &str) -> DomainResult<Vec<String>> {
+    let parsed: Vec<String> = serde_json::from_str(s).map_err(|e| {
+        DomainError::Validation(format!("claimed_resources parse error: {e}"))
+    })?;
+    for entry in &parsed {
+        let trimmed = entry.trim();
+        if trimmed.is_empty() {
+            return Err(DomainError::Validation(
+                "claimed_resources entry must be non-empty".into(),
+            ));
+        }
+        // Reject globs that have no literal anchor at all (e.g. "**", "*",
+        // "**/*") — they would match every file and defeat overlap detection.
+        let has_literal = trimmed
+            .chars()
+            .any(|c| !matches!(c, '*' | '?' | '/' | '.'));
+        if !has_literal {
+            return Err(DomainError::Validation(format!(
+                "claimed_resources entry has no literal path component: {entry}"
+            )));
+        }
+    }
+    Ok(parsed)
 }
 
 #[cfg(test)]
@@ -150,5 +201,31 @@ mod tests {
     #[test]
     fn depends_on_allows_other_short_codes() {
         Scenario::validate_depends_on("US-A-002", &["US-A-001".into()]).unwrap();
+    }
+
+    #[test]
+    fn claimed_resources_parses_array_of_globs() {
+        let v =
+            validate_claimed_resources(r#"["crates/db/migrations/*.sql","plugin/agents/*.md"]"#)
+                .unwrap();
+        assert_eq!(v.len(), 2);
+    }
+
+    #[test]
+    fn claimed_resources_rejects_empty_entry() {
+        let err = validate_claimed_resources(r#"["",""]"#).unwrap_err();
+        assert!(matches!(err, DomainError::Validation(_)));
+    }
+
+    #[test]
+    fn claimed_resources_rejects_wildcard_only() {
+        let err = validate_claimed_resources(r#"["**"]"#).unwrap_err();
+        assert!(matches!(err, DomainError::Validation(_)));
+    }
+
+    #[test]
+    fn claimed_resources_rejects_non_array() {
+        let err = validate_claimed_resources(r#"{"a":1}"#).unwrap_err();
+        assert!(matches!(err, DomainError::Validation(_)));
     }
 }

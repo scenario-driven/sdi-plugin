@@ -22,6 +22,7 @@ pub mod run;
 pub mod aggregate;
 pub mod autonomy_policy;
 pub mod agent_note;
+pub mod pattern;
 
 pub fn build(state: AppState) -> Router {
     let api = Router::new()
@@ -41,6 +42,7 @@ pub fn build(state: AppState) -> Router {
         .merge(aggregate::router())
         .merge(autonomy_policy::router())
         .merge(agent_note::router())
+        .merge(pattern::router())
         .with_state(state);
 
     match locate_web_bundle() {
