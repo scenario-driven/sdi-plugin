@@ -14,6 +14,8 @@ pub async fn run(cli: &Client, cmd: ScenarioCmd, quiet: bool) -> Result<()> {
         ScenarioCmd::Update(args) => update(cli, args, quiet).await,
         ScenarioCmd::Confirm { id } => confirm(cli, &id, quiet).await,
         ScenarioCmd::Search(args) => search(cli, args).await,
+        ScenarioCmd::Claim { id } => claim(cli, &id, quiet).await,
+        ScenarioCmd::Release { id } => release(cli, &id, quiet).await,
     }
 }
 
@@ -68,6 +70,22 @@ async fn update(cli: &Client, args: ScenarioUpdateArgs, quiet: bool) -> Result<(
 async fn confirm(cli: &Client, id: &str, quiet: bool) -> Result<()> {
     let v: Value = cli
         .post_empty(&format!("/scenarios/{}/confirm", id))
+        .await?;
+    emit(&v, quiet)
+}
+
+async fn claim(cli: &Client, id: &str, quiet: bool) -> Result<()> {
+    // D29 — caller is expected to have first checked `/scenarios/active-claims`
+    // for overlap. The daemon does not yet compute glob intersection itself,
+    // so the PreToolUse hook (sdi-hooks.cjs) is the enforcement surface that
+    // blocks Edit/Write against paths held by another scenario.
+    let v: Value = cli.post_empty(&format!("/scenarios/{}/claim", id)).await?;
+    emit(&v, quiet)
+}
+
+async fn release(cli: &Client, id: &str, quiet: bool) -> Result<()> {
+    let v: Value = cli
+        .post_empty(&format!("/scenarios/{}/release", id))
         .await?;
     emit(&v, quiet)
 }
