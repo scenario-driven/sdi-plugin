@@ -29,6 +29,7 @@ pub enum IdKind {
     AutonomyPolicy,
     AgentNote,
     AgentSpec,
+    Pattern,
 }
 
 impl IdKind {
@@ -53,6 +54,7 @@ impl IdKind {
             IdKind::AutonomyPolicy => "APOL",
             IdKind::AgentNote => "ANOTE",
             IdKind::AgentSpec => "ASPEC",
+            IdKind::Pattern => "CP",
         }
     }
 }
