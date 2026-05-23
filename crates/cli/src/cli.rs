@@ -14,6 +14,7 @@
 //! - autonomy — D14/D17/D18 per-scope policy (L3 / L4 / L5)
 //! - agent-note — M1 blackboard + M2 hand-off receipts
 //! - consensus — M3 4-stage negotiation status (proposal/critique/consensus/dissensus)
+//! - pattern  — D22/D23/D24/D26/D27 CollaborationPattern lifecycle + tree
 //! - mcp      — stdio MCP server (PRD §5.4)
 
 use clap::{Args, Parser, Subcommand};
@@ -112,6 +113,11 @@ pub enum Cmd {
     /// Consensus: M3 4-stage negotiation status (D20).
     #[command(subcommand)]
     Consensus(ConsensusCmd),
+    /// CollaborationPattern: D22 7th first-class entity. CRUD + lifecycle +
+    /// parent→child tree. Daemon enforces D26 shape gate at pending→active
+    /// and D24 depth/cycle on create.
+    #[command(subcommand)]
+    Pattern(PatternCmd),
     /// MCP server (stdio JSON-RPC, exposes scope=rag only).
     Mcp,
     /// Initialise a project anchored to the current cwd (idempotent).
@@ -304,6 +310,13 @@ pub enum ScenarioCmd {
     /// FTS5 search across one plan's scenarios. Mirrors the MCP
     /// `search_scenarios` tool (PRD §5.4).
     Search(ScenarioSearchArgs),
+    /// D29 — transition this scenario's claim_status to `active` (the LLM
+    /// is expected to run overlap detection against
+    /// `GET /scenarios/active-claims` first; the daemon does not yet compute
+    /// the glob intersection itself).
+    Claim { id: String },
+    /// D29 — transition this scenario's claim_status to `released`.
+    Release { id: String },
 }
 
 #[derive(Debug, Args)]
@@ -520,6 +533,10 @@ pub enum DecisionCmd {
     /// Supersede an existing decision (creates a new accepted decision and
     /// flips the predecessor to `superseded`).
     Supersede(DecisionSupersedeArgs),
+    /// Append a D28 rollback decision (kind=consensus, reversal_of=<id>).
+    /// The original decision is never mutated; this is the auditable inverse
+    /// row a reversal-runner appends after applying the rollback action.
+    Rollback(DecisionRollbackArgs),
 }
 
 #[derive(Debug, Args)]
@@ -544,6 +561,39 @@ pub struct DecisionSupersedeArgs {
     pub title: String,
     #[arg(long, default_value = "")]
     pub body: String,
+}
+
+#[derive(Debug, Args)]
+pub struct DecisionRollbackArgs {
+    /// Id of the original decision being rolled back.
+    pub id: String,
+    /// Short code for the rollback decision row.
+    #[arg(long)]
+    pub short_code: String,
+    /// Title for the rollback decision row.
+    #[arg(long)]
+    pub title: String,
+    /// Body for the rollback decision row.
+    #[arg(long, default_value = "")]
+    pub body: String,
+    /// D28 — the rollback decision's own reversal_plan JSON (in case the
+    /// reversal itself needs to be reversed). Daemon re-validates the JSON.
+    /// Use `--reversal-plan-from-file path` to read it from disk instead.
+    #[arg(long, conflicts_with = "reversal_plan_from_file")]
+    pub reversal_plan: Option<String>,
+    /// Read the reversal_plan JSON from the given file path.
+    #[arg(long)]
+    pub reversal_plan_from_file: Option<String>,
+    /// D28 — `blast_radius_score` for the rollback row (default 5).
+    #[arg(long)]
+    pub blast_radius_score: Option<i32>,
+    /// Optional `produced_via_pattern_id` for the rollback row; the daemon
+    /// writes a `direct` pattern row if absent.
+    #[arg(long)]
+    pub produced_via_pattern_id: Option<String>,
+    /// Reason / agent label (default: `reversal-runner`).
+    #[arg(long, default_value = "reversal-runner")]
+    pub agent_name: String,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1016,4 +1066,120 @@ pub struct ConsensusStatusArgs {
     /// Filter to a single proposal id.
     #[arg(long)]
     pub proposal_id: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// CollaborationPattern (D22) — pattern CRUD + lifecycle + tree
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Subcommand)]
+pub enum PatternCmd {
+    /// Create a CollaborationPattern row (lifecycle starts at `pending`).
+    /// Boxed: `PatternCreateArgs` is ~5x larger than the next variant
+    /// because of the four (json | from-file) shape flag pairs.
+    Create(Box<PatternCreateArgs>),
+    /// List patterns for a plan, or `--active` to list every active row.
+    List(PatternListArgs),
+    /// Show a pattern by id.
+    Show { id: String },
+    /// Transition the pattern lifecycle. `pending → active` runs the D26
+    /// shape gate; terminal targets (`converged`/`dissensus`/`aborted`)
+    /// stamp `decided_at` automatically.
+    Transition(PatternTransitionArgs),
+    /// Sugar for `transition --to aborted`.
+    Abort(PatternAbortArgs),
+    /// Render the plan's pattern parent→child tree (D24).
+    Tree(PatternTreeArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PatternCreateArgs {
+    /// Plan id the pattern belongs to.
+    #[arg(long)]
+    pub plan: String,
+    /// Short stable code (e.g. `PAT-1`). Unique per plan.
+    #[arg(long)]
+    pub short_code: String,
+    /// `workflow` | `graph` | `swarm` | `agents-as-tools` | `direct`.
+    #[arg(long)]
+    pub kind: String,
+    /// The work entity the pattern produces:
+    /// `plan` | `requirement` | `scenario` | `task` | `decision` | `round`.
+    #[arg(long = "applies-to")]
+    pub applies_to: String,
+    /// Id of the work entity (must match `applies_to`).
+    #[arg(long = "scope-id")]
+    pub scope_id: String,
+    /// Optional parent pattern id; daemon enforces D24 cycle + depth cap.
+    #[arg(long = "parent")]
+    pub parent_pattern_id: Option<String>,
+    /// Workflow `steps` JSON (array of {idx, agent, action}). Required when
+    /// `--kind workflow`. Conflicts with `--steps-from-file`.
+    #[arg(long = "steps-json", conflicts_with = "steps_from_file")]
+    pub steps_json: Option<String>,
+    /// Read the workflow `steps` JSON from the given file path.
+    #[arg(long = "steps-from-file")]
+    pub steps_from_file: Option<String>,
+    /// Graph `reviewers` JSON (array of {name, stance}). Required when
+    /// `--kind graph`. Conflicts with `--reviewers-from-file`.
+    #[arg(long = "reviewers-json", conflicts_with = "reviewers_from_file")]
+    pub reviewers_json: Option<String>,
+    /// Read the graph `reviewers` JSON from the given file path.
+    #[arg(long = "reviewers-from-file")]
+    pub reviewers_from_file: Option<String>,
+    /// Swarm `fan_out` JSON (array of agent names). Required when
+    /// `--kind swarm`. Conflicts with `--fan-out-from-file`.
+    #[arg(long = "fan-out-json", conflicts_with = "fan_out_from_file")]
+    pub fan_out_json: Option<String>,
+    /// Read the swarm `fan_out` JSON from the given file path.
+    #[arg(long = "fan-out-from-file")]
+    pub fan_out_from_file: Option<String>,
+    /// Agents-as-tools `peer_registration` JSON (array of {caller, callee}).
+    /// Required when `--kind agents-as-tools`. Conflicts with
+    /// `--peers-from-file`.
+    #[arg(long = "peers-json", conflicts_with = "peers_from_file")]
+    pub peers_json: Option<String>,
+    /// Read the agents-as-tools `peer_registration` JSON from the given path.
+    #[arg(long = "peers-from-file")]
+    pub peers_from_file: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PatternListArgs {
+    /// Plan id (required when `--active` is absent).
+    #[arg(long)]
+    pub plan: Option<String>,
+    /// List every active pattern across the daemon (cross-plan view).
+    #[arg(long, default_value_t = false)]
+    pub active: bool,
+    /// Optional kind filter (`workflow` | `graph` | `swarm` |
+    /// `agents-as-tools` | `direct`).
+    #[arg(long)]
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PatternTransitionArgs {
+    pub id: String,
+    /// One of `pending` | `active` | `converged` | `dissensus` | `aborted`.
+    #[arg(long = "to")]
+    pub to: String,
+    /// Free-form reason recorded in `decided_reason`.
+    #[arg(long)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PatternAbortArgs {
+    pub id: String,
+    /// Free-form reason recorded in `decided_reason`.
+    #[arg(long)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PatternTreeArgs {
+    /// Plan id whose pattern DAG to render.
+    #[arg(long)]
+    pub plan: String,
 }

@@ -16,6 +16,7 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
     (4, "runs + task hierarchy + lease", MIGRATION_004_RUNS),
     (5, "usage accounting", MIGRATION_005_USAGE),
     (6, "v0.4 multi-agent governance", MIGRATION_006_V04_MULTI_AGENT),
+    (7, "v0.5 pattern enforcement", MIGRATION_007_V05_PATTERN_ENFORCEMENT),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -24,6 +25,8 @@ const MIGRATION_003_COLLAB: &str = include_str!("./migrations/003_collab.sql");
 const MIGRATION_004_RUNS: &str = include_str!("./migrations/004_runs_hierarchy.sql");
 const MIGRATION_005_USAGE: &str = include_str!("./migrations/005_usage.sql");
 const MIGRATION_006_V04_MULTI_AGENT: &str = include_str!("./migrations/006_v04_multi_agent.sql");
+const MIGRATION_007_V05_PATTERN_ENFORCEMENT: &str =
+    include_str!("./migrations/007_v05_pattern_enforcement.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {
@@ -116,10 +119,10 @@ mod tests {
             "autonomy_policies",
             "agent_notes",
             "agent_specs",
+            "collaboration_patterns",
         ] {
             assert!(tables.iter().any(|t| t == must), "missing table {must}");
         }
-        // v0.4 columns on existing tables
         let scenario_cols: Vec<String> = conn
             .prepare("PRAGMA table_info(scenarios)")
             .unwrap()
@@ -127,7 +130,14 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        for col in ["depends_on", "produced_by", "verified_by"] {
+        for col in [
+            "depends_on",
+            "produced_by",
+            "verified_by",
+            "claimed_resources_json",
+            "claim_status",
+            "produced_via_pattern_id",
+        ] {
             assert!(
                 scenario_cols.iter().any(|c| c == col),
                 "scenarios missing column {col}"
@@ -140,11 +150,78 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        for col in ["kind", "proposal_id", "agent_name", "escalated_at"] {
+        for col in [
+            "kind",
+            "proposal_id",
+            "agent_name",
+            "escalated_at",
+            "reversal_plan",
+            "blast_radius_score",
+            "reversal_of",
+            "produced_via_pattern_id",
+        ] {
             assert!(
                 decision_cols.iter().any(|c| c == col),
                 "decisions missing column {col}"
             );
+        }
+        let autonomy_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(autonomy_policies)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        for col in [
+            "pattern_kind",
+            "l5_threshold",
+            "pattern_depth_cap",
+            "plan_single_session_lock",
+            "external_surface",
+            "timeout_ms",
+            "forced",
+        ] {
+            assert!(
+                autonomy_cols.iter().any(|c| c == col),
+                "autonomy_policies missing column {col}"
+            );
+        }
+        let agent_spec_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(agent_specs)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        for col in [
+            "stance",
+            "blast_radius_rules_json",
+            "status",
+            "expires_at",
+            "tool_allowlist_json",
+            "decision_kinds_json",
+        ] {
+            assert!(
+                agent_spec_cols.iter().any(|c| c == col),
+                "agent_specs missing column {col}"
+            );
+        }
+        for col in [
+            "produced_via_pattern_id",
+        ] {
+            for table in ["plans", "requirements", "tasks", "rounds"] {
+                let cols: Vec<String> = conn
+                    .prepare(&format!("PRAGMA table_info({table})"))
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(1))
+                    .unwrap()
+                    .map(|r| r.unwrap())
+                    .collect();
+                assert!(
+                    cols.iter().any(|c| c == col),
+                    "{table} missing column {col}"
+                );
+            }
         }
         let _ = std::fs::remove_file(&tmp);
     }
