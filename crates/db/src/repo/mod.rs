@@ -18,6 +18,7 @@ pub mod usage;
 pub mod autonomy_policy;
 pub mod agent_note;
 pub mod agent_spec;
+pub mod pattern;
 
 use chrono::{DateTime, Utc};
 use rusqlite::types::FromSql;
