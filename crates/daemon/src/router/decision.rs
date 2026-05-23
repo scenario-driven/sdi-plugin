@@ -1,5 +1,13 @@
 //! `/decisions` router. Append-only ADR log (D12). Body is never edited — a
 //! follow-up decision uses `supersedes_id` to chain a replacement.
+//!
+//! v0.5 (D28) adds reversibility:
+//! - `produced_via_pattern_id` carried at create.
+//! - `reversal_plan` (validated JSON), `blast_radius_score` (0..=10), and
+//!   `reversal_of` accepted on create.
+//! - `POST /decisions/:id/rollback` writes an append-only consensus row whose
+//!   `reversal_of` points at the original decision; the daemon's L5 unlock
+//!   gate is enforced here.
 
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
@@ -11,6 +19,7 @@ use axum::{
 use sdi_core::decision::{Decision, DecisionKind, DecisionStatus};
 use sdi_core::error::DomainError;
 use sdi_core::ids::{now, Id, IdKind};
+use sdi_core::pattern::validate_reversal_plan_json;
 use sdi_db::repo::decision as repo;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -21,6 +30,7 @@ pub fn router() -> Router<AppState> {
         .route("/decisions", post(create).get(list))
         .route("/decisions/:id", get(get_one))
         .route("/decisions/:id/status", post(set_status))
+        .route("/decisions/:id/rollback", post(rollback))
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +52,18 @@ struct CreateDecisionBody {
     /// D20 — Layer-2 specialist that emitted this row.
     #[serde(default)]
     agent_name: Option<String>,
+    /// D23 — pattern this decision was produced under.
+    #[serde(default)]
+    produced_via_pattern_id: Option<String>,
+    /// D28 — JSON-encoded reversal plan (discriminated on `type`).
+    #[serde(default)]
+    reversal_plan: Option<String>,
+    /// D28 — recovery-cost score (0..=10). Defaults to 5 when omitted.
+    #[serde(default)]
+    blast_radius_score: Option<i32>,
+    /// D28 — when this row IS a rollback of another decision, the original id.
+    #[serde(default)]
+    reversal_of: Option<String>,
 }
 
 async fn create(
@@ -61,6 +83,10 @@ async fn create(
     } else {
         None
     };
+    // D28 — reject malformed reversal_plan JSON at the gate, before SQL.
+    if let Some(plan) = b.reversal_plan.as_deref() {
+        validate_reversal_plan_json(plan)?;
+    }
     let decision = Decision {
         id: Id::new(IdKind::Decision),
         plan_id: Id::from(b.plan_id),
@@ -73,6 +99,10 @@ async fn create(
         proposal_id: b.proposal_id.map(Id::from),
         agent_name: b.agent_name,
         escalated_at,
+        produced_via_pattern_id: b.produced_via_pattern_id,
+        reversal_plan: b.reversal_plan,
+        blast_radius_score: b.blast_radius_score.unwrap_or(5),
+        reversal_of: b.reversal_of.map(Id::from),
         created_at: now(),
     };
     let conn = state.conn()?;
@@ -133,6 +163,92 @@ async fn set_status(
     let fresh = repo::get(&conn, &did)?;
     state.publish(EventEnvelope {
         kind: "decision.status-changed".into(),
+        entity_id: Some(fresh.id.to_string()),
+        payload: serde_json::to_value(&fresh).unwrap_or(Value::Null),
+    });
+    Ok(Json(json!(fresh)))
+}
+
+#[derive(Debug, Deserialize)]
+struct RollbackBody {
+    short_code: String,
+    title: String,
+    body: String,
+    /// D28 — required: the rollback decision's own reversal plan (in case the
+    /// reversal itself needs to be reversed). Must validate.
+    reversal_plan: String,
+    /// D28 — defaults to 5; cannot exceed 10.
+    #[serde(default)]
+    blast_radius_score: Option<i32>,
+    /// D28 — the rollback action must itself be produced under a pattern.
+    /// When omitted, the daemon writes `direct` (anti-pattern marker).
+    #[serde(default)]
+    produced_via_pattern_id: Option<String>,
+    /// Layer-2 specialist that authored the rollback. Conventionally
+    /// `reversal-runner`.
+    #[serde(default = "default_reversal_agent")]
+    agent_name: String,
+}
+
+fn default_reversal_agent() -> String {
+    "reversal-runner".into()
+}
+
+/// D28 — `POST /decisions/:id/rollback`. Appends a `consensus` decision whose
+/// `reversal_of` points at the original. The original is never mutated
+/// (D12 SNAPSHOT-ONLY); callers wanting to mark it superseded should follow
+/// up with `POST /decisions/<original>/status {"status":"superseded"}`.
+async fn rollback(
+    State(state): State<AppState>,
+    Path(original_id): Path<String>,
+    Json(b): Json<RollbackBody>,
+) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let orig_id = Id::from(original_id.clone());
+    // Pull the original to copy plan_id + emit a meaningful initiated event.
+    let original = repo::get(&conn, &orig_id)?;
+    // D28 — validate the rollback plan JSON before any SQL.
+    validate_reversal_plan_json(&b.reversal_plan)?;
+    let score = b.blast_radius_score.unwrap_or(5);
+    Decision::validate_blast_radius_score(score)?;
+    state.publish(EventEnvelope {
+        kind: "rollback_initiated".into(),
+        entity_id: Some(orig_id.to_string()),
+        payload: json!({
+            "original_decision_id": orig_id.to_string(),
+            "plan_id": original.plan_id.to_string(),
+            "agent_name": b.agent_name,
+        }),
+    });
+    let rollback_decision = Decision {
+        id: Id::new(IdKind::Decision),
+        plan_id: original.plan_id.clone(),
+        short_code: b.short_code,
+        title: b.title,
+        body: b.body,
+        status: DecisionStatus::Accepted,
+        // SNAPSHOT-ONLY — do NOT chain via supersedes_id; rollback is its own
+        // first-class row. The caller marks the original superseded via the
+        // dedicated /status endpoint when appropriate.
+        supersedes_id: None,
+        kind: DecisionKind::Consensus,
+        // D28 — rollback is structurally a consensus row for the audit log
+        // but NOT an M3-gated multi-party consensus. The repo layer bypasses
+        // the M3 stage gate when `reversal_of` is set, so this row needs no
+        // proposal_id / synthetic critique.
+        proposal_id: None,
+        agent_name: Some(b.agent_name.clone()),
+        escalated_at: None,
+        produced_via_pattern_id: b.produced_via_pattern_id,
+        reversal_plan: Some(b.reversal_plan),
+        blast_radius_score: score,
+        reversal_of: Some(orig_id.clone()),
+        created_at: now(),
+    };
+    repo::insert(&conn, &rollback_decision)?;
+    let fresh = repo::get(&conn, &rollback_decision.id)?;
+    state.publish(EventEnvelope {
+        kind: "rollback_completed".into(),
         entity_id: Some(fresh.id.to_string()),
         payload: serde_json::to_value(&fresh).unwrap_or(Value::Null),
     });

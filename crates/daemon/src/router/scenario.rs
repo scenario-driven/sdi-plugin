@@ -1,5 +1,11 @@
 //! `/scenarios` router. D5 GWT-strict authoring path; FTS5 search; status
 //! transition (draft → confirmed) is what unlocks the D8 approve gate.
+//!
+//! v0.5 (D29) added multi-session resource claims:
+//! - `claimed_resources_json` + `produced_via_pattern_id` carried at create.
+//! - `GET /scenarios/active-claims` — PreToolUse overlap query.
+//! - `POST /scenarios/:id/claim`   — transition claim_status to `active`.
+//! - `POST /scenarios/:id/release` — transition claim_status to `released`.
 
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
@@ -10,6 +16,7 @@ use axum::{
 };
 use sdi_core::error::DomainError;
 use sdi_core::ids::{now, Id, IdKind};
+use sdi_core::pattern::ClaimStatus;
 use sdi_core::scenario::{Scenario, ScenarioStatus};
 use sdi_db::repo::scenario as repo;
 use serde::Deserialize;
@@ -18,9 +25,12 @@ use serde_json::{json, Value};
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/scenarios", post(create).get(list))
+        .route("/scenarios/active-claims", get(active_claims))
         .route("/scenarios/search", get(search))
         .route("/scenarios/:id", get(get_one).put(update))
         .route("/scenarios/:id/confirm", post(confirm))
+        .route("/scenarios/:id/claim", post(claim))
+        .route("/scenarios/:id/release", post(release))
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +57,12 @@ struct CreateScenarioBody {
     /// M4 contract — verifying agent.
     #[serde(default)]
     verified_by: Option<String>,
+    /// D29 — JSON array of path globs the scenario claims while active.
+    #[serde(default)]
+    claimed_resources_json: Option<String>,
+    /// D23 — pattern this scenario was produced under.
+    #[serde(default)]
+    produced_via_pattern_id: Option<String>,
 }
 
 async fn create(
@@ -70,6 +86,9 @@ async fn create(
         depends_on: b.depends_on,
         produced_by: b.produced_by,
         verified_by: b.verified_by,
+        claimed_resources_json: b.claimed_resources_json.unwrap_or_else(|| "[]".into()),
+        claim_status: ClaimStatus::None,
+        produced_via_pattern_id: b.produced_via_pattern_id,
         created_at: now(),
         updated_at: now(),
     };
@@ -170,4 +189,68 @@ async fn search(
     let conn = state.conn()?;
     let hits = repo::search(&conn, &Id::from(qq.plan_id), &qq.q, qq.limit)?;
     Ok(Json(json!({ "scenarios": hits })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ActiveClaimsQuery {
+    /// Optional narrowing to a single plan; when omitted the entire ledger.
+    #[serde(default)]
+    plan_id: Option<String>,
+}
+
+async fn active_claims(
+    State(state): State<AppState>,
+    Query(q): Query<ActiveClaimsQuery>,
+) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let plan_id = q.plan_id.map(Id::from);
+    let rows = repo::list_active_claims(&conn, plan_id.as_ref())?;
+    Ok(Json(json!({ "scenarios": rows })))
+}
+
+/// D29 — transition scenario into `claim_status = 'active'`. Caller is
+/// expected to have run overlap detection client-side against
+/// `/scenarios/active-claims`; the daemon does not (yet) compute the glob
+/// intersection itself.
+async fn claim(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let sid = Id::from(id);
+    repo::set_claim_status(&conn, &sid, ClaimStatus::Active)?;
+    let fresh = repo::get(&conn, &sid)?;
+    state.publish(EventEnvelope {
+        kind: "claim_status_changed".into(),
+        entity_id: Some(fresh.id.to_string()),
+        payload: json!({
+            "scenario_id": fresh.id.to_string(),
+            "plan_id": fresh.plan_id.to_string(),
+            "claim_status": fresh.claim_status.to_string(),
+            "claimed_resources_json": fresh.claimed_resources_json,
+        }),
+    });
+    Ok(Json(json!(fresh)))
+}
+
+/// D29 — transition scenario into `claim_status = 'released'`.
+async fn release(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let sid = Id::from(id);
+    repo::set_claim_status(&conn, &sid, ClaimStatus::Released)?;
+    let fresh = repo::get(&conn, &sid)?;
+    state.publish(EventEnvelope {
+        kind: "claim_status_changed".into(),
+        entity_id: Some(fresh.id.to_string()),
+        payload: json!({
+            "scenario_id": fresh.id.to_string(),
+            "plan_id": fresh.plan_id.to_string(),
+            "claim_status": fresh.claim_status.to_string(),
+            "claimed_resources_json": fresh.claimed_resources_json,
+        }),
+    });
+    Ok(Json(json!(fresh)))
 }
