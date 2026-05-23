@@ -11,12 +11,14 @@ use std::str::FromStr;
 
 pub type AutonomyPolicyId = Id;
 
-/// Where the policy applies. Mirrors the SQL CHECK constraint in migration 006.
+/// Where the policy applies. Mirrors the SQL CHECK constraint in migrations
+/// 006 (`plan`/`decision_kind`/`global`) and 007 (D25 added `pattern_kind`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AutonomyScopeKind {
     Plan,
     DecisionKind,
+    PatternKind,
     Global,
 }
 
@@ -25,6 +27,7 @@ impl fmt::Display for AutonomyScopeKind {
         f.write_str(match self {
             AutonomyScopeKind::Plan => "plan",
             AutonomyScopeKind::DecisionKind => "decision_kind",
+            AutonomyScopeKind::PatternKind => "pattern_kind",
             AutonomyScopeKind::Global => "global",
         })
     }
@@ -36,6 +39,7 @@ impl FromStr for AutonomyScopeKind {
         match s {
             "plan" => Ok(AutonomyScopeKind::Plan),
             "decision_kind" => Ok(AutonomyScopeKind::DecisionKind),
+            "pattern_kind" => Ok(AutonomyScopeKind::PatternKind),
             "global" => Ok(AutonomyScopeKind::Global),
             other => Err(DomainError::Validation(format!(
                 "unknown autonomy scope_kind: {other}"
@@ -91,6 +95,36 @@ impl AutonomyMode {
     pub fn demoted() -> Self {
         AutonomyMode::L3
     }
+
+    /// D25 — pattern-kind default modes:
+    /// `workflow=L5`, `graph=L5`, `swarm=L4`, `agents-as-tools=L4`,
+    /// `direct=L3` (forced). Unknown kinds fall back to L3 (strictest).
+    pub fn default_pattern_kind_mode(kind: &str) -> AutonomyMode {
+        match kind {
+            "workflow" => AutonomyMode::L5,
+            "graph" => AutonomyMode::L5,
+            "swarm" => AutonomyMode::L4,
+            "agents-as-tools" => AutonomyMode::L4,
+            "direct" => AutonomyMode::L3,
+            _ => AutonomyMode::L3,
+        }
+    }
+
+    /// D25 — when plan-level mode and pattern-level mode are both present,
+    /// the strictest (numerically smallest rank) wins. L3 > L4 > L5 in
+    /// strictness, so the returned mode is the one that "asks more often".
+    pub fn effective_mode(plan_mode: AutonomyMode, pattern_mode: AutonomyMode) -> AutonomyMode {
+        let rank = |m: AutonomyMode| match m {
+            AutonomyMode::L3 => 0,
+            AutonomyMode::L4 => 1,
+            AutonomyMode::L5 => 2,
+        };
+        if rank(plan_mode) <= rank(pattern_mode) {
+            plan_mode
+        } else {
+            pattern_mode
+        }
+    }
 }
 
 impl fmt::Display for AutonomyMode {
@@ -124,7 +158,36 @@ pub struct AutonomyPolicy {
     pub plan_id: Option<Id>,
     pub scope_kind: AutonomyScopeKind,
     pub decision_kind: Option<String>,
+    /// D25 — when scope_kind = pattern_kind, the pattern kind this policy
+    /// scopes to (`workflow` / `graph` / `swarm` / `agents-as-tools` /
+    /// `direct`). NULL for any other scope.
+    #[serde(default)]
+    pub pattern_kind: Option<String>,
     pub mode: AutonomyMode,
+    /// D28 — `blast_radius_score ≤ l5_threshold` is one of the three L5
+    /// unlock conditions. Default 5 = architecture/schema (score 10/8) auto
+    /// downgrade to L4.
+    #[serde(default = "default_l5_threshold")]
+    pub l5_threshold: i32,
+    /// D24 — CollaborationPattern.depth chain cap. Default 3 = "plan workflow
+    /// → step swarm → swarm step agents-as-tools".
+    #[serde(default = "default_pattern_depth_cap")]
+    pub pattern_depth_cap: i32,
+    /// D29 — when true, a plan's N active scenarios may only claim from one
+    /// session at a time. Default false (multi-session collaboration natural).
+    #[serde(default)]
+    pub plan_single_session_lock: bool,
+    /// D17 — marks a plan that ships publish/deploy/external API; defaults
+    /// its mode to L4 instead of L5.
+    #[serde(default)]
+    pub external_surface: bool,
+    /// L4 timed-gate auto-apply delay in milliseconds. NULL → no auto-apply.
+    #[serde(default)]
+    pub timeout_ms: Option<i64>,
+    /// D17 — true when the policy was set by a forced-L4 invariant
+    /// (architecture/schema/naming-canonical) rather than a user override.
+    #[serde(default)]
+    pub forced: bool,
     pub set_at: Timestamp,
     pub set_by: String,
     pub reason: Option<String>,
@@ -132,13 +195,22 @@ pub struct AutonomyPolicy {
     pub updated_at: Timestamp,
 }
 
+fn default_l5_threshold() -> i32 {
+    5
+}
+
+fn default_pattern_depth_cap() -> i32 {
+    3
+}
+
 impl AutonomyPolicy {
-    /// Validate the (scope_kind, plan_id, decision_kind) tuple — must match the
-    /// SQL CHECK in migration 006.
+    /// Validate the (scope_kind, plan_id, decision_kind, pattern_kind) tuple
+    /// — must match the SQL CHECK in migrations 006 + 007.
     pub fn validate_scope(
         scope_kind: AutonomyScopeKind,
         plan_id: Option<&Id>,
         decision_kind: Option<&str>,
+        pattern_kind: Option<&str>,
     ) -> DomainResult<()> {
         match scope_kind {
             AutonomyScopeKind::Plan => {
@@ -152,6 +224,11 @@ impl AutonomyPolicy {
                         "scope=plan forbids decision_kind".into(),
                     ));
                 }
+                if pattern_kind.is_some() {
+                    return Err(DomainError::Validation(
+                        "scope=plan forbids pattern_kind".into(),
+                    ));
+                }
             }
             AutonomyScopeKind::DecisionKind => {
                 if decision_kind.is_none() {
@@ -159,11 +236,43 @@ impl AutonomyPolicy {
                         "scope=decision_kind requires decision_kind".into(),
                     ));
                 }
+                if pattern_kind.is_some() {
+                    return Err(DomainError::Validation(
+                        "scope=decision_kind forbids pattern_kind".into(),
+                    ));
+                }
+            }
+            AutonomyScopeKind::PatternKind => {
+                if pattern_kind.is_none() {
+                    return Err(DomainError::Validation(
+                        "scope=pattern_kind requires pattern_kind".into(),
+                    ));
+                }
+                if plan_id.is_some() {
+                    return Err(DomainError::Validation(
+                        "scope=pattern_kind forbids plan_id".into(),
+                    ));
+                }
+                if decision_kind.is_some() {
+                    return Err(DomainError::Validation(
+                        "scope=pattern_kind forbids decision_kind".into(),
+                    ));
+                }
+                if let Some(pk) = pattern_kind {
+                    if !matches!(
+                        pk,
+                        "workflow" | "graph" | "swarm" | "agents-as-tools" | "direct"
+                    ) {
+                        return Err(DomainError::Validation(format!(
+                            "unknown pattern_kind: {pk}"
+                        )));
+                    }
+                }
             }
             AutonomyScopeKind::Global => {
-                if plan_id.is_some() || decision_kind.is_some() {
+                if plan_id.is_some() || decision_kind.is_some() || pattern_kind.is_some() {
                     return Err(DomainError::Validation(
-                        "scope=global forbids plan_id and decision_kind".into(),
+                        "scope=global forbids plan_id / decision_kind / pattern_kind".into(),
                     ));
                 }
             }
@@ -217,16 +326,81 @@ mod tests {
 
     #[test]
     fn validate_scope_plan_requires_plan_id() {
-        let err = AutonomyPolicy::validate_scope(AutonomyScopeKind::Plan, None, None).unwrap_err();
+        let err =
+            AutonomyPolicy::validate_scope(AutonomyScopeKind::Plan, None, None, None).unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
     }
 
     #[test]
     fn validate_scope_global_forbids_plan_id() {
         let pid: Id = "PLAN-x".into();
-        let err = AutonomyPolicy::validate_scope(AutonomyScopeKind::Global, Some(&pid), None)
-            .unwrap_err();
+        let err =
+            AutonomyPolicy::validate_scope(AutonomyScopeKind::Global, Some(&pid), None, None)
+                .unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
+    }
+
+    #[test]
+    fn validate_scope_pattern_kind_requires_pattern_kind() {
+        let err = AutonomyPolicy::validate_scope(
+            AutonomyScopeKind::PatternKind,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, DomainError::Validation(_)));
+    }
+
+    #[test]
+    fn validate_scope_pattern_kind_accepts_known_kind() {
+        AutonomyPolicy::validate_scope(
+            AutonomyScopeKind::PatternKind,
+            None,
+            None,
+            Some("workflow"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn validate_scope_pattern_kind_rejects_unknown_kind() {
+        let err = AutonomyPolicy::validate_scope(
+            AutonomyScopeKind::PatternKind,
+            None,
+            None,
+            Some("rogue"),
+        )
+        .unwrap_err();
+        assert!(matches!(err, DomainError::Validation(_)));
+    }
+
+    #[test]
+    fn default_pattern_kind_mode_defaults() {
+        assert_eq!(AutonomyMode::default_pattern_kind_mode("workflow"), AutonomyMode::L5);
+        assert_eq!(AutonomyMode::default_pattern_kind_mode("graph"), AutonomyMode::L5);
+        assert_eq!(AutonomyMode::default_pattern_kind_mode("swarm"), AutonomyMode::L4);
+        assert_eq!(
+            AutonomyMode::default_pattern_kind_mode("agents-as-tools"),
+            AutonomyMode::L4
+        );
+        assert_eq!(AutonomyMode::default_pattern_kind_mode("direct"), AutonomyMode::L3);
+    }
+
+    #[test]
+    fn effective_mode_picks_strictest() {
+        assert_eq!(
+            AutonomyMode::effective_mode(AutonomyMode::L5, AutonomyMode::L4),
+            AutonomyMode::L4
+        );
+        assert_eq!(
+            AutonomyMode::effective_mode(AutonomyMode::L4, AutonomyMode::L5),
+            AutonomyMode::L4
+        );
+        assert_eq!(
+            AutonomyMode::effective_mode(AutonomyMode::L3, AutonomyMode::L5),
+            AutonomyMode::L3
+        );
     }
 
     #[test]

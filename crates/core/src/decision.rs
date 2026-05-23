@@ -97,10 +97,44 @@ pub struct Decision {
     pub proposal_id: Option<Id>,
     pub agent_name: Option<String>,
     pub escalated_at: Option<Timestamp>,
+    /// D23 — pattern this decision was produced under (NOT NULL at creation;
+    /// daemon back-fills `direct` when caller omits).
+    #[serde(default)]
+    pub produced_via_pattern_id: Option<String>,
+    /// D28 — reversal plan JSON. One of `migration_sql` / `git_revert` /
+    /// `fs_snapshot` / `compensating_action`. `validate_reversal_plan_json`
+    /// in `pattern.rs` parses + validates; daemon enforces presence + format
+    /// at consensus admission.
+    #[serde(default)]
+    pub reversal_plan: Option<String>,
+    /// D28 — static recovery-cost score in 0..=10. Default 5 marks untagged
+    /// decisions as mid-radius; gating logic stays explicit (`l5_threshold`
+    /// on AutonomyPolicy compares against this).
+    #[serde(default = "default_blast_radius_score")]
+    pub blast_radius_score: i32,
+    /// D28 — when this row IS a rollback of another decision, the original
+    /// decision id. The original is never mutated (D12 SNAPSHOT-ONLY).
+    #[serde(default)]
+    pub reversal_of: Option<Id>,
     pub created_at: Timestamp,
 }
 
+fn default_blast_radius_score() -> i32 {
+    5
+}
+
 impl Decision {
+    /// D28 — `blast_radius_score` must fit in 0..=10. Mirrors the SQL CHECK
+    /// in migration 007 so callers fail fast before SQL.
+    pub fn validate_blast_radius_score(score: i32) -> DomainResult<()> {
+        if !(0..=10).contains(&score) {
+            return Err(DomainError::Validation(format!(
+                "blast_radius_score {score} out of range 0..=10"
+            )));
+        }
+        Ok(())
+    }
+
     /// D20 — M3 enforcement. `existing_kinds` lists every Decision.kind already
     /// recorded against `proposal_id` (in any order). Returns Err when the
     /// next stage would violate `proposal → critique → consensus | dissensus`.
@@ -189,5 +223,13 @@ mod tests {
             Some(&pid()),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn blast_radius_score_bounds() {
+        Decision::validate_blast_radius_score(0).unwrap();
+        Decision::validate_blast_radius_score(10).unwrap();
+        assert!(Decision::validate_blast_radius_score(-1).is_err());
+        assert!(Decision::validate_blast_radius_score(11).is_err());
     }
 }
