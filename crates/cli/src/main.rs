@@ -26,6 +26,7 @@ async fn main() -> Result<()> {
         Cmd::Autonomy(sub) => commands::autonomy::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::AgentNote(sub) => commands::agent_note::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Consensus(sub) => commands::consensus::run(&entity_client().await?, sub).await,
+        Cmd::Pattern(sub) => commands::pattern::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Comment(sub) => commands::comment::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Question(sub) => commands::question::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Run(sub) => commands::run::run(&entity_client().await?, sub, app.quiet).await,

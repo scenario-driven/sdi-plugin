@@ -23,16 +23,41 @@ fn row_to_decision(row: &Row<'_>) -> rusqlite::Result<Decision> {
         proposal_id: s_opt(row, 8)?.map(Id::from),
         agent_name: s_opt(row, 9)?,
         escalated_at: ts_opt(row, 10)?,
-        created_at: ts(row, 11)?,
+        produced_via_pattern_id: s_opt(row, 11)?,
+        reversal_plan: s_opt(row, 12)?,
+        blast_radius_score: row.get::<_, i64>(13)? as i32,
+        reversal_of: s_opt(row, 14)?.map(Id::from),
+        created_at: ts(row, 15)?,
     })
 }
 
 const COLS: &str = "id, plan_id, short_code, title, body, status, supersedes_id, \
-                    kind, proposal_id, agent_name, escalated_at, created_at";
+                    kind, proposal_id, agent_name, escalated_at, \
+                    produced_via_pattern_id, reversal_plan, blast_radius_score, \
+                    reversal_of, created_at";
 
 pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
-    // D20 — enforce M3 ordering for non-proposal stages.
-    if !matches!(decision.kind, DecisionKind::Proposal) {
+    // D28 — blast_radius_score in 0..=10.
+    Decision::validate_blast_radius_score(decision.blast_radius_score)?;
+    // D28 — a row carrying `reversal_of` is a unilateral rollback
+    // (reversal-runner specialist). It is structurally a consensus row for the
+    // audit log but it is NOT an M3-gated multi-party consensus: there was no
+    // proposal/critique cycle, just an append-only undo. Skip the M3 gate for
+    // these rows and require `reversal_of` to resolve.
+    let is_rollback = decision.reversal_of.is_some();
+    if is_rollback {
+        if !matches!(decision.kind, DecisionKind::Consensus) {
+            return Err(DomainError::Validation(
+                "reversal_of is only valid on consensus decisions".into(),
+            ));
+        }
+        if decision.proposal_id.is_some() {
+            return Err(DomainError::Validation(
+                "rollback decisions must not carry proposal_id".into(),
+            ));
+        }
+    } else if !matches!(decision.kind, DecisionKind::Proposal) {
+        // D20 — enforce M3 ordering for non-proposal, non-rollback stages.
         let existing = list_kinds_by_proposal(
             conn,
             decision
@@ -54,7 +79,10 @@ pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
         ));
     }
     conn.execute(
-        &format!("INSERT INTO decisions({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
+        &format!(
+            "INSERT INTO decisions({COLS}) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"
+        ),
         params![
             decision.id.as_str(),
             decision.plan_id.as_str(),
@@ -67,6 +95,10 @@ pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
             decision.proposal_id.as_ref().map(|i| i.as_str().to_string()),
             decision.agent_name,
             decision.escalated_at.map(fmt_ts),
+            decision.produced_via_pattern_id,
+            decision.reversal_plan,
+            decision.blast_radius_score as i64,
+            decision.reversal_of.as_ref().map(|i| i.as_str().to_string()),
             fmt_ts(decision.created_at),
         ],
     )
@@ -221,6 +253,10 @@ mod tests {
             proposal_id: None,
             agent_name: None,
             escalated_at: None,
+            produced_via_pattern_id: None,
+            reversal_plan: None,
+            blast_radius_score: 5,
+            reversal_of: None,
             created_at: now(),
         }
     }
@@ -238,5 +274,55 @@ mod tests {
         assert_eq!(a2.status, DecisionStatus::Superseded);
         assert_eq!(b2.status, DecisionStatus::Accepted);
         assert_eq!(b2.supersedes_id.unwrap(), a.id);
+    }
+
+    #[test]
+    fn v05_columns_round_trip() {
+        let (pool, plan_id) = fixture();
+        let conn = pool.get().unwrap();
+        // Seed a pattern row so the FK on produced_via_pattern_id resolves.
+        let pat = crate::repo::pattern::PatternRow {
+            id: format!("CP-{}", ulid::Ulid::new()),
+            short_code: "CP-dec-rt".into(),
+            plan_id: plan_id.as_str().into(),
+            kind: "direct".into(),
+            applies_to: "decision".into(),
+            scope_id: plan_id.as_str().into(),
+            parent_pattern_id: None,
+            depth: 0,
+            lifecycle: "pending".into(),
+            steps_json: None,
+            reviewers_json: None,
+            fan_out_json: None,
+            peer_registration_json: None,
+            decided_at: None,
+            decided_reason: None,
+            created_at: now(),
+            updated_at: now(),
+        };
+        crate::repo::pattern::insert(&conn, &pat).unwrap();
+        let mut d = mk(plan_id, None);
+        d.produced_via_pattern_id = Some(pat.id.clone());
+        d.reversal_plan = Some(r#"{"type":"git_revert","sha":"abc123"}"#.into());
+        d.blast_radius_score = 3;
+        insert(&conn, &d).unwrap();
+        let fetched = get(&conn, &d.id).unwrap();
+        assert_eq!(fetched.produced_via_pattern_id.as_deref(), Some(pat.id.as_str()));
+        assert_eq!(
+            fetched.reversal_plan.as_deref(),
+            Some(r#"{"type":"git_revert","sha":"abc123"}"#)
+        );
+        assert_eq!(fetched.blast_radius_score, 3);
+        assert!(fetched.reversal_of.is_none());
+    }
+
+    #[test]
+    fn out_of_range_blast_radius_rejected_at_insert() {
+        let (pool, plan_id) = fixture();
+        let conn = pool.get().unwrap();
+        let mut d = mk(plan_id, None);
+        d.blast_radius_score = 11;
+        let err = insert(&conn, &d).unwrap_err();
+        assert!(matches!(err, DomainError::Validation(_)));
     }
 }
