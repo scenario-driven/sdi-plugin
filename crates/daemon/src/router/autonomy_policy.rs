@@ -1,6 +1,9 @@
 //! `/autonomy_policies` router. D14 entity; D17 forced-L4 invariants are
-//! enforced inside the repo's `upsert`. Emits `autonomy.changed` on every
-//! mutation and `circuit_breaker.triggered` for the D18 panic switch.
+//! enforced inside the repo's `upsert`. v0.5 (D24/D25/D28/D29) added the
+//! pattern_kind scope, l5_threshold, pattern_depth_cap,
+//! plan_single_session_lock, external_surface, timeout_ms, forced columns.
+//! Emits `autonomy.changed` on every mutation and `circuit_breaker.triggered`
+//! for the D18 panic switch.
 
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
@@ -32,7 +35,28 @@ struct UpsertBody {
     scope_kind: String,
     #[serde(default)]
     decision_kind: Option<String>,
+    /// D25 — required when scope_kind = pattern_kind.
+    #[serde(default)]
+    pattern_kind: Option<String>,
     mode: String,
+    /// D28 — L5 unlock threshold (0..=10); defaults to 5.
+    #[serde(default)]
+    l5_threshold: Option<i32>,
+    /// D24 — pattern DAG depth cap (1..=10); defaults to 3.
+    #[serde(default)]
+    pattern_depth_cap: Option<i32>,
+    /// D29 — single-session lock on the plan's active scenarios.
+    #[serde(default)]
+    plan_single_session_lock: Option<bool>,
+    /// D17 — marks plans with external (publish/deploy/API) surface.
+    #[serde(default)]
+    external_surface: Option<bool>,
+    /// L4 timed-gate auto-apply delay in milliseconds.
+    #[serde(default)]
+    timeout_ms: Option<i64>,
+    /// D17 — true when this row was set by a forced-L4 invariant.
+    #[serde(default)]
+    forced: Option<bool>,
     #[serde(default = "default_actor")]
     set_by: String,
     #[serde(default)]
@@ -55,7 +79,14 @@ async fn upsert(
         plan_id: b.plan_id.map(Id::from),
         scope_kind,
         decision_kind: b.decision_kind,
+        pattern_kind: b.pattern_kind.clone(),
         mode,
+        l5_threshold: b.l5_threshold.unwrap_or(5),
+        pattern_depth_cap: b.pattern_depth_cap.unwrap_or(3),
+        plan_single_session_lock: b.plan_single_session_lock.unwrap_or(false),
+        external_surface: b.external_surface.unwrap_or(false),
+        timeout_ms: b.timeout_ms,
+        forced: b.forced.unwrap_or(false),
         set_at: now(),
         set_by: b.set_by,
         reason: b.reason,
@@ -69,6 +100,7 @@ async fn upsert(
         &policy.project_id,
         policy.plan_id.as_ref(),
         policy.decision_kind.as_deref(),
+        policy.pattern_kind.as_deref(),
     )?;
     state.publish(EventEnvelope {
         kind: "autonomy.changed".into(),
@@ -99,6 +131,9 @@ struct ResolveQuery {
     plan_id: Option<String>,
     #[serde(default)]
     decision_kind: Option<String>,
+    /// D25 — let callers resolve a pattern-kind-scoped policy directly.
+    #[serde(default)]
+    pattern_kind: Option<String>,
 }
 
 async fn resolve(
@@ -112,6 +147,7 @@ async fn resolve(
         &Id::from(q.project_id),
         plan_id.as_ref(),
         q.decision_kind.as_deref(),
+        q.pattern_kind.as_deref(),
     )?;
     Ok(Json(json!({ "policy": policy })))
 }
