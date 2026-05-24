@@ -1,0 +1,242 @@
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag to (re)build, e.g. v0.1.0 — must already exist'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            archive_ext: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            archive_ext: tar.gz
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive_ext: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive_ext: tar.gz
+            cross: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: install cross compiler (aarch64-linux)
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p .cargo
+          cat >> .cargo/config.toml <<'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: build sdi + sdid
+        run: |
+          cargo build --release --target ${{ matrix.target }} -p sdi-cli -p sdi-daemon
+
+      - name: package
+        id: pkg
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          DIR="sdi-${TAG}-${{ matrix.target }}"
+          mkdir -p "dist-stage/${DIR}"
+          cp "target/${{ matrix.target }}/release/sdi"  "dist-stage/${DIR}/sdi"
+          cp "target/${{ matrix.target }}/release/sdid" "dist-stage/${DIR}/sdid"
+          ( cd dist-stage && tar -czf "${DIR}.tar.gz" "${DIR}" )
+          ( cd dist-stage && shasum -a 256 "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256" )
+          echo "archive=dist-stage/${DIR}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "sha=dist-stage/${DIR}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+          echo "target=${{ matrix.target }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdi-${{ matrix.target }}
+          path: |
+            ${{ steps.pkg.outputs.archive }}
+            ${{ steps.pkg.outputs.sha }}
+          if-no-files-found: error
+
+  release:
+    name: github release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: sdi-*
+          merge-multiple: true
+
+      - name: create / update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/*.tar.gz artifacts/*.sha256 --clobber
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes \
+              artifacts/*.tar.gz artifacts/*.sha256
+          fi
+
+  dist-branch:
+    name: publish dist branch
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: sdi-*
+          merge-multiple: true
+
+      - name: setup node + pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: install pnpm
+        run: npm install -g pnpm@9
+      - name: build sdi-web SPA
+        run: |
+          pnpm --dir plugin/web install --frozen-lockfile
+          pnpm --dir plugin/web build
+
+      - name: stage dist tree
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p stage/plugin/bin stage/plugin/daemon/bin
+          # Extract per-target binaries into platform-suffixed names so the
+          # install gate can pick the right one. The runtime selector in
+          # plugin/adapters/shared/sdi-hooks.cjs:resolveSdiBin will use
+          # plugin/bin/sdi (a wrapper) which dispatches by uname.
+          for archive in artifacts/sdi-${TAG}-*.tar.gz; do
+            base="$(basename "$archive" .tar.gz)"
+            target="${base#sdi-${TAG}-}"
+            tmp="$(mktemp -d)"
+            tar -xzf "$archive" -C "$tmp"
+            cp "$tmp/$base/sdi"  "stage/plugin/bin/sdi-$target"
+            cp "$tmp/$base/sdid" "stage/plugin/daemon/bin/sdid-$target"
+          done
+          # Platform dispatcher (shell script). resolveSdiBin checks
+          # plugin/bin/sdi; this trampoline picks the right per-target binary.
+          cat > stage/plugin/bin/sdi <<'EOSH'
+          #!/bin/sh
+          # SDI install gate trampoline. Picks the per-target binary built by
+          # release.yml. Resolved suffix matches Rust target triples.
+          set -e
+          dir="$(cd "$(dirname "$0")" && pwd)"
+          os="$(uname -s)"
+          arch="$(uname -m)"
+          case "$os/$arch" in
+            Darwin/x86_64)  triple=x86_64-apple-darwin ;;
+            Darwin/arm64)   triple=aarch64-apple-darwin ;;
+            Linux/x86_64)   triple=x86_64-unknown-linux-gnu ;;
+            Linux/aarch64)  triple=aarch64-unknown-linux-gnu ;;
+            *) echo "[sdi] unsupported platform: $os/$arch" >&2; exit 78 ;;
+          esac
+          exec "$dir/sdi-$triple" "$@"
+          EOSH
+          chmod +x stage/plugin/bin/sdi
+          cat > stage/plugin/daemon/bin/sdid <<'EOSH'
+          #!/bin/sh
+          set -e
+          dir="$(cd "$(dirname "$0")" && pwd)"
+          os="$(uname -s)"
+          arch="$(uname -m)"
+          case "$os/$arch" in
+            Darwin/x86_64)  triple=x86_64-apple-darwin ;;
+            Darwin/arm64)   triple=aarch64-apple-darwin ;;
+            Linux/x86_64)   triple=x86_64-unknown-linux-gnu ;;
+            Linux/aarch64)  triple=aarch64-unknown-linux-gnu ;;
+            *) echo "[sdi] unsupported platform: $os/$arch" >&2; exit 78 ;;
+          esac
+          exec "$dir/sdid-$triple" "$@"
+          EOSH
+          chmod +x stage/plugin/daemon/bin/sdid
+
+      - name: assemble dist tree (source + binaries + web)
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          # dist branch carries the full plugin shell so Claude Code's
+          # marketplace cache resolves hooks, commands, skills, agents from
+          # the same checkout that holds the binaries. The exclude patterns
+          # are relative to the rsync source (plugin/), so `bin/` / `daemon/bin/`
+          # (binaries come from artifacts) and `web/node_modules/` (rebuilt on
+          # demand; multi-hundred-MB) are kept out. `web/dist/` IS included —
+          # that's the built SPA the daemon serves via tower-http ServeDir.
+          rsync -a \
+            --exclude='bin/' \
+            --exclude='daemon/bin/' \
+            --exclude='web/node_modules/' \
+            --exclude='web/*.tsbuildinfo' \
+            --exclude='web/.vite/' \
+            plugin/ stage/plugin/
+          cp -R .claude-plugin stage/.claude-plugin
+          cp README.md LICENSE stage/ 2>/dev/null || true
+          # Record exactly which tag this dist tree corresponds to.
+          echo "$TAG" > stage/plugin/.sdi-version
+
+      - name: push to dist branch
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Create or reset dist branch as an orphan — dist carries only the
+          # latest release tree, no source history. Per-version archaeology
+          # is in GitHub Releases + the source tag on main.
+          git checkout --orphan dist-stage
+          git rm -rf . >/dev/null 2>&1 || true
+          # Copy staged tree in
+          cp -R stage/. .
+          rm -rf stage artifacts
+          git add -A
+          git commit -m "release ${TAG}: built binaries + plugin shell"
+          # Force-push to dist (orphan branch always replaces). Tag dist
+          # mirror with the same tag suffixed -dist for symmetry.
+          git push origin "HEAD:refs/heads/dist" --force
+          git tag "${TAG}-dist"
+          git push origin "${TAG}-dist"
