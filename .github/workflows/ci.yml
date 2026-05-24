@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: rust + hooks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --no-fail-fast
+      # Hook integration tests depend on target/debug/sdi + sdid that the
+      # rust matrix just built; running them here keeps the binaries in the
+      # same workspace and avoids a redundant rebuild on a separate runner.
+      - name: build debug binaries for hook tests
+        run: cargo build --workspace
+      - name: hook syntax check
+        run: node --check plugin/adapters/shared/sdi-hooks.cjs
+      - name: hook tests
+        run: |
+          if [ -d plugin/tests ] && ls plugin/tests/*.test.cjs >/dev/null 2>&1; then
+            node --test plugin/tests/
+          else
+            echo "no plugin/tests/*.test.cjs yet — skipping"
+          fi
