@@ -181,6 +181,42 @@ function resolveSdidBin(root, sdiBin) {
   return null;
 }
 
+// Locate the sdi-web SPA bundle for the active install layout.
+//
+// Returns one of:
+//   { state: 'ready',     dist: '<abs path to dist/>' }   // built bundle present
+//   { state: 'buildable', source: '<abs path to web/>' }  // source present, dist missing
+//   { state: 'absent' }                                   // no web/ tree shipped
+//
+// Lookup order (matches the daemon's `locate_web_bundle` in crates/daemon/src/router/mod.rs):
+//   1. SDI_WEB_DIST env override
+//   2. <pluginRoot>/web/dist (release bundle)
+//   3. <workspace>/plugin/web/dist (dev mode)
+function resolveWebDist(root) {
+  const candidates = [];
+  if (process.env.SDI_WEB_DIST) candidates.push(process.env.SDI_WEB_DIST);
+  candidates.push(path.join(root, 'web', 'dist'));
+  const ws = findWorkspaceRoot(root);
+  if (ws) candidates.push(path.join(ws, 'plugin', 'web', 'dist'));
+
+  for (const c of candidates) {
+    const idx = path.join(c, 'index.html');
+    if (fs.existsSync(idx)) return { state: 'ready', dist: c };
+  }
+
+  // dist absent — is the source tree present? Caller decides whether to nag.
+  const sourceCandidates = [
+    path.join(root, 'web'),
+    ws ? path.join(ws, 'plugin', 'web') : null,
+  ].filter(Boolean);
+  for (const c of sourceCandidates) {
+    if (fs.existsSync(path.join(c, 'package.json'))) {
+      return { state: 'buildable', source: c };
+    }
+  }
+  return { state: 'absent' };
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Install gate
 //
@@ -275,6 +311,13 @@ async function spawnDaemon(sdidBin) {
     // Detached spawn; daemon will write its own pid/port file under XDG cache.
     fs.mkdirSync(path.dirname(pf), { recursive: true });
     const env = { ...process.env };
+    // Hand the daemon a concrete SPA path so its ServeDir resolves the same
+    // bundle the install gate is advertising. SDI_WEB_DISABLE=1 forces the
+    // daemon to fall back to its built-in 404 (matches the user's opt-out).
+    if (!env.SDI_WEB_DIST && env.SDI_WEB_DISABLE !== '1') {
+      const web = resolveWebDist(pluginRoot());
+      if (web.state === 'ready') env.SDI_WEB_DIST = web.dist;
+    }
     const child = spawn(sdidBin, [], { stdio: 'ignore', detached: true, env });
     child.unref();
   } catch (err) {
@@ -497,6 +540,16 @@ function isReadOnlyBash(cmd) {
   if (verb === 'node') {
     return /^(--version|-v)$/.test(tokens[1] || '');
   }
+  // SDI's own management CLI (sdi / sdid) is exempt from D21 unconditionally.
+  // D21's purpose is to force coding/file-mutation work onto specialist
+  // sub-agents; SDI CLI invocations are workflow management against SDI's own
+  // SQLite (scenarios, plans, rounds, daemon control) — orthogonal to the
+  // delegation gate. Subcommand-level safety for destructive operations
+  // (e.g. `sdi project delete`) belongs in the daemon's confirmation prompt,
+  // not in this verb whitelist. Without this exemption the main session
+  // cannot bootstrap any workflow (the very first `sdi plan create` would
+  // be blocked), which is the bootstrap deadlock the v0.5 cleanup is fixing.
+  if (verb === 'sdi' || verb === 'sdid') return true;
   return /^(ls|cat|head|tail|grep|rg|wc|file|which|pwd|echo|stat|env|printenv|date|uname|hostname|whoami|tree)$/.test(
     verb,
   );
@@ -727,7 +780,24 @@ async function runSessionStart(input) {
       }
     }
   }
-  appendHookLog('session_start', { cwd, project_id: project && project.id });
+  // Dashboard SPA advisory — single line, opt-out via SDI_WEB_DISABLE=1.
+  // Daemon-owned SPA at <port>/. Status mirrors the daemon's own resolver.
+  if (process.env.SDI_WEB_DISABLE !== '1') {
+    const web = resolveWebDist(root);
+    if (web.state === 'ready') {
+      const port = readDaemonPort();
+      const url = port ? `http://127.0.0.1:${port}/` : '(daemon port unknown)';
+      banner += `dashboard: ready at ${url}\n`;
+    } else if (web.state === 'buildable') {
+      banner += `dashboard: not built. Build once: \`pnpm --dir ${web.source} install && pnpm --dir ${web.source} build\` (or set SDI_WEB_DISABLE=1 to silence).\n`;
+    }
+    // state === 'absent' → no line; bundle simply not shipped.
+  }
+  appendHookLog('session_start', {
+    cwd,
+    project_id: project && project.id,
+    web_state: process.env.SDI_WEB_DISABLE === '1' ? 'disabled' : resolveWebDist(root).state,
+  });
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: banner },
@@ -784,6 +854,19 @@ async function runPreToolUse(input) {
   const toolName = (input && input.tool_name) || '';
   const watched = /^(Edit|Write|MultiEdit|Bash|NotebookEdit|Agent|Task|TeamCreate|SendMessage)$/.test(toolName);
   if (!watched) return;
+
+  // Project scope gate. SDI hooks only enforce gates inside cwds that resolve
+  // to a registered SDI project. When the daemon is unreachable or the cwd is
+  // not registered, projectByCwd returns null and every downstream gate is
+  // skipped — matching Clawket's allow-on-`isProjectDisabled`/missing-context
+  // pattern (claude-hooks.cjs:2074-2077) so the hook never bleeds onto repos
+  // SDI does not own.
+  const cwd = (input && input.cwd) || process.cwd();
+  const project = await projectByCwd(cwd).catch(() => null);
+  if (!project) {
+    appendHookLog('pre_tool_use_skip', { tool: toolName, reason: 'cwd-not-in-sdi-project' });
+    return;
+  }
 
   // D21 — delegation gate.
   const agentId = (input && input.agent_id) || null;
@@ -861,8 +944,14 @@ async function runPreToolUse(input) {
     await patternShapeAdvisory(toolName, (input && input.tool_input) || {}).catch(() => {});
   }
 
+  // Active-task gate. Only direct file-mutation tools require an active task —
+  // Bash / Agent / Task / TeamCreate / SendMessage are bootstrap-capable
+  // (creating the first plan, registering specialists, spawning the first
+  // session) and have their own enforcement through D21 + D26 + D29. Without
+  // this narrowing, a fresh project deadlocks: making the first task requires
+  // a task to already be in_progress.
   const activeTaskId = readActiveTaskHint();
-  if (!activeTaskId) {
+  if (!activeTaskId && isExecutionTool(toolName)) {
     emitDeny(
       `[sdi] no active task — set one before mutating files. ` +
         `Run \`sdi task list\` and \`sdi task update <TASK-ID> --status in_progress\`, ` +
@@ -905,13 +994,12 @@ async function runPreToolUse(input) {
     }
   }
 
-  // Autonomy gate. Best-effort: if the daemon can't resolve a policy (no
-  // project, no active plan, no policy rows yet) we silently allow — the
-  // gate exists to *raise* friction, never to invent it.
-  const cwd = (input && input.cwd) || process.cwd();
-  const project = await projectByCwd(cwd).catch(() => null);
-  const plan = project ? await activePlanForProject(project.id).catch(() => null) : null;
-  if (project && plan) {
+  // Autonomy gate. Best-effort: if the daemon can't resolve an active plan or
+  // policy rows yet, we silently allow — the gate exists to *raise* friction,
+  // never to invent it. The project was already resolved by the entry-level
+  // scope gate above; reuse it instead of round-tripping the daemon twice.
+  const plan = await activePlanForProject(project.id).catch(() => null);
+  if (plan) {
     const resolved = await getJson(
       `/autonomy_policies/resolve?project_id=${encodeURIComponent(project.id)}` +
         `&plan_id=${encodeURIComponent(plan.id)}`,
@@ -1060,6 +1148,7 @@ module.exports = {
   _internals: {
     resolveSdiBin,
     resolveSdidBin,
+    resolveWebDist,
     findWorkspaceRoot,
     verifySdiSkills,
     daemonBase,
