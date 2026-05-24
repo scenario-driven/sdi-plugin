@@ -218,6 +218,14 @@ jobs:
           cp README.md LICENSE stage/ 2>/dev/null || true
           # Record exactly which tag this dist tree corresponds to.
           echo "$TAG" > stage/plugin/.sdi-version
+          # dist branch is a pure artifact tree. Source-tree .gitignore rules
+          # (notably plugin/web/.gitignore which excludes dist/) would cause
+          # `git add -A` below to drop the built SPA. Strip them.
+          find stage -name '.gitignore' -type f -delete
+          # Sanity: built SPA must be present after this step.
+          test -f stage/plugin/web/dist/index.html
+          test -x stage/plugin/bin/sdi
+          test -x stage/plugin/daemon/bin/sdid
 
       - name: push to dist branch
         env:
@@ -238,5 +246,6 @@ jobs:
           # Force-push to dist (orphan branch always replaces). Tag dist
           # mirror with the same tag suffixed -dist for symmetry.
           git push origin "HEAD:refs/heads/dist" --force
-          git tag "${TAG}-dist"
-          git push origin "${TAG}-dist"
+          # Idempotent: workflow_dispatch reruns must overwrite the dist tag.
+          git tag -f "${TAG}-dist"
+          git push origin "${TAG}-dist" --force
