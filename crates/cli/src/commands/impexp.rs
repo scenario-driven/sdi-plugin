@@ -1,8 +1,6 @@
 //! `sdi export | import` — JSON round-trip for plan + knowledge bundles.
 
-use crate::cli::{
-    ExportCmd, ExportKnowledgeArgs, ImportCmd, ImportKnowledgeArgs, ImportPlansArgs,
-};
+use crate::cli::{ExportCmd, ExportKnowledgeArgs, ImportCmd, ImportKnowledgeArgs, ImportPlansArgs};
 use crate::http::Client;
 use crate::output::emit;
 use anyhow::{Context, Result};

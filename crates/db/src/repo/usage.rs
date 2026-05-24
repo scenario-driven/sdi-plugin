@@ -163,10 +163,9 @@ pub fn preflight_avg_for_tier(
         )
         .map_err(map_sqlite_err)?;
     let v: Option<f64> = stmt
-        .query_row(
-            params![project_id.as_str(), tier.to_string()],
-            |row| row.get(0),
-        )
+        .query_row(params![project_id.as_str(), tier.to_string()], |row| {
+            row.get(0)
+        })
         .map_err(map_sqlite_err)?;
     Ok(v)
 }

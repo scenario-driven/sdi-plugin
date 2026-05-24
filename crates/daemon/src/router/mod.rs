@@ -8,21 +8,21 @@ use serde_json::json;
 use std::path::PathBuf;
 use tower_http::services::{ServeDir, ServeFile};
 
-pub mod project;
-pub mod plan;
-pub mod requirement;
-pub mod scenario;
-pub mod round;
-pub mod task;
-pub mod knowledge;
-pub mod decision;
-pub mod disruption;
-pub mod collab;
-pub mod run;
+pub mod agent_note;
 pub mod aggregate;
 pub mod autonomy_policy;
-pub mod agent_note;
+pub mod collab;
+pub mod decision;
+pub mod disruption;
+pub mod knowledge;
 pub mod pattern;
+pub mod plan;
+pub mod project;
+pub mod requirement;
+pub mod round;
+pub mod run;
+pub mod scenario;
+pub mod task;
 
 pub fn build(state: AppState) -> Router {
     let api = Router::new()

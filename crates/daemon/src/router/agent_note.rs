@@ -93,10 +93,7 @@ struct ListQuery {
     kind: Option<String>,
 }
 
-async fn list(
-    State(state): State<AppState>,
-    Query(q): Query<ListQuery>,
-) -> ApiResult<Json<Value>> {
+async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>) -> ApiResult<Json<Value>> {
     let scope = AgentNoteScope::from_str(&q.scope_kind)?;
     let kind = q.kind.as_deref().map(AgentNoteKind::from_str).transpose()?;
     let conn = state.conn()?;
@@ -118,10 +115,7 @@ async fn list_handoffs(
     Ok(Json(json!({ "notes": rows })))
 }
 
-async fn ack(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn ack(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let nid = Id::from(id);
     repo::ack_handoff(&conn, &nid)?;

@@ -31,7 +31,9 @@ impl FromStr for DecisionStatus {
             "proposed" => Ok(DecisionStatus::Proposed),
             "accepted" => Ok(DecisionStatus::Accepted),
             "superseded" => Ok(DecisionStatus::Superseded),
-            other => Err(DomainError::Validation(format!("unknown decision status: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown decision status: {other}"
+            ))),
         }
     }
 }
@@ -184,9 +186,8 @@ mod tests {
 
     #[test]
     fn proposal_must_not_have_proposal_id() {
-        let err =
-            Decision::validate_stage_transition(DecisionKind::Proposal, &[], Some(&pid()))
-                .unwrap_err();
+        let err = Decision::validate_stage_transition(DecisionKind::Proposal, &[], Some(&pid()))
+            .unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
     }
 
@@ -199,9 +200,8 @@ mod tests {
 
     #[test]
     fn consensus_blocked_without_critique() {
-        let err =
-            Decision::validate_stage_transition(DecisionKind::Consensus, &[], Some(&pid()))
-                .unwrap_err();
+        let err = Decision::validate_stage_transition(DecisionKind::Consensus, &[], Some(&pid()))
+            .unwrap_err();
         assert!(matches!(err, DomainError::ConsensusMissingCritique { .. }));
     }
 

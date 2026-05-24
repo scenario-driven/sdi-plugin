@@ -91,7 +91,9 @@ async fn dispatch(method: &str, params: Value, id: Value, registry: &Registry) -
             serde_json::to_value(InitializeResult {
                 protocol_version: PROTOCOL_VERSION,
                 capabilities: Capabilities {
-                    tools: ToolsCapability { list_changed: false },
+                    tools: ToolsCapability {
+                        list_changed: false,
+                    },
                 },
                 server_info: ServerInfo {
                     name: "sdi-mcp",
@@ -111,11 +113,7 @@ async fn dispatch(method: &str, params: Value, id: Value, registry: &Registry) -
             let name = match params.get("name").and_then(|v| v.as_str()) {
                 Some(n) => n,
                 None => {
-                    return Response::err(
-                        id,
-                        codes::INVALID_PARAMS,
-                        "tools/call requires `name`",
-                    );
+                    return Response::err(id, codes::INVALID_PARAMS, "tools/call requires `name`");
                 }
             };
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
@@ -136,9 +134,7 @@ async fn dispatch(method: &str, params: Value, id: Value, registry: &Registry) -
         // `initialized` is a notification — should never reach here because
         // notifications drop in `handle_line`. Defensive arm for the case
         // where a buggy client sends it with an id.
-        "initialized" | "notifications/initialized" => {
-            Response::ok(id, json!({}))
-        }
+        "initialized" | "notifications/initialized" => Response::ok(id, json!({})),
         other => Response::err(
             id,
             codes::METHOD_NOT_FOUND,

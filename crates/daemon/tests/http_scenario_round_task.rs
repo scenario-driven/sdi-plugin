@@ -985,7 +985,11 @@ async fn carry_over_excludes_unevaluated_scenarios_prd_6_3() {
         .await
         .unwrap();
     let arr = results["results"].as_array().unwrap();
-    assert_eq!(arr.len(), 1, "R2 must contain exactly SCN-A; SCN-B unevaluated");
+    assert_eq!(
+        arr.len(),
+        1,
+        "R2 must contain exactly SCN-A; SCN-B unevaluated"
+    );
     assert_eq!(arr[0]["scenario_id"], scn_a_id);
     assert!(
         arr.iter().all(|r| r["scenario_id"] != scn_b_id),

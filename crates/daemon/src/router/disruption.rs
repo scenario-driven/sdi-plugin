@@ -24,10 +24,7 @@ pub fn router() -> Router<AppState> {
         .route("/disruption-reviews", post(create))
         .route("/disruption-reviews/:id", get(get_one))
         .route("/disruption-reviews/:id/resolve", post(resolve))
-        .route(
-            "/plans/:plan_id/disruption-reviews",
-            get(list_for_plan),
-        )
+        .route("/plans/:plan_id/disruption-reviews", get(list_for_plan))
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,11 +47,7 @@ async fn create(
         plan_id: Id::from(b.plan_id),
         source_kind,
         source_id: Id::from(b.source_id),
-        impacted_scenario_ids: b
-            .impacted_scenario_ids
-            .into_iter()
-            .map(Id::from)
-            .collect(),
+        impacted_scenario_ids: b.impacted_scenario_ids.into_iter().map(Id::from).collect(),
         status: DisruptionReviewStatus::Pending,
         resolution: None,
         note: b.note,
@@ -72,10 +65,7 @@ async fn create(
     Ok(Json(json!(fresh)))
 }
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn get_one(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     Ok(Json(json!(repo::get(&conn, &Id::from(id))?)))
 }

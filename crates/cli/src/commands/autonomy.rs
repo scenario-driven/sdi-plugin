@@ -2,9 +2,7 @@
 //! `/autonomy_policies` surface so the L3/L4/L5 invariants stay enforced in
 //! one place (the repo's `upsert` rejects L5 on forced-L4 decision kinds).
 
-use crate::cli::{
-    AutonomyCircuitBreakerArgs, AutonomyCmd, AutonomyGetArgs, AutonomySetArgs,
-};
+use crate::cli::{AutonomyCircuitBreakerArgs, AutonomyCmd, AutonomyGetArgs, AutonomySetArgs};
 use crate::http::Client;
 use crate::output::emit;
 use anyhow::Result;

@@ -108,18 +108,12 @@ async fn list(
     Ok(Json(json!({ "rounds": rows })))
 }
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn get_one(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     Ok(Json(json!(repo::get(&conn, &Id::from(id))?)))
 }
 
-async fn activate(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn activate(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let rid = Id::from(id);
     let round = repo::get(&conn, &rid)?;
@@ -204,16 +198,19 @@ async fn activate(
     Ok(Json(payload))
 }
 
-async fn complete(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn complete(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let rid = Id::from(id);
     let round = repo::get(&conn, &rid)?;
     round.check_can_complete()?;
     let completed_at = now();
-    repo::set_status(&conn, &rid, RoundStatus::Completed, None, Some(completed_at))?;
+    repo::set_status(
+        &conn,
+        &rid,
+        RoundStatus::Completed,
+        None,
+        Some(completed_at),
+    )?;
     let fresh = repo::get(&conn, &rid)?;
     state.publish(EventEnvelope {
         kind: "round.completed".into(),

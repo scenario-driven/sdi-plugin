@@ -144,9 +144,7 @@ impl AgentNote {
 
     /// M2 — `kind=handoff` requires a `to_agent`. Mirrors SQL CHECK.
     pub fn validate_handoff(kind: AgentNoteKind, to_agent: Option<&str>) -> DomainResult<()> {
-        if matches!(kind, AgentNoteKind::Handoff)
-            && to_agent.map(str::is_empty).unwrap_or(true)
-        {
+        if matches!(kind, AgentNoteKind::Handoff) && to_agent.map(str::is_empty).unwrap_or(true) {
             return Err(DomainError::Validation(
                 "handoff note requires non-empty to_agent".into(),
             ));
@@ -171,8 +169,8 @@ mod tests {
 
     #[test]
     fn anchor_requires_exactly_one_id() {
-        let err = AgentNote::validate_anchor(AgentNoteScope::Plan, None, None, None, None)
-            .unwrap_err();
+        let err =
+            AgentNote::validate_anchor(AgentNoteScope::Plan, None, None, None, None).unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
         let err = AgentNote::validate_anchor(
             AgentNoteScope::Plan,

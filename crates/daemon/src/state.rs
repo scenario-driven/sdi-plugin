@@ -5,7 +5,7 @@
 //! - a tokio broadcast sender so handlers can publish events to SSE subscribers
 //! - the resolved [`Paths`] so handlers can find sockets / port files / log files
 
-use sdi_db::{Pool, Paths};
+use sdi_db::{Paths, Pool};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -28,7 +28,11 @@ impl AppState {
     pub fn new(pool: Pool, paths: Arc<Paths>) -> Self {
         // Capacity big enough to absorb a burst from a CLI script.
         let (tx, _rx) = broadcast::channel(256);
-        Self { pool, paths, events: tx }
+        Self {
+            pool,
+            paths,
+            events: tx,
+        }
     }
 
     /// Best-effort publish: subscribers may be 0 (no-op) or lagging (dropped).

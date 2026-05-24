@@ -44,11 +44,24 @@ pub fn validate_snapshot_body(body: &str) -> DomainResult<()> {
     }
 
     let inline_version_markers = [
-        "v1:", "v2:", "v3:", "v4:", "v5:",
-        "version 1:", "version 2:", "version 3:",
-        "(was:", "(was ", "(originally:", "(originally ",
-        "(formerly:", "(formerly ",
-        "(원래:", "(원래 ", "(기존:", "(기존 ",
+        "v1:",
+        "v2:",
+        "v3:",
+        "v4:",
+        "v5:",
+        "version 1:",
+        "version 2:",
+        "version 3:",
+        "(was:",
+        "(was ",
+        "(originally:",
+        "(originally ",
+        "(formerly:",
+        "(formerly ",
+        "(원래:",
+        "(원래 ",
+        "(기존:",
+        "(기존 ",
     ];
     for needle in inline_version_markers {
         if lower.contains(needle) {

@@ -107,7 +107,11 @@ pub fn list_active(
                    AND kind = ?3 \
                  ORDER BY created_at"
             ),
-            vec![scope.to_string(), anchor_id.as_str().to_string(), k.to_string()],
+            vec![
+                scope.to_string(),
+                anchor_id.as_str().to_string(),
+                k.to_string(),
+            ],
         ),
         None => (
             format!(
@@ -119,7 +123,8 @@ pub fn list_active(
         ),
     };
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
-    let arg_refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
+    let arg_refs: Vec<&dyn rusqlite::ToSql> =
+        args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
     let rows = stmt
         .query_map(arg_refs.as_slice(), row_to_note)
         .map_err(map_sqlite_err)?;
@@ -273,14 +278,23 @@ mod tests {
     fn retire_excludes_from_active_list() {
         let (pool, project_id, plan_id) = fixture();
         let conn = pool.get().unwrap();
-        let note = mk_plan_note(project_id, plan_id.clone(), AgentNoteKind::Observation, None);
+        let note = mk_plan_note(
+            project_id,
+            plan_id.clone(),
+            AgentNoteKind::Observation,
+            None,
+        );
         insert(&conn, &note).unwrap();
         assert_eq!(
-            list_active(&conn, AgentNoteScope::Plan, &plan_id, None).unwrap().len(),
+            list_active(&conn, AgentNoteScope::Plan, &plan_id, None)
+                .unwrap()
+                .len(),
             1
         );
         retire(&conn, &note.id, "noise").unwrap();
-        assert!(list_active(&conn, AgentNoteScope::Plan, &plan_id, None).unwrap().is_empty());
+        assert!(list_active(&conn, AgentNoteScope::Plan, &plan_id, None)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

@@ -113,10 +113,7 @@ pub fn upsert(conn: &Connection, policy: &AutonomyPolicy) -> DomainResult<()> {
     Ok(())
 }
 
-pub fn list_by_project(
-    conn: &Connection,
-    project_id: &Id,
-) -> DomainResult<Vec<AutonomyPolicy>> {
+pub fn list_by_project(conn: &Connection, project_id: &Id) -> DomainResult<Vec<AutonomyPolicy>> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {COLS} FROM autonomy_policies WHERE project_id = ?1 \
@@ -181,7 +178,14 @@ pub fn resolve(
             return Ok(Some(p));
         }
     }
-    scope_lookup(conn, project_id, AutonomyScopeKind::Global, None, None, None)
+    scope_lookup(
+        conn,
+        project_id,
+        AutonomyScopeKind::Global,
+        None,
+        None,
+        None,
+    )
 }
 
 fn scope_lookup(
@@ -235,7 +239,9 @@ pub fn circuit_breaker(
         params![now_s, actor, reason, project_id.as_str()],
     )
     .map_err(|e| match e {
-        rusqlite::Error::SqliteFailure(_, _) => DomainError::Validation(format!("circuit_breaker: {e}")),
+        rusqlite::Error::SqliteFailure(_, _) => {
+            DomainError::Validation(format!("circuit_breaker: {e}"))
+        }
         other => map_sqlite_err(other),
     })
 }
@@ -310,7 +316,9 @@ mod tests {
         let (pool, project_id) = fixture();
         let conn = pool.get().unwrap();
         upsert(&conn, &mk_global(project_id.clone(), AutonomyMode::L5)).unwrap();
-        let p = resolve(&conn, &project_id, None, None, None).unwrap().unwrap();
+        let p = resolve(&conn, &project_id, None, None, None)
+            .unwrap()
+            .unwrap();
         assert_eq!(p.mode, AutonomyMode::L5);
     }
 
@@ -321,7 +329,9 @@ mod tests {
         upsert(&conn, &mk_global(project_id.clone(), AutonomyMode::L5)).unwrap();
         let n = circuit_breaker(&conn, &project_id, "user", "panic", now()).unwrap();
         assert_eq!(n, 1);
-        let p = resolve(&conn, &project_id, None, None, None).unwrap().unwrap();
+        let p = resolve(&conn, &project_id, None, None, None)
+            .unwrap()
+            .unwrap();
         assert_eq!(p.mode, AutonomyMode::L3);
     }
 

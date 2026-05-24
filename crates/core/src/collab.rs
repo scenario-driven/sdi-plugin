@@ -57,12 +57,18 @@ impl Comment {
                 "comment must anchor on exactly one of plan|task|scenario|round (got {count})"
             )));
         }
-        Ok(match (self.plan_id.is_some(), self.task_id.is_some(), self.scenario_id.is_some()) {
-            (true, _, _) => CommentAnchor::Plan,
-            (_, true, _) => CommentAnchor::Task,
-            (_, _, true) => CommentAnchor::Scenario,
-            _ => CommentAnchor::Round,
-        })
+        Ok(
+            match (
+                self.plan_id.is_some(),
+                self.task_id.is_some(),
+                self.scenario_id.is_some(),
+            ) {
+                (true, _, _) => CommentAnchor::Plan,
+                (_, true, _) => CommentAnchor::Task,
+                (_, _, true) => CommentAnchor::Scenario,
+                _ => CommentAnchor::Round,
+            },
+        )
     }
 }
 
@@ -94,7 +100,9 @@ impl FromStr for QuestionStatus {
         match s {
             "open" => Ok(Self::Open),
             "answered" => Ok(Self::Answered),
-            other => Err(DomainError::Validation(format!("unknown question status: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown question status: {other}"
+            ))),
         }
     }
 }

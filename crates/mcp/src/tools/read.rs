@@ -58,8 +58,7 @@ impl Tool for SearchKnowledge {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "search_knowledge",
-            description:
-                "Full-text search across project knowledge artifacts. Returns only \
+            description: "Full-text search across project knowledge artifacts. Returns only \
                  scope=rag entries (reference and archive scopes are intentionally \
                  invisible to LLMs).",
             input_schema: json!({
@@ -109,8 +108,7 @@ impl Tool for SearchScenarios {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "search_scenarios",
-            description:
-                "FTS5 search over scenarios within one plan. Returns matches with \
+            description: "FTS5 search over scenarios within one plan. Returns matches with \
                  their Given/When/Then text and confirmation status.",
             input_schema: json!({
                 "type": "object",
@@ -158,8 +156,7 @@ impl Tool for GetPlanContext {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "get_plan_context",
-            description:
-                "Composite plan snapshot: plan metadata, all scenarios on the plan, \
+            description: "Composite plan snapshot: plan metadata, all scenarios on the plan, \
                  tasks currently in flight, and recent decisions. The shape an LLM \
                  needs to reason about a plan without issuing four calls.",
             input_schema: json!({
@@ -219,8 +216,7 @@ impl Tool for GetRecentDecisions {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "get_recent_decisions",
-            description:
-                "Append-only ADR log for a plan. Returns decisions ordered most-recent \
+            description: "Append-only ADR log for a plan. Returns decisions ordered most-recent \
                  first, including `superseded` status so the LLM sees the full chain.",
             input_schema: json!({
                 "type": "object",
@@ -264,8 +260,7 @@ impl Tool for GetAutonomyState {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "get_autonomy_state",
-            description:
-                "D14/D17 autonomy snapshot for a project: every policy row plus \
+            description: "D14/D17 autonomy snapshot for a project: every policy row plus \
                  the resolved effective policy at the caller-supplied scope. The \
                  resolve order is plan > decision_kind > global (PRD §3).",
             input_schema: json!({
@@ -322,8 +317,7 @@ impl Tool for ListAgentNotes {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "list_agent_notes",
-            description:
-                "M1 blackboard view. Either `to_agent` (pending hand-offs addressed \
+            description: "M1 blackboard view. Either `to_agent` (pending hand-offs addressed \
                  to that agent) or the pair `scope_kind` + `anchor_id` (active notes \
                  on a plan/round/scenario/task). Mutually exclusive.",
             input_schema: json!({

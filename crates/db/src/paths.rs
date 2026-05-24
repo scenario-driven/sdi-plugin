@@ -31,7 +31,9 @@ impl Paths {
             .map(PathBuf::from)
             .or_else(dirs::home_dir);
         let home = base.ok_or_else(|| {
-            DomainError::Validation("could not determine home directory (and SDI_HOME unset)".into())
+            DomainError::Validation(
+                "could not determine home directory (and SDI_HOME unset)".into(),
+            )
         })?;
 
         // Allow tests/sandboxes to plant XDG roots under a custom $SDI_HOME.
@@ -93,8 +95,12 @@ impl Paths {
 }
 
 fn starts_with_resolved(candidate: &Path, prefix: &Path) -> bool {
-    let cand = candidate.canonicalize().unwrap_or_else(|_| candidate.to_path_buf());
-    let pref = prefix.canonicalize().unwrap_or_else(|_| prefix.to_path_buf());
+    let cand = candidate
+        .canonicalize()
+        .unwrap_or_else(|_| candidate.to_path_buf());
+    let pref = prefix
+        .canonicalize()
+        .unwrap_or_else(|_| prefix.to_path_buf());
     cand.starts_with(pref)
 }
 

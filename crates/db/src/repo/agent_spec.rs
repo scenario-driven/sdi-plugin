@@ -137,17 +137,16 @@ pub fn list_all(conn: &Connection) -> DomainResult<Vec<AgentSpec>> {
 
 /// D26 — list distinct (name, stance) tuples for a single role. The daemon's
 /// graph consensus gate uses this to count sybil-resistant reviewers.
-pub fn list_stances_for_name(
-    conn: &Connection,
-    name: &str,
-) -> DomainResult<Vec<AgentSpec>> {
+pub fn list_stances_for_name(conn: &Connection, name: &str) -> DomainResult<Vec<AgentSpec>> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {COLS} FROM agent_specs WHERE name = ?1 \
              AND status = 'active' ORDER BY stance"
         ))
         .map_err(map_sqlite_err)?;
-    let rows = stmt.query_map([name], row_to_spec).map_err(map_sqlite_err)?;
+    let rows = stmt
+        .query_map([name], row_to_spec)
+        .map_err(map_sqlite_err)?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r.map_err(map_sqlite_err)?);
@@ -155,11 +154,7 @@ pub fn list_stances_for_name(
     Ok(out)
 }
 
-pub fn set_instance_count(
-    conn: &Connection,
-    name: &str,
-    instance_count: i64,
-) -> DomainResult<()> {
+pub fn set_instance_count(conn: &Connection, name: &str, instance_count: i64) -> DomainResult<()> {
     AgentSpec::validate_instance_count(instance_count)?;
     let n = conn
         .execute(

@@ -301,8 +301,7 @@ mod tests {
         insert(&conn, &r2).unwrap();
         resolve(&conn, &r1.id, Some(DisruptionResolution::Keep), None).unwrap();
 
-        let pending =
-            list_by_plan(&conn, &plan_id, Some(DisruptionReviewStatus::Pending)).unwrap();
+        let pending = list_by_plan(&conn, &plan_id, Some(DisruptionReviewStatus::Pending)).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, r2.id);
 

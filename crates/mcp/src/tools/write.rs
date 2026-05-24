@@ -48,8 +48,7 @@ impl Tool for AddScenario {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "add_scenario",
-            description:
-                "Create a Given/When/Then scenario on a plan. The daemon rejects empty \
+            description: "Create a Given/When/Then scenario on a plan. The daemon rejects empty \
                  GWT fields (D5 GWT_EMPTY). Set `confirmed: true` to skip the explicit \
                  confirm step when the scenario is already vetted.",
             input_schema: json!({
@@ -68,12 +67,30 @@ impl Tool for AddScenario {
         }
     }
     async fn call(&self, args: Value) -> ToolCallResult {
-        let plan_id = match require_str(&args, "plan_id") { Ok(s) => s, Err(e) => return e };
-        let short_code = match require_str(&args, "short_code") { Ok(s) => s, Err(e) => return e };
-        let given = match require_str(&args, "given") { Ok(s) => s, Err(e) => return e };
-        let when_clause = match require_str(&args, "when") { Ok(s) => s, Err(e) => return e };
-        let then_clause = match require_str(&args, "then") { Ok(s) => s, Err(e) => return e };
-        let confirmed = args.get("confirmed").and_then(|v| v.as_bool()).unwrap_or(false);
+        let plan_id = match require_str(&args, "plan_id") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let short_code = match require_str(&args, "short_code") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let given = match require_str(&args, "given") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let when_clause = match require_str(&args, "when") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let then_clause = match require_str(&args, "then") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let confirmed = args
+            .get("confirmed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let body = json!({
             "plan_id": plan_id,
             "short_code": short_code,
@@ -100,8 +117,7 @@ impl Tool for AddRequirement {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "add_requirement",
-            description:
-                "Author a requirement snapshot on a plan (D12 SNAPSHOT-only — there is \
+            description: "Author a requirement snapshot on a plan (D12 SNAPSHOT-only — there is \
                  no history, the row carries today's truth). Use `source` to record \
                  where the requirement came from (interview, ticket, etc.).",
             input_schema: json!({
@@ -119,10 +135,22 @@ impl Tool for AddRequirement {
         }
     }
     async fn call(&self, args: Value) -> ToolCallResult {
-        let plan_id = match require_str(&args, "plan_id") { Ok(s) => s, Err(e) => return e };
-        let short_code = match require_str(&args, "short_code") { Ok(s) => s, Err(e) => return e };
-        let title = match require_str(&args, "title") { Ok(s) => s, Err(e) => return e };
-        let body_txt = match require_str(&args, "body") { Ok(s) => s, Err(e) => return e };
+        let plan_id = match require_str(&args, "plan_id") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let short_code = match require_str(&args, "short_code") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let title = match require_str(&args, "title") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let body_txt = match require_str(&args, "body") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
         let mut body = json!({
             "plan_id": plan_id,
             "short_code": short_code,
@@ -150,8 +178,7 @@ impl Tool for AddDecision {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "add_decision",
-            description:
-                "Append a decision (ADR) to a plan's append-only log. Set \
+            description: "Append a decision (ADR) to a plan's append-only log. Set \
                  `supersedes_id` to chain a replacement: the daemon auto-flips the \
                  predecessor to `superseded` (D12).",
             input_schema: json!({
@@ -172,10 +199,22 @@ impl Tool for AddDecision {
         }
     }
     async fn call(&self, args: Value) -> ToolCallResult {
-        let plan_id = match require_str(&args, "plan_id") { Ok(s) => s, Err(e) => return e };
-        let short_code = match require_str(&args, "short_code") { Ok(s) => s, Err(e) => return e };
-        let title = match require_str(&args, "title") { Ok(s) => s, Err(e) => return e };
-        let body_txt = match require_str(&args, "body") { Ok(s) => s, Err(e) => return e };
+        let plan_id = match require_str(&args, "plan_id") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let short_code = match require_str(&args, "short_code") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let title = match require_str(&args, "title") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let body_txt = match require_str(&args, "body") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
         let mut body = json!({
             "plan_id": plan_id,
             "short_code": short_code,
@@ -203,8 +242,7 @@ impl Tool for UpdateTaskEvidence {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "update_task_evidence",
-            description:
-                "Complete a task with evidence (PRD §6.6 EVIDENCE_REQUIRED). Each \
+            description: "Complete a task with evidence (PRD §6.6 EVIDENCE_REQUIRED). Each \
                  evidence entry maps one scenario to a verdict (`passing` / `failing` \
                  / `impacted` / `retired`) and an evidence reference (file:line, URL, \
                  log path). Verdict vocab matches the daemon's ScenarioResult — no \
@@ -239,7 +277,10 @@ impl Tool for UpdateTaskEvidence {
         }
     }
     async fn call(&self, args: Value) -> ToolCallResult {
-        let task_id = match require_str(&args, "task_id") { Ok(s) => s, Err(e) => return e };
+        let task_id = match require_str(&args, "task_id") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
         let scenarios = match args.get("scenarios").and_then(|v| v.as_array()) {
             Some(a) if !a.is_empty() => a.clone(),
             _ => return ToolCallResult::err_text("scenarios must be a non-empty array"),
@@ -270,8 +311,7 @@ impl Tool for StartRound {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "start_round",
-            description:
-                "Activate a round. In strict-regression mode (D6 default) the daemon \
+            description: "Activate a round. In strict-regression mode (D6 default) the daemon \
                  carries `passing` results from the previous completed round forward; \
                  the response includes `carried_results` so the LLM sees the count.",
             input_schema: json!({
@@ -285,7 +325,10 @@ impl Tool for StartRound {
         }
     }
     async fn call(&self, args: Value) -> ToolCallResult {
-        let round_id = match require_str(&args, "round_id") { Ok(s) => s, Err(e) => return e };
+        let round_id = match require_str(&args, "round_id") {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
         match self
             .client
             .post_empty(&format!("/rounds/{}/activate", round_id))
@@ -323,7 +366,9 @@ mod tests {
         let t = UpdateTaskEvidence {
             client: Arc::new(DaemonClient::new("http://127.0.0.1:1".to_string())),
         };
-        let r = t.call(json!({ "task_id": "TASK-X", "scenarios": [] })).await;
+        let r = t
+            .call(json!({ "task_id": "TASK-X", "scenarios": [] }))
+            .await;
         assert!(r.is_error);
         let text = match &r.content[0] {
             crate::protocol::ContentBlock::Text { text } => text.clone(),

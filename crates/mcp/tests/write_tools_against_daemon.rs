@@ -56,7 +56,12 @@ async fn http() -> reqwest::Client {
 }
 
 async fn post(c: &reqwest::Client, base: &str, path: &str, body: &Value) -> Value {
-    let resp = c.post(format!("{}{}", base, path)).json(body).send().await.unwrap();
+    let resp = c
+        .post(format!("{}{}", base, path))
+        .json(body)
+        .send()
+        .await
+        .unwrap();
     let status = resp.status();
     let text = resp.text().await.unwrap();
     assert!(status.is_success(), "{path} → {status}: {text}");
@@ -210,7 +215,11 @@ async fn add_scenario_surfaces_d5_gwt_empty_from_daemon() {
         }))
         .await;
     assert!(res.is_error);
-    assert!(text_of(&res).contains("GWT_EMPTY"), "got: {}", text_of(&res));
+    assert!(
+        text_of(&res).contains("GWT_EMPTY"),
+        "got: {}",
+        text_of(&res)
+    );
 }
 
 #[tokio::test]
@@ -240,7 +249,9 @@ async fn add_decision_then_supersede() {
     let base = spawn_daemon().await;
     let b = bootstrap(&base).await;
     let client = Arc::new(DaemonClient::new(base));
-    let tool = AddDecision { client: client.clone() };
+    let tool = AddDecision {
+        client: client.clone(),
+    };
 
     let r1 = tool
         .call(json!({
@@ -268,11 +279,7 @@ async fn add_decision_then_supersede() {
     // Daemon should have auto-flipped d1 → superseded.
     let c = http().await;
     let fresh: Value = c
-        .get(format!(
-            "{}/decisions/{}",
-            client.url(""),
-            d1_id
-        ))
+        .get(format!("{}/decisions/{}", client.url(""), d1_id))
         .send()
         .await
         .unwrap()

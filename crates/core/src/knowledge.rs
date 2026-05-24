@@ -34,7 +34,9 @@ impl FromStr for KnowledgeScope {
             "rag" => Ok(KnowledgeScope::Rag),
             "reference" => Ok(KnowledgeScope::Reference),
             "archive" => Ok(KnowledgeScope::Archive),
-            other => Err(DomainError::Validation(format!("unknown knowledge scope: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown knowledge scope: {other}"
+            ))),
         }
     }
 }

@@ -72,7 +72,10 @@ pub fn list_comments_by(
     anchor_col: &str,
     anchor_id: &Id,
 ) -> DomainResult<Vec<Comment>> {
-    if !matches!(anchor_col, "plan_id" | "task_id" | "scenario_id" | "round_id") {
+    if !matches!(
+        anchor_col,
+        "plan_id" | "task_id" | "scenario_id" | "round_id"
+    ) {
         return Err(DomainError::Validation(format!(
             "invalid comment anchor column: {anchor_col}"
         )));
@@ -199,9 +202,7 @@ pub fn list_questions_by_plan(
             vec![plan_id.to_string(), st.to_string()],
         ),
         None => (
-            format!(
-                "SELECT {QUESTION_COLS} FROM questions WHERE plan_id = ?1 ORDER BY created_at"
-            ),
+            format!("SELECT {QUESTION_COLS} FROM questions WHERE plan_id = ?1 ORDER BY created_at"),
             vec![plan_id.to_string()],
         ),
     };
@@ -298,10 +299,7 @@ pub fn list_activity_by_project(
     Ok(out)
 }
 
-pub fn list_activity_stats(
-    conn: &Connection,
-    project_id: &Id,
-) -> DomainResult<Vec<(String, i64)>> {
+pub fn list_activity_stats(conn: &Connection, project_id: &Id) -> DomainResult<Vec<(String, i64)>> {
     let mut stmt = conn
         .prepare(
             "SELECT kind, COUNT(*) FROM activity WHERE project_id = ?1 \

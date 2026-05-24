@@ -26,7 +26,10 @@ pub fn router() -> Router<AppState> {
         .route("/plans/:id", get(get_one).put(update))
         .route("/plans/:id/approve", post(approve))
         .route("/plans/:id/complete", post(complete))
-        .route("/projects/:project_id/plans/active", get(active_for_project))
+        .route(
+            "/projects/:project_id/plans/active",
+            get(active_for_project),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,19 +82,15 @@ async fn list(
     let rows = match q.project_id {
         Some(pid) => repo::list_by_project(&conn, &Id::from(pid))?,
         None => {
-            return Err(DomainError::Validation(
-                "project_id query parameter required".into(),
+            return Err(
+                DomainError::Validation("project_id query parameter required".into()).into(),
             )
-            .into())
         }
     };
     Ok(Json(json!({ "plans": rows })))
 }
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn get_one(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     Ok(Json(json!(repo::get(&conn, &Id::from(id))?)))
 }
@@ -119,10 +118,7 @@ async fn update(
     Ok(Json(json!(fresh)))
 }
 
-async fn approve(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn approve(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let pid = Id::from(id);
     let plan = repo::get(&conn, &pid)?;
@@ -139,10 +135,7 @@ async fn approve(
     Ok(Json(json!(fresh)))
 }
 
-async fn complete(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn complete(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let pid = Id::from(id);
     let plan = repo::get(&conn, &pid)?;

@@ -42,7 +42,10 @@ pub struct CheckResult {
 
 impl CheckResult {
     fn ok() -> Self {
-        Self { ok: true, detail: None }
+        Self {
+            ok: true,
+            detail: None,
+        }
     }
     fn fail(msg: impl Into<String>) -> Self {
         Self {

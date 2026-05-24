@@ -12,11 +12,23 @@ use sdi_core::error::DomainResult;
 const MIGRATIONS: &[(i64, &str, &str)] = &[
     (1, "core entities + FTS5", MIGRATION_001_CORE),
     (2, "disruption review queue", MIGRATION_002_DISRUPTION),
-    (3, "collaboration: comments + questions + activity", MIGRATION_003_COLLAB),
+    (
+        3,
+        "collaboration: comments + questions + activity",
+        MIGRATION_003_COLLAB,
+    ),
     (4, "runs + task hierarchy + lease", MIGRATION_004_RUNS),
     (5, "usage accounting", MIGRATION_005_USAGE),
-    (6, "v0.4 multi-agent governance", MIGRATION_006_V04_MULTI_AGENT),
-    (7, "v0.5 pattern enforcement", MIGRATION_007_V05_PATTERN_ENFORCEMENT),
+    (
+        6,
+        "v0.4 multi-agent governance",
+        MIGRATION_006_V04_MULTI_AGENT,
+    ),
+    (
+        7,
+        "v0.5 pattern enforcement",
+        MIGRATION_007_V05_PATTERN_ENFORCEMENT,
+    ),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -56,15 +68,13 @@ pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {
         // ALTER TABLE that runs after some CREATEs) leave the schema intact
         // and a retry sees the same starting state.
         conn.execute_batch("BEGIN").map_err(map_sqlite_err)?;
-        let apply = conn
-            .execute_batch(sql)
-            .and_then(|_| {
-                conn.execute(
-                    "INSERT INTO schema_migrations(version, label) VALUES (?1, ?2)",
-                    rusqlite::params![version, label],
-                )
-                .map(|_| ())
-            });
+        let apply = conn.execute_batch(sql).and_then(|_| {
+            conn.execute(
+                "INSERT INTO schema_migrations(version, label) VALUES (?1, ?2)",
+                rusqlite::params![version, label],
+            )
+            .map(|_| ())
+        });
         match apply {
             Ok(()) => {
                 conn.execute_batch("COMMIT").map_err(map_sqlite_err)?;
@@ -206,9 +216,7 @@ mod tests {
                 "agent_specs missing column {col}"
             );
         }
-        for col in [
-            "produced_via_pattern_id",
-        ] {
+        for col in ["produced_via_pattern_id"] {
             for table in ["plans", "requirements", "tasks", "rounds"] {
                 let cols: Vec<String> = conn
                     .prepare(&format!("PRAGMA table_info({table})"))

@@ -37,7 +37,11 @@ const COLS: &str = "id, plan_id, short_code, given, when_clause, then_clause, ta
                     created_at, updated_at";
 
 pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
-    Scenario::validate_gwt(&scenario.given, &scenario.when_clause, &scenario.then_clause)?;
+    Scenario::validate_gwt(
+        &scenario.given,
+        &scenario.when_clause,
+        &scenario.then_clause,
+    )?;
     Scenario::validate_depends_on(&scenario.short_code, &scenario.depends_on)?;
     // D29 — claim payload must be a valid JSON array of globs.
     validate_claimed_resources(&scenario.claimed_resources_json)?;
@@ -58,7 +62,10 @@ pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
             scenario.when_clause,
             scenario.then_clause,
             tags,
-            scenario.origin_round_id.as_ref().map(|i| i.as_str().to_string()),
+            scenario
+                .origin_round_id
+                .as_ref()
+                .map(|i| i.as_str().to_string()),
             scenario.status.to_string(),
             depends_on,
             scenario.produced_by,
@@ -148,11 +155,7 @@ pub fn set_status(conn: &Connection, id: &Id, status: ScenarioStatus) -> DomainR
 /// D29 — set claim_status on a scenario row. Caller (daemon router) is
 /// responsible for the transition rules (none → requested → active → released)
 /// and overlap detection across other active claims.
-pub fn set_claim_status(
-    conn: &Connection,
-    id: &Id,
-    status: ClaimStatus,
-) -> DomainResult<()> {
+pub fn set_claim_status(conn: &Connection, id: &Id, status: ClaimStatus) -> DomainResult<()> {
     let n = conn
         .execute(
             "UPDATE scenarios SET claim_status = ?1, updated_at = ?2 WHERE id = ?3",
@@ -168,10 +171,7 @@ pub fn set_claim_status(
 /// D29 — list all scenarios with `claim_status='active'`, optionally narrowed
 /// to a single plan. Used by `/scenarios/active-claims` for the PreToolUse
 /// overlap check.
-pub fn list_active_claims(
-    conn: &Connection,
-    plan_id: Option<&Id>,
-) -> DomainResult<Vec<Scenario>> {
+pub fn list_active_claims(conn: &Connection, plan_id: Option<&Id>) -> DomainResult<Vec<Scenario>> {
     let (sql, params): (String, Vec<String>) = match plan_id {
         Some(pid) => (
             format!(
@@ -201,7 +201,12 @@ pub fn list_active_claims(
 }
 
 /// FTS5-backed keyword search across given/when/then. Returns scenario IDs.
-pub fn search(conn: &Connection, plan_id: &Id, query: &str, limit: usize) -> DomainResult<Vec<Scenario>> {
+pub fn search(
+    conn: &Connection,
+    plan_id: &Id,
+    query: &str,
+    limit: usize,
+) -> DomainResult<Vec<Scenario>> {
     let mut stmt = conn
         .prepare(
             "SELECT s.id, s.plan_id, s.short_code, s.given, s.when_clause, s.then_clause, \
@@ -214,7 +219,10 @@ pub fn search(conn: &Connection, plan_id: &Id, query: &str, limit: usize) -> Dom
         )
         .map_err(map_sqlite_err)?;
     let rows = stmt
-        .query_map(params![plan_id.as_str(), query, limit as i64], row_to_scenario)
+        .query_map(
+            params![plan_id.as_str(), query, limit as i64],
+            row_to_scenario,
+        )
         .map_err(map_sqlite_err)?;
     let mut out = Vec::new();
     for r in rows {
@@ -344,7 +352,10 @@ mod tests {
         let fetched = get(&conn, &s.id).unwrap();
         assert_eq!(fetched.claimed_resources_json, s.claimed_resources_json);
         assert_eq!(fetched.claim_status, ClaimStatus::None);
-        assert_eq!(fetched.produced_via_pattern_id.as_deref(), Some(pat.id.as_str()));
+        assert_eq!(
+            fetched.produced_via_pattern_id.as_deref(),
+            Some(pat.id.as_str())
+        );
     }
 
     #[test]

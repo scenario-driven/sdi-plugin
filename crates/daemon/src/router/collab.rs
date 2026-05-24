@@ -25,7 +25,9 @@ pub fn router() -> Router<AppState> {
         .route("/comments", post(create_comment).get(list_comments))
         .route(
             "/comments/:id",
-            get(get_comment).patch(update_comment).delete(delete_comment),
+            get(get_comment)
+                .patch(update_comment)
+                .delete(delete_comment),
         )
         // questions
         .route("/questions", post(create_question).get(list_questions))
@@ -36,7 +38,10 @@ pub fn router() -> Router<AppState> {
         .route("/activity/stats", get(activity_stats))
         .route("/projects/:project_id/timeline", get(project_timeline))
         // method-not-allowed guards on append-only resources
-        .route("/activity/:id", patch(method_not_allowed).delete(method_not_allowed))
+        .route(
+            "/activity/:id",
+            patch(method_not_allowed).delete(method_not_allowed),
+        )
 }
 
 async fn method_not_allowed() -> ApiResult<Json<Value>> {
@@ -133,7 +138,10 @@ async fn list_comments(
     Ok(Json(json!({ "comments": rows })))
 }
 
-async fn get_comment(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+async fn get_comment(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     Ok(Json(json!(repo::get_comment(&conn, &Id::from(id))?)))
 }
@@ -226,7 +234,11 @@ async fn list_questions(
     Query(q): Query<ListQuestionsQuery>,
 ) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
-    let status = q.status.as_deref().map(QuestionStatus::from_str).transpose()?;
+    let status = q
+        .status
+        .as_deref()
+        .map(QuestionStatus::from_str)
+        .transpose()?;
     let rows = repo::list_questions_by_plan(&conn, &Id::from(q.plan_id), status)?;
     Ok(Json(json!({ "questions": rows })))
 }
@@ -343,7 +355,8 @@ async fn project_timeline(
     Query(q): Query<TimelineQuery>,
 ) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
-    let rows = repo::list_activity_by_project(&conn, &Id::from(project_id), q.limit.unwrap_or(200))?;
+    let rows =
+        repo::list_activity_by_project(&conn, &Id::from(project_id), q.limit.unwrap_or(200))?;
     Ok(Json(json!({ "items": rows })))
 }
 

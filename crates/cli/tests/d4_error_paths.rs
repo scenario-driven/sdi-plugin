@@ -79,9 +79,8 @@ fn task_complete_with_malformed_evidence_is_anyhow_error() {
     let h = Harness::new();
     // "bare-passing-no-equals" doesn't match SCN-ID=result@evidence_ref, so
     // the CLI parser should reject it before any HTTP call.
-    let (code, _stdout, stderr) = h.run(&[
-        "task", "complete", "TASK-FAKE", "--evidence", "garbage",
-    ]);
+    let (code, _stdout, stderr) =
+        h.run(&["task", "complete", "TASK-FAKE", "--evidence", "garbage"]);
     assert_ne!(code, 0);
     assert!(
         stderr.contains("SCN-ID=result@evidence_ref") || stderr.contains("evidence"),
@@ -114,10 +113,7 @@ fn plan_approve_without_confirmed_scenario_surfaces_d8_error() {
         stderr.contains("SCENARIOS_REQUIRED"),
         "expected SCENARIOS_REQUIRED in: {stderr}"
     );
-    assert!(
-        stderr.contains("400"),
-        "expected 400 status in: {stderr}"
-    );
+    assert!(stderr.contains("400"), "expected 400 status in: {stderr}");
 }
 
 #[test]
@@ -138,11 +134,16 @@ fn scenario_create_with_empty_then_surfaces_d5_gwt_empty() {
     let plan_id = plan["id"].as_str().unwrap().to_string();
 
     let (code, _stdout, stderr) = h.run(&[
-        "scenario", "create", &plan_id,
+        "scenario",
+        "create",
+        &plan_id,
         &format!("SCN-{}", &suffix[..6]),
-        "--given", "x",
-        "--when", "y",
-        "--then", "   ",
+        "--given",
+        "x",
+        "--when",
+        "y",
+        "--then",
+        "   ",
     ]);
     assert_ne!(code, 0);
     assert!(

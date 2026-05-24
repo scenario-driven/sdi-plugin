@@ -1,9 +1,7 @@
 //! `sdi dashboard | handoff | summary | board | wiki | timeline | metrics | replay`.
 //! Read-only views that pull pre-computed aggregates from the daemon.
 
-use crate::cli::{
-    BoardArgs, DashboardArgs, ReplayArgs, SummaryArgs, TimelineArgs, WikiArgs,
-};
+use crate::cli::{BoardArgs, DashboardArgs, ReplayArgs, SummaryArgs, TimelineArgs, WikiArgs};
 use crate::http::Client;
 use crate::output::emit;
 use anyhow::Result;
@@ -86,11 +84,7 @@ pub async fn replay(cli: &Client, args: ReplayArgs) -> Result<()> {
     emit(&v, false)
 }
 
-fn build_dashboard_path(
-    base: &str,
-    cwd: Option<&str>,
-    project: Option<&str>,
-) -> Result<String> {
+fn build_dashboard_path(base: &str, cwd: Option<&str>, project: Option<&str>) -> Result<String> {
     let mut path = base.to_string();
     let mut sep = '?';
     if let Some(c) = cwd {

@@ -1,8 +1,7 @@
 //! `sdi knowledge …` — PRD §5.4 scope-aware knowledge client.
 
 use crate::cli::{
-    KnowledgeCmd, KnowledgeCreateArgs, KnowledgeListArgs, KnowledgeSearchArgs,
-    KnowledgeUpdateArgs,
+    KnowledgeCmd, KnowledgeCreateArgs, KnowledgeListArgs, KnowledgeSearchArgs, KnowledgeUpdateArgs,
 };
 use crate::http::Client;
 use crate::output::emit;

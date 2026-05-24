@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use clap::Parser;
-use sdi_db::Paths;
 use sdi_daemon::lifecycle;
+use sdi_db::Paths;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -60,10 +60,9 @@ async fn main() -> Result<()> {
     );
 
     let paths_for_cleanup = paths.clone();
-    let serve = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            lifecycle::shutdown_signal().await;
-        });
+    let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
+        lifecycle::shutdown_signal().await;
+    });
 
     let res = serve.await;
     lifecycle::cleanup(&paths_for_cleanup);

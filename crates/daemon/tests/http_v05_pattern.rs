@@ -528,7 +528,10 @@ async fn scenario_claim_release_roundtrips_and_surfaces_active_ledger() {
     assert_eq!(claimed["claim_status"], "active");
 
     let active: serde_json::Value = c
-        .get(format!("{}/scenarios/active-claims?plan_id={}", base, plan_id))
+        .get(format!(
+            "{}/scenarios/active-claims?plan_id={}",
+            base, plan_id
+        ))
         .send()
         .await
         .unwrap()
@@ -555,7 +558,10 @@ async fn scenario_claim_release_roundtrips_and_surfaces_active_ledger() {
     assert_eq!(released["claim_status"], "released");
 
     let after: serde_json::Value = c
-        .get(format!("{}/scenarios/active-claims?plan_id={}", base, plan_id))
+        .get(format!(
+            "{}/scenarios/active-claims?plan_id={}",
+            base, plan_id
+        ))
         .send()
         .await
         .unwrap()

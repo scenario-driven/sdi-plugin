@@ -31,7 +31,9 @@ impl FromStr for RoundStatus {
             "planning" => Ok(RoundStatus::Planning),
             "active" => Ok(RoundStatus::Active),
             "completed" => Ok(RoundStatus::Completed),
-            other => Err(DomainError::Validation(format!("unknown round status: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown round status: {other}"
+            ))),
         }
     }
 }
@@ -95,7 +97,9 @@ impl FromStr for InFlightPolicy {
             "pause" => Ok(InFlightPolicy::Pause),
             "abort" => Ok(InFlightPolicy::Abort),
             "continue-on-noimpact" => Ok(InFlightPolicy::ContinueOnNoimpact),
-            other => Err(DomainError::Validation(format!("unknown in-flight policy: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown in-flight policy: {other}"
+            ))),
         }
     }
 }
@@ -125,7 +129,9 @@ impl FromStr for DisruptionPolicy {
         match s {
             "needs-review" => Ok(DisruptionPolicy::NeedsReview),
             "auto" => Ok(DisruptionPolicy::Auto),
-            other => Err(DomainError::Validation(format!("unknown disruption policy: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown disruption policy: {other}"
+            ))),
         }
     }
 }

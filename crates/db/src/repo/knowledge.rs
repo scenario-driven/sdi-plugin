@@ -75,14 +75,13 @@ pub fn list_by_project(
             vec![project_id.as_str().to_string(), s.to_string()],
         ),
         None => (
-            format!(
-                "SELECT {COLS} FROM knowledge WHERE project_id = ?1 ORDER BY updated_at DESC"
-            ),
+            format!("SELECT {COLS} FROM knowledge WHERE project_id = ?1 ORDER BY updated_at DESC"),
             vec![project_id.as_str().to_string()],
         ),
     };
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
-    let arg_refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
+    let arg_refs: Vec<&dyn rusqlite::ToSql> =
+        args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
     let rows = stmt
         .query_map(arg_refs.as_slice(), row_to_knowledge)
         .map_err(map_sqlite_err)?;
@@ -205,8 +204,16 @@ mod tests {
     fn scope_filter_isolates_rag_from_reference() {
         let (pool, project_id) = fixture();
         let conn = pool.get().unwrap();
-        insert(&conn, &mk(project_id.clone(), KnowledgeScope::Rag, "rag note")).unwrap();
-        insert(&conn, &mk(project_id.clone(), KnowledgeScope::Reference, "ref note")).unwrap();
+        insert(
+            &conn,
+            &mk(project_id.clone(), KnowledgeScope::Rag, "rag note"),
+        )
+        .unwrap();
+        insert(
+            &conn,
+            &mk(project_id.clone(), KnowledgeScope::Reference, "ref note"),
+        )
+        .unwrap();
         let rag = list_by_project(&conn, &project_id, Some(KnowledgeScope::Rag)).unwrap();
         let r#ref = list_by_project(&conn, &project_id, Some(KnowledgeScope::Reference)).unwrap();
         let all = list_by_project(&conn, &project_id, None).unwrap();
@@ -219,8 +226,24 @@ mod tests {
     fn search_finds_within_scope() {
         let (pool, project_id) = fixture();
         let conn = pool.get().unwrap();
-        insert(&conn, &mk(project_id.clone(), KnowledgeScope::Rag, "fts5 keyword search")).unwrap();
-        insert(&conn, &mk(project_id.clone(), KnowledgeScope::Reference, "fts5 reference doc")).unwrap();
+        insert(
+            &conn,
+            &mk(
+                project_id.clone(),
+                KnowledgeScope::Rag,
+                "fts5 keyword search",
+            ),
+        )
+        .unwrap();
+        insert(
+            &conn,
+            &mk(
+                project_id.clone(),
+                KnowledgeScope::Reference,
+                "fts5 reference doc",
+            ),
+        )
+        .unwrap();
         let hits = search(&conn, &project_id, KnowledgeScope::Rag, "fts5", 5).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].scope, KnowledgeScope::Rag);

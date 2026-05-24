@@ -2,23 +2,23 @@
 //! take a `&Connection` (or `&Transaction`) so that callers can compose them
 //! into pool::tx() blocks for atomic multi-statement work.
 
-pub mod project;
-pub mod plan;
-pub mod requirement;
-pub mod decision;
-pub mod scenario;
-pub mod round;
-pub mod task;
-pub mod knowledge;
-pub mod event;
-pub mod disruption;
-pub mod collab;
-pub mod run;
-pub mod usage;
-pub mod autonomy_policy;
 pub mod agent_note;
 pub mod agent_spec;
+pub mod autonomy_policy;
+pub mod collab;
+pub mod decision;
+pub mod disruption;
+pub mod event;
+pub mod knowledge;
 pub mod pattern;
+pub mod plan;
+pub mod project;
+pub mod requirement;
+pub mod round;
+pub mod run;
+pub mod scenario;
+pub mod task;
+pub mod usage;
 
 use chrono::{DateTime, Utc};
 use rusqlite::types::FromSql;
@@ -30,11 +30,7 @@ pub(crate) fn ts(row: &Row<'_>, idx: usize) -> rusqlite::Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(&raw)
         .map(|d| d.with_timezone(&Utc))
         .map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(
-                idx,
-                rusqlite::types::Type::Text,
-                Box::new(e),
-            )
+            rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
         })
 }
 
@@ -79,7 +75,10 @@ pub(crate) fn s_opt(row: &Row<'_>, idx: usize) -> rusqlite::Result<Option<String
 
 /// Read a JSON-string column and parse it. Used by B4 entities.
 #[allow(dead_code)]
-pub(crate) fn json<T: serde::de::DeserializeOwned>(row: &Row<'_>, idx: usize) -> rusqlite::Result<T> {
+pub(crate) fn json<T: serde::de::DeserializeOwned>(
+    row: &Row<'_>,
+    idx: usize,
+) -> rusqlite::Result<T> {
     let raw: String = row.get(idx)?;
     serde_json::from_str(&raw).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))

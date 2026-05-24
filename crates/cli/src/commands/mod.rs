@@ -2,8 +2,8 @@
 //! daemon HTTP router; argument shapes live in `crate::cli`, output formatting
 //! goes through `crate::output::emit`.
 
-pub mod aggregate;
 pub mod agent_note;
+pub mod aggregate;
 pub mod autonomy;
 pub mod comment;
 pub mod consensus;

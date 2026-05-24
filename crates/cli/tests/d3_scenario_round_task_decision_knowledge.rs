@@ -85,16 +85,28 @@ fn full_sdi_flow_via_cli() {
     // requirement
     let req_code = format!("REQ-{}", &suffix[..6]);
     let _req = h.run_ok(&[
-        "req", "create", &plan_id, &req_code, "Login", "--body", "user must log in",
+        "req",
+        "create",
+        &plan_id,
+        &req_code,
+        "Login",
+        "--body",
+        "user must log in",
     ]);
 
     // scenario (confirmed)
     let scn_code = format!("SCN-{}", &suffix[..6]);
     let scn = h.run_ok(&[
-        "scenario", "create", &plan_id, &scn_code,
-        "--given", "a registered user",
-        "--when", "they submit valid credentials",
-        "--then", "they receive a session token",
+        "scenario",
+        "create",
+        &plan_id,
+        &scn_code,
+        "--given",
+        "a registered user",
+        "--when",
+        "they submit valid credentials",
+        "--then",
+        "they receive a session token",
         "--confirmed",
     ]);
     let scn_id = scn["id"].as_str().unwrap().to_string();
@@ -118,26 +130,39 @@ fn full_sdi_flow_via_cli() {
     // task create + start + complete (with evidence)
     let task_code = format!("T-{}", &suffix[..6]);
     let task = h.run_ok(&[
-        "task", "create", &r1_id, &task_code,
+        "task",
+        "create",
+        &r1_id,
+        &task_code,
         "implement /auth/login",
-        "--scenario", &scn_id,
+        "--scenario",
+        &scn_id,
     ]);
     let task_id = task["id"].as_str().unwrap().to_string();
     let _started = h.run_ok(&["task", "start", &task_id]);
     let done = h.run_ok(&[
-        "task", "complete", &task_id,
-        "--evidence", &format!("{}=passing@auth.rs:42", scn_id),
-        "--summary", "endpoint live",
+        "task",
+        "complete",
+        &task_id,
+        "--evidence",
+        &format!("{}=passing@auth.rs:42", scn_id),
+        "--summary",
+        "endpoint live",
     ]);
     assert_eq!(done["status"], "done");
     assert!(done["evidence_at"].is_string());
 
     // round result, complete round, complete plan
     let _r1_res = h.run_ok(&[
-        "round", "result", &r1_id,
-        "--scenario", &scn_id,
-        "--result", "passing",
-        "--evidence", "auth.rs:42",
+        "round",
+        "result",
+        &r1_id,
+        "--scenario",
+        &scn_id,
+        "--result",
+        "passing",
+        "--evidence",
+        "auth.rs:42",
     ]);
     let _r1_done = h.run_ok(&["round", "complete", &r1_id]);
     let plan_done = h.run_ok(&["plan", "complete", &plan_id]);
@@ -153,31 +178,49 @@ fn full_sdi_flow_via_cli() {
 
     let d2_code = format!("DEC-{}-B", &suffix[..6]);
     let _d2 = h.run_ok(&[
-        "decision", "supersede", &d1_id,
-        "--plan-id", &plan_id,
-        "--short-code", &d2_code,
-        "--title", "Switch to opaque tokens",
-        "--body", "JWT replay risk",
+        "decision",
+        "supersede",
+        &d1_id,
+        "--plan-id",
+        &plan_id,
+        "--short-code",
+        &d2_code,
+        "--title",
+        "Switch to opaque tokens",
+        "--body",
+        "JWT replay risk",
     ]);
     let d1_fresh = h.run_ok(&["decision", "view", &d1_id]);
     assert_eq!(d1_fresh["status"], "superseded");
 
     // knowledge: rag + reference + scope filter
     let _k_rag = h.run_ok(&[
-        "knowledge", "create", &project_id,
-        "--scope", "rag",
-        "--kind", "decision",
+        "knowledge",
+        "create",
+        &project_id,
+        "--scope",
+        "rag",
+        "--kind",
+        "decision",
         "Token strategy",
-        "--body", "Opaque tokens beat JWT after replay risk.",
-        "--tag", "auth",
-        "--tag", "tokens",
+        "--body",
+        "Opaque tokens beat JWT after replay risk.",
+        "--tag",
+        "auth",
+        "--tag",
+        "tokens",
     ]);
     let _k_ref = h.run_ok(&[
-        "knowledge", "create", &project_id,
-        "--scope", "reference",
-        "--kind", "runbook",
+        "knowledge",
+        "create",
+        &project_id,
+        "--scope",
+        "reference",
+        "--kind",
+        "runbook",
         "Auth runbook",
-        "--body", "Manual procedures.",
+        "--body",
+        "Manual procedures.",
     ]);
 
     let all = h.run_ok(&["knowledge", "list", &project_id]);

@@ -38,7 +38,9 @@ impl FromStr for UsageTier {
             "low" => Ok(Self::Low),
             "med" => Ok(Self::Med),
             "high" => Ok(Self::High),
-            other => Err(DomainError::Validation(format!("unknown usage tier: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown usage tier: {other}"
+            ))),
         }
     }
 }

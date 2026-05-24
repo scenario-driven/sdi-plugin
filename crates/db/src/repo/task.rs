@@ -333,5 +333,4 @@ mod tests {
         let err = complete_with_evidence(&conn, &t.id, &empty).unwrap_err();
         assert!(matches!(err, DomainError::EvidenceRequired));
     }
-
 }

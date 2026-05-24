@@ -115,7 +115,13 @@ pub fn update_lifecycle(
                  decided_reason = COALESCE(?3, decided_reason), \
                  updated_at = ?4 \
              WHERE id = ?5",
-            params![new_lifecycle, decided_at, decided_reason, now_s, id.as_str()],
+            params![
+                new_lifecycle,
+                decided_at,
+                decided_reason,
+                now_s,
+                id.as_str()
+            ],
         )
         .map_err(map_sqlite_err)?;
     if n == 0 {
@@ -219,10 +225,7 @@ mod tests {
     use sdi_core::plan::{Plan, PlanStatus};
     use sdi_core::project::Project;
 
-    fn fixture() -> (
-        r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
-        Id,
-    ) {
+    fn fixture() -> (r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, Id) {
         let tmp = std::env::temp_dir().join(format!(
             "sdi-repo-pat-{}-{}.db",
             std::process::id(),

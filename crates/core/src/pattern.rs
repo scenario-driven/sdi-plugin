@@ -147,9 +147,7 @@ impl PatternLifecycle {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            PatternLifecycle::Converged
-                | PatternLifecycle::Dissensus
-                | PatternLifecycle::Aborted
+            PatternLifecycle::Converged | PatternLifecycle::Dissensus | PatternLifecycle::Aborted
         )
     }
 }
@@ -394,9 +392,7 @@ pub enum ReversalPlan {
     /// Filesystem snapshot reference (e.g. tarball path or repo state ref).
     FsSnapshot { snapshot_ref: String },
     /// Compensating action against an external system (free-form JSON spec).
-    CompensatingAction {
-        action_spec: serde_json::Value,
-    },
+    CompensatingAction { action_spec: serde_json::Value },
 }
 
 /// D28 — parse + validate a stored reversal_plan JSON blob. Returns the typed
@@ -404,9 +400,8 @@ pub enum ReversalPlan {
 /// malformed. The L5 auto-apply gate is allowed only when this returns Ok and
 /// `blast_radius_score ≤ AutonomyPolicy.l5_threshold`.
 pub fn validate_reversal_plan_json(s: &str) -> DomainResult<ReversalPlan> {
-    let plan: ReversalPlan = serde_json::from_str(s).map_err(|e| {
-        DomainError::Validation(format!("reversal_plan parse error: {e}"))
-    })?;
+    let plan: ReversalPlan = serde_json::from_str(s)
+        .map_err(|e| DomainError::Validation(format!("reversal_plan parse error: {e}")))?;
     match &plan {
         ReversalPlan::MigrationSql { sql, .. } if sql.trim().is_empty() => {
             return Err(DomainError::Validation(
@@ -424,7 +419,8 @@ pub fn validate_reversal_plan_json(s: &str) -> DomainResult<ReversalPlan> {
             ));
         }
         ReversalPlan::CompensatingAction { action_spec }
-            if action_spec.is_null() || matches!(action_spec, serde_json::Value::Object(o) if o.is_empty()) =>
+            if action_spec.is_null()
+                || matches!(action_spec, serde_json::Value::Object(o) if o.is_empty()) =>
         {
             return Err(DomainError::Validation(
                 "reversal_plan compensating_action.action_spec must be non-empty".into(),
@@ -470,8 +466,8 @@ mod tests {
             reviewer("impl-coder", Stance::Neutral),
             reviewer("impl-coder", Stance::Neutral),
         ];
-        let err = validate_pattern_shape(PatternKind::Graph, None, Some(&sybil), None, None)
-            .unwrap_err();
+        let err =
+            validate_pattern_shape(PatternKind::Graph, None, Some(&sybil), None, None).unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
     }
 
@@ -487,8 +483,8 @@ mod tests {
     #[test]
     fn swarm_requires_two_fan_out() {
         let one = vec!["a".to_string()];
-        let err = validate_pattern_shape(PatternKind::Swarm, None, None, Some(&one), None)
-            .unwrap_err();
+        let err =
+            validate_pattern_shape(PatternKind::Swarm, None, None, Some(&one), None).unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
         let two = vec!["a".to_string(), "b".to_string()];
         validate_pattern_shape(PatternKind::Swarm, None, None, Some(&two), None).unwrap();
@@ -497,14 +493,8 @@ mod tests {
     #[test]
     fn agents_as_tools_requires_one_peer() {
         let none: Vec<PeerLink> = vec![];
-        let err = validate_pattern_shape(
-            PatternKind::AgentsAsTools,
-            None,
-            None,
-            None,
-            Some(&none),
-        )
-        .unwrap_err();
+        let err = validate_pattern_shape(PatternKind::AgentsAsTools, None, None, None, Some(&none))
+            .unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
         let one = vec![PeerLink {
             caller: "a".into(),
@@ -539,10 +529,8 @@ mod tests {
 
     #[test]
     fn reversal_plan_compensating_action_rejects_empty_object() {
-        let err = validate_reversal_plan_json(
-            r#"{"type":"compensating_action","action_spec":{}}"#,
-        )
-        .unwrap_err();
+        let err = validate_reversal_plan_json(r#"{"type":"compensating_action","action_spec":{}}"#)
+            .unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
     }
 

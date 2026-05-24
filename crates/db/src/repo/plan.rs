@@ -111,7 +111,11 @@ pub fn update_body(conn: &Connection, id: &Id, title: &str, body: &str) -> Domai
         return Err(DomainError::NotFound(id.to_string()));
     }
     let v: i64 = conn
-        .query_row("SELECT version FROM plans WHERE id = ?1", [id.as_str()], |r| r.get(0))
+        .query_row(
+            "SELECT version FROM plans WHERE id = ?1",
+            [id.as_str()],
+            |r| r.get(0),
+        )
         .map_err(map_sqlite_err)?;
     Ok(v)
 }
@@ -199,7 +203,9 @@ mod tests {
         plan.status = PlanStatus::Active;
         plan.approved_at = Some(now());
         set_status(&conn, &plan.id, PlanStatus::Active, plan.approved_at, None).unwrap();
-        let active = find_active_for_project(&conn, &project_id).unwrap().unwrap();
+        let active = find_active_for_project(&conn, &project_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(active.id, plan.id);
     }
 

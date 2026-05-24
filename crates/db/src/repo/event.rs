@@ -87,7 +87,8 @@ pub fn tail_since(
     sql.push_str(&format!(" ORDER BY created_at LIMIT ?{}", args.len() + 1));
     args.push((limit as i64).to_string());
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
-    let arg_refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
+    let arg_refs: Vec<&dyn rusqlite::ToSql> =
+        args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
     let rows = stmt
         .query_map(arg_refs.as_slice(), row_to_event)
         .map_err(map_sqlite_err)?;

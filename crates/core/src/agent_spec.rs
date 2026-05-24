@@ -116,9 +116,7 @@ impl AgentSpec {
     /// meta-specialists (`STOCK_META_AGENTS`). M5 forbids dynamic role
     /// invention outside these two lists.
     pub fn validate_name(name: &str) -> DomainResult<()> {
-        if STOCK_AGENTS.contains(&name)
-            || STOCK_META_AGENTS.iter().any(|(n, _)| *n == name)
-        {
+        if STOCK_AGENTS.contains(&name) || STOCK_META_AGENTS.iter().any(|(n, _)| *n == name) {
             Ok(())
         } else {
             Err(DomainError::Validation(format!(

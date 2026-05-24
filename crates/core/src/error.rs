@@ -3,7 +3,11 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum DomainError {
     #[error("invalid state transition: {entity} {from} -> {to}")]
-    InvalidTransition { entity: String, from: String, to: String },
+    InvalidTransition {
+        entity: String,
+        from: String,
+        to: String,
+    },
 
     #[error("validation error: {0}")]
     Validation(String),

@@ -39,7 +39,9 @@ impl FromStr for TaskStatus {
             "done" => Ok(TaskStatus::Done),
             "cancelled" => Ok(TaskStatus::Cancelled),
             "blocked" => Ok(TaskStatus::Blocked),
-            other => Err(DomainError::Validation(format!("unknown task status: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown task status: {other}"
+            ))),
         }
     }
 }
@@ -111,7 +113,11 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn check_transition(&self, target: TaskStatus, evidence: Option<&TaskEvidence>) -> DomainResult<()> {
+    pub fn check_transition(
+        &self,
+        target: TaskStatus,
+        evidence: Option<&TaskEvidence>,
+    ) -> DomainResult<()> {
         use TaskStatus::*;
         let ok = matches!(
             (self.status, target),
@@ -188,7 +194,9 @@ mod tests {
     fn invalid_transition_rejected() {
         let mut t = sample_task();
         t.status = TaskStatus::Done;
-        let err = t.check_transition(TaskStatus::InProgress, None).unwrap_err();
+        let err = t
+            .check_transition(TaskStatus::InProgress, None)
+            .unwrap_err();
         assert!(matches!(err, DomainError::InvalidTransition { .. }));
     }
 }

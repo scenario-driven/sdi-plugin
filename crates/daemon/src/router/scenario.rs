@@ -120,10 +120,7 @@ async fn list(
     Ok(Json(json!({ "scenarios": rows })))
 }
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn get_one(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     Ok(Json(json!(repo::get(&conn, &Id::from(id))?)))
 }
@@ -154,10 +151,7 @@ async fn update(
     Ok(Json(json!(fresh)))
 }
 
-async fn confirm(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn confirm(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let sid = Id::from(id);
     repo::set_status(&conn, &sid, ScenarioStatus::Confirmed)?;
@@ -212,10 +206,7 @@ async fn active_claims(
 /// expected to have run overlap detection client-side against
 /// `/scenarios/active-claims`; the daemon does not (yet) compute the glob
 /// intersection itself.
-async fn claim(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn claim(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let sid = Id::from(id);
     repo::set_claim_status(&conn, &sid, ClaimStatus::Active)?;
@@ -234,10 +225,7 @@ async fn claim(
 }
 
 /// D29 — transition scenario into `claim_status = 'released'`.
-async fn release(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn release(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let sid = Id::from(id);
     repo::set_claim_status(&conn, &sid, ClaimStatus::Released)?;

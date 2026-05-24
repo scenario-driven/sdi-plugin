@@ -1,0 +1,23 @@
+#!/bin/sh
+# SDI pre-commit hook: enforce `cargo fmt --all -- --check`.
+#
+# Behavior:
+#   - If `cargo` is missing (non-Rust contributor), warn to stderr and pass.
+#   - Otherwise run `cargo fmt --all -- --check`. On failure, instruct the
+#     developer to run `cargo fmt --all` and re-stage, then abort the commit.
+#   - Never auto-formats silently. Formatting is the developer's action.
+
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "[sdi pre-commit] warning: cargo not found on PATH; skipping rustfmt check." >&2
+    exit 0
+fi
+
+if ! cargo fmt --all -- --check; then
+    echo "" >&2
+    echo "[sdi pre-commit] rustfmt violations detected." >&2
+    echo "[sdi pre-commit] Run:    cargo fmt --all" >&2
+    echo "[sdi pre-commit] Then re-stage the formatted files and commit again." >&2
+    exit 1
+fi
+
+exit 0

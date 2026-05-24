@@ -9,8 +9,8 @@
 //! pretty JSON regardless of `--quiet`.
 
 use crate::cli::{
-    PatternAbortArgs, PatternCmd, PatternCreateArgs, PatternListArgs,
-    PatternTransitionArgs, PatternTreeArgs,
+    PatternAbortArgs, PatternCmd, PatternCreateArgs, PatternListArgs, PatternTransitionArgs,
+    PatternTreeArgs,
 };
 use crate::http::Client;
 use crate::output::emit;
@@ -44,8 +44,7 @@ async fn create(cli: &Client, args: PatternCreateArgs, quiet: bool) -> Result<()
     if let Some(v) = read_or_inline(args.steps_json, args.steps_from_file, "steps")? {
         body["steps"] = v;
     }
-    if let Some(v) = read_or_inline(args.reviewers_json, args.reviewers_from_file, "reviewers")?
-    {
+    if let Some(v) = read_or_inline(args.reviewers_json, args.reviewers_from_file, "reviewers")? {
         body["reviewers"] = v;
     }
     if let Some(v) = read_or_inline(args.fan_out_json, args.fan_out_from_file, "fan_out")? {
@@ -138,8 +137,8 @@ fn read_or_inline(
         (None, Some(path)) => std::fs::read_to_string(&path)
             .with_context(|| format!("read --{}-from-file: {}", field, path))?,
     };
-    let v: Value = serde_json::from_str(raw.trim())
-        .with_context(|| format!("parse --{}-json", field))?;
+    let v: Value =
+        serde_json::from_str(raw.trim()).with_context(|| format!("parse --{}-json", field))?;
     Ok(Some(v))
 }
 
@@ -170,12 +169,7 @@ async fn patch_lifecycle(cli: &Client, id: &str, body: &Value) -> Result<Value> 
             if let Some(err) = v.get("error") {
                 let code = err.get("code").and_then(|c| c.as_str()).unwrap_or("ERROR");
                 let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("");
-                return Err(anyhow!(
-                    "HTTP {} {}: {}",
-                    status.as_u16(),
-                    code,
-                    msg
-                ));
+                return Err(anyhow!("HTTP {} {}: {}", status.as_u16(), code, msg));
             }
         }
         return Err(anyhow!(

@@ -65,9 +65,7 @@ async fn update(cli: &Client, args: PlanUpdateArgs, quiet: bool) -> Result<()> {
 }
 
 async fn transition(cli: &Client, id: &str, action: &str, quiet: bool) -> Result<()> {
-    let v: Value = cli
-        .post_empty(&format!("/plans/{}/{}", id, action))
-        .await?;
+    let v: Value = cli.post_empty(&format!("/plans/{}/{}", id, action)).await?;
     emit(&v, quiet)
 }
 

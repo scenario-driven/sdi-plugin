@@ -152,12 +152,12 @@ async fn simple_get(cli: &Client, path: &str) -> Result<()> {
 
 /// Parse `SCN-ID=result@evidence_ref` into the JSON shape the daemon wants.
 fn parse_evidence(spec: &str) -> Result<Value> {
-    let (head, evidence_ref) = spec
-        .split_once('@')
-        .ok_or_else(|| anyhow::anyhow!("--evidence must be SCN-ID=result@evidence_ref, got: {spec}"))?;
-    let (scn, result) = head
-        .split_once('=')
-        .ok_or_else(|| anyhow::anyhow!("--evidence must be SCN-ID=result@evidence_ref, got: {spec}"))?;
+    let (head, evidence_ref) = spec.split_once('@').ok_or_else(|| {
+        anyhow::anyhow!("--evidence must be SCN-ID=result@evidence_ref, got: {spec}")
+    })?;
+    let (scn, result) = head.split_once('=').ok_or_else(|| {
+        anyhow::anyhow!("--evidence must be SCN-ID=result@evidence_ref, got: {spec}")
+    })?;
     Ok(json!({
         "scenario_id": scn,
         "result": result,

@@ -92,10 +92,7 @@ async fn list(
     Ok(Json(json!({ "knowledge": rows })))
 }
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn get_one(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     Ok(Json(json!(repo::get(&conn, &Id::from(id))?)))
 }

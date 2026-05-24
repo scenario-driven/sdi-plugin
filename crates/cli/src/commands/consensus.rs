@@ -33,7 +33,9 @@ async fn status(cli: &Client, args: ConsensusStatusArgs) -> Result<()> {
         let proposal_id = if kind == "proposal" {
             id
         } else {
-            row.get("proposal_id").and_then(|s| s.as_str()).unwrap_or("")
+            row.get("proposal_id")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
         };
         if proposal_id.is_empty() {
             continue;
@@ -43,17 +45,15 @@ async fn status(cli: &Client, args: ConsensusStatusArgs) -> Result<()> {
                 continue;
             }
         }
-        let entry = groups
-            .entry(proposal_id.to_string())
-            .or_insert_with(|| {
-                json!({
-                    "proposal_id": proposal_id,
-                    "proposal": Value::Null,
-                    "critiques": Value::Array(vec![]),
-                    "consensus": Value::Null,
-                    "dissensus": Value::Null,
-                })
-            });
+        let entry = groups.entry(proposal_id.to_string()).or_insert_with(|| {
+            json!({
+                "proposal_id": proposal_id,
+                "proposal": Value::Null,
+                "critiques": Value::Array(vec![]),
+                "consensus": Value::Null,
+                "dissensus": Value::Null,
+            })
+        });
         match kind {
             "proposal" => {
                 entry["proposal"] = row.clone();
@@ -81,9 +81,17 @@ async fn status(cli: &Client, args: ConsensusStatusArgs) -> Result<()> {
                 .and_then(|v| v.as_array())
                 .map(|a| a.len())
                 .unwrap_or(0);
-            let stage = if entry.get("dissensus").map(|v| !v.is_null()).unwrap_or(false) {
+            let stage = if entry
+                .get("dissensus")
+                .map(|v| !v.is_null())
+                .unwrap_or(false)
+            {
                 "dissensus"
-            } else if entry.get("consensus").map(|v| !v.is_null()).unwrap_or(false) {
+            } else if entry
+                .get("consensus")
+                .map(|v| !v.is_null())
+                .unwrap_or(false)
+            {
                 "consensus"
             } else if critique_count > 0 {
                 "critique"

@@ -41,9 +41,7 @@ async fn create(
     Json(body): Json<CreateProjectBody>,
 ) -> ApiResult<Json<Value>> {
     let id = Id::new(IdKind::Project);
-    let slug = body
-        .slug
-        .unwrap_or_else(|| slug::slugify(&body.name));
+    let slug = body.slug.unwrap_or_else(|| slug::slugify(&body.name));
     let project = Project {
         id: id.clone(),
         key: body.key,
@@ -70,10 +68,7 @@ async fn list(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "projects": rows })))
 }
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn get_one(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let p = repo::get(&conn, &Id::from(id))?;
     Ok(Json(json!(p)))
@@ -165,10 +160,7 @@ async fn by_cwd(
     Ok(Json(json!({ "project": found })))
 }
 
-async fn by_key(
-    State(state): State<AppState>,
-    Path(key): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn by_key(State(state): State<AppState>, Path(key): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let found = repo::find_by_key(&conn, &key)?;
     Ok(Json(json!({ "project": found })))

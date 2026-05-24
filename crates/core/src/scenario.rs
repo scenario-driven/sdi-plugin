@@ -29,7 +29,9 @@ impl FromStr for ScenarioStatus {
         match s {
             "draft" => Ok(ScenarioStatus::Draft),
             "confirmed" => Ok(ScenarioStatus::Confirmed),
-            other => Err(DomainError::Validation(format!("unknown scenario status: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown scenario status: {other}"
+            ))),
         }
     }
 }
@@ -63,7 +65,9 @@ impl FromStr for ScenarioResult {
             "failing" => Ok(ScenarioResult::Failing),
             "impacted" => Ok(ScenarioResult::Impacted),
             "retired" => Ok(ScenarioResult::Retired),
-            other => Err(DomainError::Validation(format!("unknown scenario result: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown scenario result: {other}"
+            ))),
         }
     }
 }
@@ -146,9 +150,8 @@ impl Scenario {
 /// separators / glob wildcards are rejected (must carry at least one literal
 /// character so the daemon claim ledger can compare overlaps meaningfully).
 pub fn validate_claimed_resources(s: &str) -> DomainResult<Vec<String>> {
-    let parsed: Vec<String> = serde_json::from_str(s).map_err(|e| {
-        DomainError::Validation(format!("claimed_resources parse error: {e}"))
-    })?;
+    let parsed: Vec<String> = serde_json::from_str(s)
+        .map_err(|e| DomainError::Validation(format!("claimed_resources parse error: {e}")))?;
     for entry in &parsed {
         let trimmed = entry.trim();
         if trimmed.is_empty() {
@@ -158,9 +161,7 @@ pub fn validate_claimed_resources(s: &str) -> DomainResult<Vec<String>> {
         }
         // Reject globs that have no literal anchor at all (e.g. "**", "*",
         // "**/*") — they would match every file and defeat overlap detection.
-        let has_literal = trimmed
-            .chars()
-            .any(|c| !matches!(c, '*' | '?' | '/' | '.'));
+        let has_literal = trimmed.chars().any(|c| !matches!(c, '*' | '?' | '/' | '.'));
         if !has_literal {
             return Err(DomainError::Validation(format!(
                 "claimed_resources entry has no literal path component: {entry}"
@@ -193,8 +194,7 @@ mod tests {
 
     #[test]
     fn depends_on_rejects_self_reference() {
-        let err =
-            Scenario::validate_depends_on("US-A-001", &["US-A-001".into()]).unwrap_err();
+        let err = Scenario::validate_depends_on("US-A-001", &["US-A-001".into()]).unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
     }
 

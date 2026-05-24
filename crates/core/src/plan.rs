@@ -31,7 +31,9 @@ impl FromStr for PlanStatus {
             "draft" => Ok(PlanStatus::Draft),
             "active" => Ok(PlanStatus::Active),
             "completed" => Ok(PlanStatus::Completed),
-            other => Err(DomainError::Validation(format!("unknown plan status: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown plan status: {other}"
+            ))),
         }
     }
 }

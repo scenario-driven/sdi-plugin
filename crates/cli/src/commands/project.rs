@@ -73,7 +73,10 @@ async fn detach_cwd(cli: &Client, project_id: &str, cwd: &str) -> Result<()> {
     // axum's `.delete()` route on `/projects/:id/cwds` takes a JSON body; we
     // can't use a GET-style query, so emulate with reqwest.delete().
     let v: Value = cli
-        .delete_with_body(&format!("/projects/{}/cwds", project_id), &json!({ "cwd": cwd }))
+        .delete_with_body(
+            &format!("/projects/{}/cwds", project_id),
+            &json!({ "cwd": cwd }),
+        )
         .await?;
     emit(&v, false)
 }

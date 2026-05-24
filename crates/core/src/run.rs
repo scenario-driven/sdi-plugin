@@ -43,7 +43,9 @@ impl FromStr for RunResult {
             "success" => Ok(Self::Success),
             "failure" => Ok(Self::Failure),
             "aborted" => Ok(Self::Aborted),
-            other => Err(DomainError::Validation(format!("unknown run result: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown run result: {other}"
+            ))),
         }
     }
 }
@@ -98,7 +100,9 @@ impl FromStr for RelationKind {
             "depends-on" => Ok(Self::DependsOn),
             "duplicates" => Ok(Self::Duplicates),
             "related" => Ok(Self::Related),
-            other => Err(DomainError::Validation(format!("unknown relation kind: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown relation kind: {other}"
+            ))),
         }
     }
 }

@@ -41,7 +41,10 @@ pub fn router() -> Router<AppState> {
         .route("/tasks/:id/ancestors", get(ancestors))
         .route("/tasks/:id/descendants", get(descendants))
         .route("/tasks/:id/subtree", get(subtree))
-        .route("/tasks/:id/relations", post(create_relation).get(list_relations))
+        .route(
+            "/tasks/:id/relations",
+            post(create_relation).get(list_relations),
+        )
         .route("/relations/:id", delete(delete_relation))
         // lease
         .route("/tasks/:id/lease", post(acquire_lease).get(get_lease))
@@ -197,7 +200,11 @@ async fn decompose(
             short_code: child.short_code,
             description: child.description,
             status: TaskStatus::Todo,
-            parent_scenario_ids: child.parent_scenario_ids.into_iter().map(Id::from).collect(),
+            parent_scenario_ids: child
+                .parent_scenario_ids
+                .into_iter()
+                .map(Id::from)
+                .collect(),
             parent_requirement_ids: child
                 .parent_requirement_ids
                 .into_iter()
@@ -262,10 +269,7 @@ async fn descendants(
     Ok(Json(json!({ "descendants": tasks })))
 }
 
-async fn subtree(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn subtree(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let root = task_repo::get(&conn, &Id::from(id.clone()))?;
     let ids = repo::descendants(&conn, &Id::from(id))?;
@@ -273,7 +277,9 @@ async fn subtree(
         .iter()
         .filter_map(|i| task_repo::get(&conn, i).ok())
         .collect();
-    Ok(Json(json!({ "root": root, "descendants": descendants_tasks })))
+    Ok(Json(
+        json!({ "root": root, "descendants": descendants_tasks }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]

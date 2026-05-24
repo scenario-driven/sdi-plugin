@@ -18,17 +18,29 @@ async fn main() -> Result<()> {
         Cmd::Project(sub) => commands::project::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Plan(sub) => commands::plan::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Req(sub) => commands::requirement::run(&entity_client().await?, sub, app.quiet).await,
-        Cmd::Scenario(sub) => commands::scenario::run(&entity_client().await?, sub, app.quiet).await,
+        Cmd::Scenario(sub) => {
+            commands::scenario::run(&entity_client().await?, sub, app.quiet).await
+        }
         Cmd::Round(sub) => commands::round::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Task(sub) => commands::task::run(&entity_client().await?, sub, app.quiet).await,
-        Cmd::Decision(sub) => commands::decision::run(&entity_client().await?, sub, app.quiet).await,
-        Cmd::Knowledge(sub) => commands::knowledge::run(&entity_client().await?, sub, app.quiet).await,
-        Cmd::Autonomy(sub) => commands::autonomy::run(&entity_client().await?, sub, app.quiet).await,
-        Cmd::AgentNote(sub) => commands::agent_note::run(&entity_client().await?, sub, app.quiet).await,
+        Cmd::Decision(sub) => {
+            commands::decision::run(&entity_client().await?, sub, app.quiet).await
+        }
+        Cmd::Knowledge(sub) => {
+            commands::knowledge::run(&entity_client().await?, sub, app.quiet).await
+        }
+        Cmd::Autonomy(sub) => {
+            commands::autonomy::run(&entity_client().await?, sub, app.quiet).await
+        }
+        Cmd::AgentNote(sub) => {
+            commands::agent_note::run(&entity_client().await?, sub, app.quiet).await
+        }
         Cmd::Consensus(sub) => commands::consensus::run(&entity_client().await?, sub).await,
         Cmd::Pattern(sub) => commands::pattern::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Comment(sub) => commands::comment::run(&entity_client().await?, sub, app.quiet).await,
-        Cmd::Question(sub) => commands::question::run(&entity_client().await?, sub, app.quiet).await,
+        Cmd::Question(sub) => {
+            commands::question::run(&entity_client().await?, sub, app.quiet).await
+        }
         Cmd::Run(sub) => commands::run::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Usage(sub) => commands::usage::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Dashboard(args) => commands::aggregate::dashboard(&entity_client().await?, args).await,

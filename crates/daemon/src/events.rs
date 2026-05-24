@@ -19,14 +19,14 @@ pub async fn sse_handler(
     let rx = state.events.subscribe();
     let hello = stream::once(async {
         Ok::<_, Infallible>(
-            Event::default()
-                .event("hello")
-                .data(serde_json::to_string(&EventEnvelope {
+            Event::default().event("hello").data(
+                serde_json::to_string(&EventEnvelope {
                     kind: "hello".into(),
                     entity_id: None,
                     payload: serde_json::json!({"daemon": "sdid"}),
                 })
-                .unwrap_or_else(|_| "{}".into())),
+                .unwrap_or_else(|_| "{}".into()),
+            ),
         )
     });
     let live = BroadcastStream::new(rx).filter_map(|res| match res {

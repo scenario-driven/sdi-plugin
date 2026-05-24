@@ -94,10 +94,7 @@ fn sdi_mcp_advertises_all_nine_tools_over_stdio() {
         panic!("bad tools/list response: {e}\n{line}");
     });
     let tools = v["result"]["tools"].as_array().expect("tools array");
-    let names: Vec<&str> = tools
-        .iter()
-        .filter_map(|t| t["name"].as_str())
-        .collect();
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     // E2 reads + E3 writes = 9 tools.
     for expected in [
         "search_knowledge",

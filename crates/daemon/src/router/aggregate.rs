@@ -147,10 +147,7 @@ async fn dashboard(
 // handoff
 // ---------------------------------------------------------------------------
 
-async fn handoff(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn handoff(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let project = project_repo::get(&conn, &Id::from(id))?;
     let active_plan = plan_repo::find_active_for_project(&conn, &project.id)?;
@@ -222,7 +219,9 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<axum::response::Res
     buf.push_str(&format!("sdi_usage_input_tokens_total {total_tokens_in}\n"));
     buf.push_str("# HELP sdi_usage_output_tokens_total Output tokens across all runs\n");
     buf.push_str("# TYPE sdi_usage_output_tokens_total counter\n");
-    buf.push_str(&format!("sdi_usage_output_tokens_total {total_tokens_out}\n"));
+    buf.push_str(&format!(
+        "sdi_usage_output_tokens_total {total_tokens_out}\n"
+    ));
 
     Ok(axum::response::Response::builder()
         .header("content-type", "text/plain; version=0.0.4")
@@ -319,7 +318,9 @@ async fn list_usage(
     } else if let Some(p) = q.project_id {
         usage_repo::list_by_project(&conn, &Id::from(p))?
     } else {
-        return Err(DomainError::Validation("project_id, plan_id, or task_id required".into()).into());
+        return Err(
+            DomainError::Validation("project_id, plan_id, or task_id required".into()).into(),
+        );
     };
     Ok(Json(json!({ "usage_records": rows })))
 }
@@ -442,7 +443,9 @@ async fn import_plans(
         }
         if let Some(arr) = entry.get("requirements").and_then(|v| v.as_array()) {
             for v in arr {
-                if let Ok(r) = serde_json::from_value::<sdi_core::requirement::Requirement>(v.clone()) {
+                if let Ok(r) =
+                    serde_json::from_value::<sdi_core::requirement::Requirement>(v.clone())
+                {
                     if requirement_repo::insert(&conn, &r).is_ok() {
                         imported_requirements += 1;
                     }
@@ -515,7 +518,11 @@ async fn export_knowledge(
     Query(q): Query<ExportKnowledgeQuery>,
 ) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
-    let scope = q.scope.as_deref().map(KnowledgeScope::from_str).transpose()?;
+    let scope = q
+        .scope
+        .as_deref()
+        .map(KnowledgeScope::from_str)
+        .transpose()?;
     let items = knowledge_repo::list_by_project(&conn, &Id::from(q.project_id), scope)?;
     Ok(Json(json!({
         "version": 1,

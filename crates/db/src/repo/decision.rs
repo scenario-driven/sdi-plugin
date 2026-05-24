@@ -60,13 +60,9 @@ pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
         // D20 — enforce M3 ordering for non-proposal, non-rollback stages.
         let existing = list_kinds_by_proposal(
             conn,
-            decision
-                .proposal_id
-                .as_ref()
-                .ok_or_else(|| DomainError::Validation(format!(
-                    "{} decision requires proposal_id",
-                    decision.kind
-                )))?,
+            decision.proposal_id.as_ref().ok_or_else(|| {
+                DomainError::Validation(format!("{} decision requires proposal_id", decision.kind))
+            })?,
         )?;
         Decision::validate_stage_transition(
             decision.kind,
@@ -90,15 +86,24 @@ pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
             decision.title,
             decision.body,
             decision.status.to_string(),
-            decision.supersedes_id.as_ref().map(|i| i.as_str().to_string()),
+            decision
+                .supersedes_id
+                .as_ref()
+                .map(|i| i.as_str().to_string()),
             decision.kind.to_string(),
-            decision.proposal_id.as_ref().map(|i| i.as_str().to_string()),
+            decision
+                .proposal_id
+                .as_ref()
+                .map(|i| i.as_str().to_string()),
             decision.agent_name,
             decision.escalated_at.map(fmt_ts),
             decision.produced_via_pattern_id,
             decision.reversal_plan,
             decision.blast_radius_score as i64,
-            decision.reversal_of.as_ref().map(|i| i.as_str().to_string()),
+            decision
+                .reversal_of
+                .as_ref()
+                .map(|i| i.as_str().to_string()),
             fmt_ts(decision.created_at),
         ],
     )
@@ -131,9 +136,9 @@ pub fn list_kinds_by_proposal(
     let mut out = Vec::new();
     for r in rows {
         let raw = r.map_err(map_sqlite_err)?;
-        let kind: DecisionKind = raw
-            .parse()
-            .map_err(|e: DomainError| map_sqlite_err(rusqlite::Error::ToSqlConversionFailure(Box::new(e))))?;
+        let kind: DecisionKind = raw.parse().map_err(|e: DomainError| {
+            map_sqlite_err(rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+        })?;
         out.push(kind);
     }
     Ok(out)
@@ -307,7 +312,10 @@ mod tests {
         d.blast_radius_score = 3;
         insert(&conn, &d).unwrap();
         let fetched = get(&conn, &d.id).unwrap();
-        assert_eq!(fetched.produced_via_pattern_id.as_deref(), Some(pat.id.as_str()));
+        assert_eq!(
+            fetched.produced_via_pattern_id.as_deref(),
+            Some(pat.id.as_str())
+        );
         assert_eq!(
             fetched.reversal_plan.as_deref(),
             Some(r#"{"type":"git_revert","sha":"abc123"}"#)

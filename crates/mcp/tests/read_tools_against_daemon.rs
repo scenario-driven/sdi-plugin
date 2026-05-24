@@ -54,7 +54,12 @@ async fn http() -> reqwest::Client {
 }
 
 async fn post(c: &reqwest::Client, base: &str, path: &str, body: &Value) -> Value {
-    let resp = c.post(format!("{}{}", base, path)).json(body).send().await.unwrap();
+    let resp = c
+        .post(format!("{}{}", base, path))
+        .json(body)
+        .send()
+        .await
+        .unwrap();
     let status = resp.status();
     let text = resp.text().await.unwrap();
     assert!(status.is_success(), "{path} → {status}: {text}");
@@ -195,7 +200,11 @@ async fn search_knowledge_never_leaks_reference_scope() {
     let res = tool
         .call(json!({ "project_id": seeded.project_id, "q": "uniqkeyword" }))
         .await;
-    assert!(!res.is_error, "search_knowledge surfaced error: {:?}", res.content);
+    assert!(
+        !res.is_error,
+        "search_knowledge surfaced error: {:?}",
+        res.content
+    );
     let text = match &res.content[0] {
         sdi_mcp::protocol::ContentBlock::Text { text } => text.clone(),
     };

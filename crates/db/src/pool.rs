@@ -57,9 +57,7 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
         let pool = open_pool(&tmp).unwrap();
         let conn = pool.get().unwrap();
-        let n: i64 = conn
-            .query_row("SELECT 1", [], |r| r.get(0))
-            .unwrap();
+        let n: i64 = conn.query_row("SELECT 1", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
         let _ = std::fs::remove_file(&tmp);
     }

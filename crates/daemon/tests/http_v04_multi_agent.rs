@@ -105,7 +105,11 @@ async fn autonomy_upsert_resolve_and_circuit_breaker() {
         .send()
         .await
         .unwrap();
-    assert!(r1.status().is_success(), "global upsert failed: {:?}", r1.status());
+    assert!(
+        r1.status().is_success(),
+        "global upsert failed: {:?}",
+        r1.status()
+    );
 
     // Upsert plan L4 — should resolve first.
     c.post(format!("{}/autonomy_policies", base))
@@ -211,7 +215,10 @@ async fn agent_note_handoff_round_trip() {
     let note_id = note["id"].as_str().unwrap().to_string();
 
     let pending: serde_json::Value = c
-        .get(format!("{}/agent_notes/handoffs?to_agent=test-runner", base))
+        .get(format!(
+            "{}/agent_notes/handoffs?to_agent=test-runner",
+            base
+        ))
         .send()
         .await
         .unwrap()
@@ -228,7 +235,10 @@ async fn agent_note_handoff_round_trip() {
     assert!(ack.status().is_success());
 
     let pending: serde_json::Value = c
-        .get(format!("{}/agent_notes/handoffs?to_agent=test-runner", base))
+        .get(format!(
+            "{}/agent_notes/handoffs?to_agent=test-runner",
+            base
+        ))
         .send()
         .await
         .unwrap()
@@ -309,5 +319,8 @@ async fn decision_m3_gate_blocks_consensus_without_critique() {
         .send()
         .await
         .unwrap();
-    assert!(ok.status().is_success(), "consensus after critique should succeed");
+    assert!(
+        ok.status().is_success(),
+        "consensus after critique should succeed"
+    );
 }

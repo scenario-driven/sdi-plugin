@@ -73,18 +73,15 @@ async fn list(
     State(state): State<AppState>,
     Query(q): Query<ListReqQuery>,
 ) -> ApiResult<Json<Value>> {
-    let plan_id = q.plan_id.ok_or_else(|| {
-        DomainError::Validation("plan_id query parameter required".into())
-    })?;
+    let plan_id = q
+        .plan_id
+        .ok_or_else(|| DomainError::Validation("plan_id query parameter required".into()))?;
     let conn = state.conn()?;
     let rows = repo::list_by_plan(&conn, &Id::from(plan_id))?;
     Ok(Json(json!({ "requirements": rows })))
 }
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn get_one(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     Ok(Json(json!(repo::get(&conn, &Id::from(id))?)))
 }

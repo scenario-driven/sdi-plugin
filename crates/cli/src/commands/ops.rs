@@ -22,13 +22,13 @@ pub async fn init(cli: &Client, args: InitArgs) -> Result<()> {
         .and_then(|s| s.to_str())
         .unwrap_or("project");
     let name = args.name.clone().unwrap_or_else(|| basename.to_string());
-    let key = args
-        .key
-        .clone()
-        .unwrap_or_else(|| slug_to_key(basename));
+    let key = args.key.clone().unwrap_or_else(|| slug_to_key(basename));
     // Idempotent: if a project already owns this cwd, return it.
     let by_cwd: Value = cli
-        .get_json(&format!("/projects/by-cwd?cwd={}", urlencode(&cwd.display().to_string())))
+        .get_json(&format!(
+            "/projects/by-cwd?cwd={}",
+            urlencode(&cwd.display().to_string())
+        ))
         .await
         .unwrap_or(Value::Null);
     if let Some(proj) = by_cwd.get("project") {
@@ -68,11 +68,15 @@ pub fn backup(paths: &Paths, output: &str) -> Result<()> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::copy(src, dst).with_context(|| format!("copy {} -> {}", src.display(), dst.display()))?;
-    println!("{}", json!({
-        "backup": dst.display().to_string(),
-        "source": src.display().to_string(),
-    }));
+    std::fs::copy(src, dst)
+        .with_context(|| format!("copy {} -> {}", src.display(), dst.display()))?;
+    println!(
+        "{}",
+        json!({
+            "backup": dst.display().to_string(),
+            "source": src.display().to_string(),
+        })
+    );
     Ok(())
 }
 
@@ -81,12 +85,14 @@ pub fn restore(paths: &Paths, input: &str) -> Result<()> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::copy(input, dst)
-        .with_context(|| format!("copy {} -> {}", input, dst.display()))?;
-    println!("{}", json!({
-        "restored": dst.display().to_string(),
-        "source": input,
-    }));
+    std::fs::copy(input, dst).with_context(|| format!("copy {} -> {}", input, dst.display()))?;
+    println!(
+        "{}",
+        json!({
+            "restored": dst.display().to_string(),
+            "source": input,
+        })
+    );
     Ok(())
 }
 
@@ -172,7 +178,9 @@ pub async fn watch(cli: &Client, args: WatchArgs) -> Result<()> {
                 }
             }
             let Some(data) = data_line else { continue };
-            let Ok(ev) = serde_json::from_str::<Value>(data) else { continue };
+            let Ok(ev) = serde_json::from_str::<Value>(data) else {
+                continue;
+            };
             if let Some(prefix) = &args.kind {
                 let kind = ev.get("kind").and_then(|v| v.as_str()).unwrap_or("");
                 if !kind.starts_with(prefix) {

@@ -308,7 +308,10 @@ mod tests {
 
     #[test]
     fn floor_forces_architecture_to_l4() {
-        assert_eq!(AutonomyMode::floor_for_kind("architecture"), AutonomyMode::L4);
+        assert_eq!(
+            AutonomyMode::floor_for_kind("architecture"),
+            AutonomyMode::L4
+        );
         assert_eq!(AutonomyMode::floor_for_kind("schema"), AutonomyMode::L4);
         assert_eq!(
             AutonomyMode::floor_for_kind("naming-canonical"),
@@ -334,21 +337,15 @@ mod tests {
     #[test]
     fn validate_scope_global_forbids_plan_id() {
         let pid: Id = "PLAN-x".into();
-        let err =
-            AutonomyPolicy::validate_scope(AutonomyScopeKind::Global, Some(&pid), None, None)
-                .unwrap_err();
+        let err = AutonomyPolicy::validate_scope(AutonomyScopeKind::Global, Some(&pid), None, None)
+            .unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
     }
 
     #[test]
     fn validate_scope_pattern_kind_requires_pattern_kind() {
-        let err = AutonomyPolicy::validate_scope(
-            AutonomyScopeKind::PatternKind,
-            None,
-            None,
-            None,
-        )
-        .unwrap_err();
+        let err = AutonomyPolicy::validate_scope(AutonomyScopeKind::PatternKind, None, None, None)
+            .unwrap_err();
         assert!(matches!(err, DomainError::Validation(_)));
     }
 
@@ -377,14 +374,26 @@ mod tests {
 
     #[test]
     fn default_pattern_kind_mode_defaults() {
-        assert_eq!(AutonomyMode::default_pattern_kind_mode("workflow"), AutonomyMode::L5);
-        assert_eq!(AutonomyMode::default_pattern_kind_mode("graph"), AutonomyMode::L5);
-        assert_eq!(AutonomyMode::default_pattern_kind_mode("swarm"), AutonomyMode::L4);
+        assert_eq!(
+            AutonomyMode::default_pattern_kind_mode("workflow"),
+            AutonomyMode::L5
+        );
+        assert_eq!(
+            AutonomyMode::default_pattern_kind_mode("graph"),
+            AutonomyMode::L5
+        );
+        assert_eq!(
+            AutonomyMode::default_pattern_kind_mode("swarm"),
+            AutonomyMode::L4
+        );
         assert_eq!(
             AutonomyMode::default_pattern_kind_mode("agents-as-tools"),
             AutonomyMode::L4
         );
-        assert_eq!(AutonomyMode::default_pattern_kind_mode("direct"), AutonomyMode::L3);
+        assert_eq!(
+            AutonomyMode::default_pattern_kind_mode("direct"),
+            AutonomyMode::L3
+        );
     }
 
     #[test]

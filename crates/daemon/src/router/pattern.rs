@@ -148,10 +148,7 @@ struct ListQuery {
     plan_id: String,
 }
 
-async fn list(
-    State(state): State<AppState>,
-    Query(q): Query<ListQuery>,
-) -> ApiResult<Json<Value>> {
+async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let rows = repo::list_by_plan(&conn, &Id::from(q.plan_id))?;
     let payload: Vec<Value> = rows.iter().map(pattern_payload).collect();
@@ -169,13 +166,9 @@ async fn list_active(State(state): State<AppState>) -> ApiResult<Json<Value>> {
 
 // ── GET /patterns/:id ──────────────────────────────────────────────────────
 
-async fn get_one(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn get_one(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
-    let row = repo::get(&conn, &Id::from(id.clone()))?
-        .ok_or(DomainError::NotFound(id))?;
+    let row = repo::get(&conn, &Id::from(id.clone()))?.ok_or(DomainError::NotFound(id))?;
     Ok(Json(pattern_payload(&row)))
 }
 
@@ -197,8 +190,7 @@ async fn transition_lifecycle(
     let next = PatternLifecycle::from_str(&b.to)?;
     let conn = state.conn()?;
     let pid = Id::from(id.clone());
-    let current = repo::get(&conn, &pid)?
-        .ok_or_else(|| DomainError::NotFound(id.clone()))?;
+    let current = repo::get(&conn, &pid)?.ok_or_else(|| DomainError::NotFound(id.clone()))?;
     let current_lifecycle = PatternLifecycle::from_str(&current.lifecycle)?;
 
     // Reject moves out of terminal states (converged/dissensus/aborted).
@@ -229,8 +221,7 @@ async fn transition_lifecycle(
     }
 
     repo::update_lifecycle(&conn, &pid, next.as_str(), b.reason.as_deref())?;
-    let fresh = repo::get(&conn, &pid)?
-        .ok_or(DomainError::NotFound(id))?;
+    let fresh = repo::get(&conn, &pid)?.ok_or(DomainError::NotFound(id))?;
     state.publish(EventEnvelope {
         kind: "pattern_lifecycle".into(),
         entity_id: Some(fresh.id.clone()),
@@ -258,10 +249,9 @@ async fn method_not_allowed() -> Result<Json<Value>, (StatusCode, Json<Value>)> 
 
 fn encode_opt<T: serde::Serialize>(v: &Option<T>) -> DomainResult<Option<String>> {
     match v {
-        Some(x) => Ok(Some(
-            serde_json::to_string(x)
-                .map_err(|e| DomainError::Validation(format!("encode pattern field: {e}")))?,
-        )),
+        Some(x) => Ok(Some(serde_json::to_string(x).map_err(|e| {
+            DomainError::Validation(format!("encode pattern field: {e}"))
+        })?)),
         None => Ok(None),
     }
 }

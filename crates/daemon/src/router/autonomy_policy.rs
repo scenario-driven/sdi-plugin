@@ -115,10 +115,7 @@ struct ListQuery {
     project_id: String,
 }
 
-async fn list(
-    State(state): State<AppState>,
-    Query(q): Query<ListQuery>,
-) -> ApiResult<Json<Value>> {
+async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let rows = repo::list_by_project(&conn, &Id::from(q.project_id))?;
     Ok(Json(json!({ "policies": rows })))
