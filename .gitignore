@@ -34,3 +34,12 @@ plugin/daemon/bin/*
 
 # Local install marker written by ensureInstalled (LM-8: lives under pluginRoot)
 plugin/.sdi-version
+
+# sdi-web build artifacts. Source lives in plugin/web/ (snapshot-imported from
+# the now-archived sdi-web repo); the built SPA is served by sdid via tower-http
+# ServeDir under plugin/web/dist/. Generated on demand by `pnpm --dir plugin/web
+# build` (release.yml + first-run install prompt).
+plugin/web/node_modules/
+plugin/web/dist/
+plugin/web/*.tsbuildinfo
+plugin/web/.vite/
