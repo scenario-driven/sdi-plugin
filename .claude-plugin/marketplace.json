@@ -1,0 +1,19 @@
+{
+  "name": "scenario-driven-sdi-plugin",
+  "owner": {
+    "name": "scenario-driven",
+    "url": "https://github.com/scenario-driven"
+  },
+  "plugins": [
+    {
+      "name": "sdi",
+      "source": "./plugin",
+      "description": "Scenario-Driven Implementation engine for Claude Code. Natural-language GWT scenarios as first-class citizens; LLM implements + verifies + auto-regresses.",
+      "version": "0.0.0",
+      "license": "MIT",
+      "homepage": "https://github.com/scenario-driven/sdi-plugin",
+      "category": "workflow",
+      "tags": ["sdi", "scenario-driven", "gwt", "multi-agent", "tdd", "bdd"]
+    }
+  ]
+}
