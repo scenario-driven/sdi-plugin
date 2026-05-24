@@ -243,10 +243,16 @@ test(
         agent_id: '00000000-0000-0000-0000-0000000000aa',
         agent_type: 'impl-coder',
       };
+      // Claude Code passes the session cwd through the PreToolUse payload; the
+      // project-scope gate (runPreToolUse) keys off it. Without an explicit
+      // `cwd`, the hook falls back to `process.cwd()` of the shim runner —
+      // which is not a registered SDI project, so every gate downstream is
+      // skipped (silent skip masks the real assertion intent).
       const preEdit = runShim(
         'pre-tool-use.cjs',
         taskEnv,
         JSON.stringify({
+          cwd: projectCwd,
           tool_name: 'Edit',
           tool_input: { file_path: filePath },
           ...subAgentEnv,
@@ -259,21 +265,21 @@ test(
       const postEdit = runShim(
         'post-tool-use.cjs',
         taskEnv,
-        JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: filePath } }),
+        JSON.stringify({ cwd: projectCwd, tool_name: 'Edit', tool_input: { file_path: filePath } }),
       );
       assert.equal(postEdit.status, 0, `post-tool-use stderr=${postEdit.stderr}`);
 
       const subStart = runShim(
         'subagent-start.cjs',
         taskEnv,
-        JSON.stringify({ subagent_type: 'Plan' }),
+        JSON.stringify({ cwd: projectCwd, subagent_type: 'Plan' }),
       );
       assert.equal(subStart.status, 0, `subagent-start stderr=${subStart.stderr}`);
 
       const subStop = runShim(
         'subagent-stop.cjs',
         taskEnv,
-        JSON.stringify({ subagent_type: 'Plan', result: 'design complete' }),
+        JSON.stringify({ cwd: projectCwd, subagent_type: 'Plan', result: 'design complete' }),
       );
       assert.equal(subStop.status, 0, `subagent-stop stderr=${subStop.stderr}`);
 
@@ -286,6 +292,7 @@ test(
         'pre-tool-use.cjs',
         shimEnv(home, {}),
         JSON.stringify({
+          cwd: projectCwd,
           tool_name: 'Edit',
           tool_input: { file_path: filePath },
           ...subAgentEnv,
