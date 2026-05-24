@@ -22,6 +22,11 @@ const WORKSPACE_ROOT = path.resolve(PLUGIN_ROOT, '..');
 const SHARED = path.join(PLUGIN_ROOT, 'adapters/shared/sdi-hooks.cjs');
 const SHIM_DIR = path.join(PLUGIN_ROOT, 'adapters/claude');
 
+// Stable fake project cwd used across PreToolUse tests. The mock daemon
+// returns a registered project for ANY cwd, so this constant just keeps
+// stdin payloads readable.
+const PROJECT_CWD = '/tmp/sdi-mock-project';
+
 function mkTempHome(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
 }
@@ -42,6 +47,82 @@ function runShim(name, env, stdin) {
     input: stdin || '',
     encoding: 'utf8',
     timeout: 10000,
+  });
+}
+
+// Async shim runner — required when the child shim calls back into a mock
+// HTTP server hosted in this process. spawnSync deadlocks the mock (parent
+// blocked → no accept → request times out).
+function runShimAsync(name, env, stdin) {
+  return new Promise((resolve) => {
+    const shim = path.join(SHIM_DIR, name);
+    const child = spawn('node', [shim], { env });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (c) => (stdout += c.toString('utf8')));
+    child.stderr.on('data', (c) => (stderr += c.toString('utf8')));
+    child.on('close', (code) => resolve({ status: code, stdout, stderr }));
+    if (stdin) child.stdin.write(stdin);
+    child.stdin.end();
+  });
+}
+
+function pinDaemonPort(home, port) {
+  fs.mkdirSync(path.join(home, '.cache/sdi'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.cache/sdi/sdid.port'), String(port));
+}
+
+// Full mock SDI daemon — answers every endpoint the PreToolUse hook touches.
+// Pre-Change-A tests didn't need this because the hook ran unconditionally;
+// now the hook short-circuits on `cwd-not-in-sdi-project` unless /projects/by-cwd
+// returns a row. Caller can override any field; defaults give a "registered
+// project, no active plan, no claims, no patterns" baseline that triggers no
+// downstream gates of its own.
+function startMockSdiDaemon(opts) {
+  const o = opts || {};
+  const project = o.project || {
+    id: 'PROJ-test',
+    key: 'TEST',
+    name: 'Test',
+    cwd: PROJECT_CWD,
+  };
+  const plan = o.plan === undefined ? null : o.plan; // null = no active plan
+  const policy = o.policy || { mode: 'L5' };
+  const scenarios = o.scenarios || [];
+  const patterns = o.patterns || [];
+  const claimsStatus = o.claimsStatus || 200;
+
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const send = (status, body) => {
+      const buf = Buffer.from(JSON.stringify(body));
+      res.writeHead(status, {
+        'content-type': 'application/json',
+        'content-length': buf.length,
+      });
+      res.end(buf);
+    };
+    if (u.pathname === '/health') return send(200, { ok: true });
+    if (u.pathname === '/projects/by-cwd') return send(200, { project });
+    if (u.pathname === `/projects/${project.id}/plans/active`) {
+      return send(200, plan ? { plan } : {});
+    }
+    if (u.pathname === '/autonomy_policies/resolve') return send(200, { policy });
+    if (u.pathname === '/scenarios/active-claims') {
+      if (claimsStatus !== 200) {
+        res.writeHead(claimsStatus);
+        return res.end();
+      }
+      return send(200, { scenarios });
+    }
+    if (u.pathname === '/patterns/active') return send(200, { patterns });
+    res.writeHead(404);
+    res.end();
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () =>
+      resolve({ server, port: server.address().port, project }),
+    );
   });
 }
 
@@ -108,19 +189,68 @@ test('shared module: SDI_BIN env override wins over workspace targets', () => {
   }
 });
 
+test('shared module: resolveWebDist three states (ready / buildable / absent)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sdi-web-'));
+  try {
+    delete require.cache[require.resolve(SHARED)];
+    const { _internals } = require(SHARED);
+
+    // Stub a plugin root with no web/ tree → absent.
+    const rootAbsent = path.join(tmp, 'absent');
+    fs.mkdirSync(rootAbsent, { recursive: true });
+    assert.equal(_internals.resolveWebDist(rootAbsent).state, 'absent');
+
+    // Stub a plugin root with web/package.json but no dist → buildable.
+    const rootBuildable = path.join(tmp, 'buildable');
+    fs.mkdirSync(path.join(rootBuildable, 'web'), { recursive: true });
+    fs.writeFileSync(path.join(rootBuildable, 'web', 'package.json'), '{}');
+    const buildable = _internals.resolveWebDist(rootBuildable);
+    assert.equal(buildable.state, 'buildable');
+    assert.equal(buildable.source, path.join(rootBuildable, 'web'));
+
+    // Stub a plugin root with web/dist/index.html → ready.
+    const rootReady = path.join(tmp, 'ready');
+    fs.mkdirSync(path.join(rootReady, 'web', 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(rootReady, 'web', 'dist', 'index.html'), '<html/>');
+    const ready = _internals.resolveWebDist(rootReady);
+    assert.equal(ready.state, 'ready');
+    assert.equal(ready.dist, path.join(rootReady, 'web', 'dist'));
+
+    // SDI_WEB_DIST env override wins over plugin-root lookup.
+    const override = path.join(tmp, 'override');
+    fs.mkdirSync(override, { recursive: true });
+    fs.writeFileSync(path.join(override, 'index.html'), '<html/>');
+    process.env.SDI_WEB_DIST = override;
+    try {
+      delete require.cache[require.resolve(SHARED)];
+      const { _internals: i2 } = require(SHARED);
+      const r = i2.resolveWebDist(rootAbsent);
+      assert.equal(r.state, 'ready');
+      assert.equal(r.dist, override);
+    } finally {
+      delete process.env.SDI_WEB_DIST;
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ────────────────────────────────────────────────────────────────────────────
 // Shim error-safety: every shim exits 0 even if the shared module throws.
 
-test('shim wraps: PreToolUse exits 0 with no active task (deny path, not crash)', () => {
+test('shim wraps: PreToolUse exits 0 with no active task (deny path, not crash)', async () => {
   const home = mkTempHome('sdi-pretool');
+  const { server, port } = await startMockSdiDaemon();
   try {
+    pinDaemonPort(home, port);
     const env = shimEnv(home, { SDI_BYPASS_HOOKS: '' });
     // D21: main session can't call Edit at all — simulate a registered
     // sub-agent so the active-task gate is what's under test here.
-    const r = runShim(
+    const r = await runShimAsync(
       'pre-tool-use.cjs',
       env,
       JSON.stringify({
+        cwd: PROJECT_CWD,
         tool_name: 'Edit',
         agent_id: '00000000-0000-0000-0000-000000000099',
         agent_type: 'impl-coder',
@@ -131,6 +261,7 @@ test('shim wraps: PreToolUse exits 0 with no active task (deny path, not crash)'
     assert.match(r.stdout, /permissionDecision.*deny/);
     assert.match(r.stdout, /no active task/);
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -138,12 +269,18 @@ test('shim wraps: PreToolUse exits 0 with no active task (deny path, not crash)'
 // ────────────────────────────────────────────────────────────────────────────
 // D21 — Mandatory delegation gate (PRD §2 D21, §5 Layer 1.5).
 
-test('D21: PreToolUse blocks main session Edit (delegation gate)', () => {
+test('D21: PreToolUse blocks main session Edit (delegation gate)', async () => {
   const home = mkTempHome('sdi-d21-main-edit');
+  const { server, port } = await startMockSdiDaemon();
   try {
+    pinDaemonPort(home, port);
     const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
     // No agent_id → main session.
-    const r = runShim('pre-tool-use.cjs', env, JSON.stringify({ tool_name: 'Edit' }));
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
     assert.equal(r.status, 0, `stderr=${r.stderr}`);
     assert.match(r.stdout, /permissionDecision.*deny/);
     assert.match(r.stdout, /D21 delegation gate/);
@@ -154,41 +291,56 @@ test('D21: PreToolUse blocks main session Edit (delegation gate)', () => {
       entries.some((e) => e.event === 'pre_tool_use_blocked' && e.reason === 'delegation-gate'),
     );
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('D21: PreToolUse blocks main mutating Bash (rm)', () => {
+test('D21: PreToolUse blocks main mutating Bash (rm)', async () => {
   const home = mkTempHome('sdi-d21-mut-bash');
+  const { server, port } = await startMockSdiDaemon();
   try {
+    pinDaemonPort(home, port);
     const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
-    const r = runShim(
+    const r = await runShimAsync(
       'pre-tool-use.cjs',
       env,
-      JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/foo' } }),
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Bash',
+        tool_input: { command: 'rm -rf /tmp/foo' },
+      }),
     );
     assert.equal(r.status, 0, `stderr=${r.stderr}`);
     assert.match(r.stdout, /permissionDecision.*deny/);
     assert.match(r.stdout, /D21 delegation gate/);
     assert.match(r.stdout, /mutating Bash/);
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('D21: PreToolUse allows main read-only Bash (git status) through delegation gate', () => {
+test('D21: PreToolUse allows main read-only Bash (git status) through delegation gate', async () => {
   const home = mkTempHome('sdi-d21-ro-bash');
+  const { server, port } = await startMockSdiDaemon();
   try {
+    pinDaemonPort(home, port);
     const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
     // Main + read-only bash → passes D21, falls through to active-task gate.
-    const r = runShim(
+    // Bash is bootstrap-capable (Change B), so the active-task gate no longer
+    // fires for Bash — assert the read-only allow audit row instead.
+    const r = await runShimAsync(
       'pre-tool-use.cjs',
       env,
-      JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git status' } }),
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Bash',
+        tool_input: { command: 'git status' },
+      }),
     );
     assert.equal(r.status, 0, `stderr=${r.stderr}`);
     assert.doesNotMatch(r.stdout, /D21 delegation gate/);
-    assert.match(r.stdout, /no active task/);
     // Audit log records the read-only allow.
     const log = path.join(home, '.local/state/sdi/hook.log');
     const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -198,18 +350,22 @@ test('D21: PreToolUse allows main read-only Bash (git status) through delegation
       ),
     );
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('D21: PreToolUse rejects unregistered sub-agent (rogue-specialist)', () => {
+test('D21: PreToolUse rejects unregistered sub-agent (rogue-specialist)', async () => {
   const home = mkTempHome('sdi-d21-rogue');
+  const { server, port } = await startMockSdiDaemon();
   try {
+    pinDaemonPort(home, port);
     const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_ACTIVE_TASK: 'TASK-X' });
-    const r = runShim(
+    const r = await runShimAsync(
       'pre-tool-use.cjs',
       env,
       JSON.stringify({
+        cwd: PROJECT_CWD,
         tool_name: 'Edit',
         agent_id: '00000000-0000-0000-0000-000000000001',
         agent_type: 'never-registered-agent',
@@ -226,19 +382,23 @@ test('D21: PreToolUse rejects unregistered sub-agent (rogue-specialist)', () => 
       ),
     );
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('D21: PreToolUse passes registered sub-agent through delegation gate', () => {
+test('D21: PreToolUse passes registered sub-agent through delegation gate', async () => {
   const home = mkTempHome('sdi-d21-pass');
+  const { server, port } = await startMockSdiDaemon();
   try {
+    pinDaemonPort(home, port);
     const env = shimEnv(home, { SDI_BYPASS_HOOKS: '' });
     // Registered sub-agent, no active task → delegation passes, active-task fails.
-    const r = runShim(
+    const r = await runShimAsync(
       'pre-tool-use.cjs',
       env,
       JSON.stringify({
+        cwd: PROJECT_CWD,
         tool_name: 'Edit',
         agent_id: '00000000-0000-0000-0000-000000000002',
         agent_type: 'impl-coder',
@@ -250,15 +410,22 @@ test('D21: PreToolUse passes registered sub-agent through delegation gate', () =
     assert.doesNotMatch(r.stdout, /D21 delegation gate/);
     assert.doesNotMatch(r.stdout, /rogue-specialist/);
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('D21: SDI_DELEGATION_BYPASS=1 unblocks main + audits the bypass', () => {
+test('D21: SDI_DELEGATION_BYPASS=1 unblocks main + audits the bypass', async () => {
   const home = mkTempHome('sdi-d21-bypass');
+  const { server, port } = await startMockSdiDaemon();
   try {
+    pinDaemonPort(home, port);
     const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '1' });
-    const r = runShim('pre-tool-use.cjs', env, JSON.stringify({ tool_name: 'Edit' }));
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
     assert.equal(r.status, 0, `stderr=${r.stderr}`);
     // Delegation bypassed — falls through to active-task gate (no active task here).
     assert.doesNotMatch(r.stdout, /D21 delegation gate/);
@@ -269,19 +436,27 @@ test('D21: SDI_DELEGATION_BYPASS=1 unblocks main + audits the bypass', () => {
     const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.ok(entries.some((e) => e.event === 'pre_tool_use_delegation_bypass'));
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('D21: PreToolUse does NOT trigger delegation gate on orchestration tools (Agent)', () => {
+test('D21: PreToolUse does NOT trigger delegation gate on orchestration tools (Agent)', async () => {
   const home = mkTempHome('sdi-d21-agent');
+  const { server, port } = await startMockSdiDaemon();
   try {
+    pinDaemonPort(home, port);
     const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_ACTIVE_TASK: 'TASK-AGENT' });
-    const r = runShim('pre-tool-use.cjs', env, JSON.stringify({ tool_name: 'Agent' }));
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Agent' }),
+    );
     assert.equal(r.status, 0, `stderr=${r.stderr}`);
     // Agent is orchestration — main is allowed to spawn specialists.
     assert.doesNotMatch(r.stdout, /D21 delegation gate/);
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -416,50 +591,9 @@ test('v0.5 agents: pattern-orchestrator, pattern-critic, reversal-runner exist w
 // .cache/sdi/sdid.port references it. Same mechanism the e2e test uses,
 // minus a real daemon — D29 logic is the unit under test.
 
-function startMockClaimsServer({ scenarios }) {
-  const server = http.createServer((req, res) => {
-    const u = new URL(req.url, 'http://127.0.0.1');
-    if (u.pathname === '/scenarios/active-claims') {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ scenarios }));
-      return;
-    }
-    // Unknown route — 404 so the hook's null-coalescing branches exercise.
-    res.writeHead(404);
-    res.end();
-  });
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolve({ server, port: server.address().port });
-    });
-  });
-}
-
-// Async shim runner so the parent event loop keeps spinning — needed when the
-// child shim calls back into a mock HTTP server hosted in this very process.
-// spawnSync would deadlock the mock (parent blocked → no accept → 2s timeout).
-function runShimAsync(name, env, stdin) {
-  return new Promise((resolve) => {
-    const shim = path.join(SHIM_DIR, name);
-    const child = spawn('node', [shim], { env });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (c) => (stdout += c.toString('utf8')));
-    child.stderr.on('data', (c) => (stderr += c.toString('utf8')));
-    child.on('close', (code) => resolve({ status: code, stdout, stderr }));
-    if (stdin) child.stdin.write(stdin);
-    child.stdin.end();
-  });
-}
-
-function pinDaemonPort(home, port) {
-  fs.mkdirSync(path.join(home, '.cache/sdi'), { recursive: true });
-  fs.writeFileSync(path.join(home, '.cache/sdi/sdid.port'), String(port));
-}
-
 test('D29: PreToolUse blocks Edit when another scenario claims the target path', async () => {
   const home = mkTempHome('sdi-d29-overlap');
-  const { server, port } = await startMockClaimsServer({
+  const { server, port } = await startMockSdiDaemon({
     scenarios: [
       {
         id: 'SCN-OTHER',
@@ -478,6 +612,7 @@ test('D29: PreToolUse blocks Edit when another scenario claims the target path',
       'pre-tool-use.cjs',
       env,
       JSON.stringify({
+        cwd: PROJECT_CWD,
         tool_name: 'Edit',
         tool_input: { file_path: 'crates/db/src/migrations/008_x.sql' },
         agent_id: '00000000-0000-0000-0000-0000000000d2',
@@ -503,7 +638,7 @@ test('D29: PreToolUse blocks Edit when another scenario claims the target path',
 
 test('D29: PreToolUse proceeds when the claims ledger is empty', async () => {
   const home = mkTempHome('sdi-d29-empty');
-  const { server, port } = await startMockClaimsServer({ scenarios: [] });
+  const { server, port } = await startMockSdiDaemon({ scenarios: [] });
   try {
     pinDaemonPort(home, port);
     const env = shimEnv(home, {
@@ -515,6 +650,7 @@ test('D29: PreToolUse proceeds when the claims ledger is empty', async () => {
       'pre-tool-use.cjs',
       env,
       JSON.stringify({
+        cwd: PROJECT_CWD,
         tool_name: 'Edit',
         tool_input: { file_path: 'crates/db/src/migrations/008_x.sql' },
         agent_id: '00000000-0000-0000-0000-0000000000d3',
@@ -531,20 +667,24 @@ test('D29: PreToolUse proceeds when the claims ledger is empty', async () => {
   }
 });
 
-test('D29: PreToolUse proceeds (with warning) when daemon is unreachable', () => {
+test('D29: PreToolUse proceeds (with warning) when the claims endpoint is unreachable', async () => {
+  // Project lookup must succeed (project-scope gate fires first); the claims
+  // endpoint specifically returns 503 → claim gate emits the "daemon
+  // unreachable" advisory and proceeds without blocking.
   const home = mkTempHome('sdi-d29-unreachable');
+  const { server, port } = await startMockSdiDaemon({ claimsStatus: 503 });
   try {
-    // No port file → no daemon → claim gate must PROCEED (don't lock the
-    // editor when the daemon is down). Active task still gates fine.
+    pinDaemonPort(home, port);
     const env = shimEnv(home, {
       SDI_BYPASS_HOOKS: '',
       SDI_ACTIVE_TASK: 'TASK-D29',
       SDI_ACTIVE_SCENARIO: 'SCN-MINE',
     });
-    const r = runShim(
+    const r = await runShimAsync(
       'pre-tool-use.cjs',
       env,
       JSON.stringify({
+        cwd: PROJECT_CWD,
         tool_name: 'Edit',
         tool_input: { file_path: 'crates/db/src/migrations/008_x.sql' },
         agent_id: '00000000-0000-0000-0000-0000000000d4',
@@ -556,13 +696,14 @@ test('D29: PreToolUse proceeds (with warning) when daemon is unreachable', () =>
     // stderr surfaces the "daemon unreachable" advisory.
     assert.match(r.stderr, /D29 advisory: daemon unreachable/);
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
 test('D29: SDI_HOOK_V05_DISABLE=1 bypasses the claim gate even when overlap exists', async () => {
   const home = mkTempHome('sdi-d29-disable');
-  const { server, port } = await startMockClaimsServer({
+  const { server, port } = await startMockSdiDaemon({
     scenarios: [
       {
         id: 'SCN-OTHER',
@@ -582,6 +723,7 @@ test('D29: SDI_HOOK_V05_DISABLE=1 bypasses the claim gate even when overlap exis
       'pre-tool-use.cjs',
       env,
       JSON.stringify({
+        cwd: PROJECT_CWD,
         tool_name: 'Edit',
         tool_input: { file_path: 'crates/db/src/migrations/008_x.sql' },
         agent_id: '00000000-0000-0000-0000-0000000000d5',
