@@ -259,8 +259,11 @@ async function runSetup({ sdiBin, sdidBin }) {
     return false;
   }
 
-  // Make daemon binary discoverable by `sdi daemon start` (which does its own
-  // sibling-lookup from the running `sdi` binary — already satisfied).
+  // Hand the resolved daemon path to `sdi daemon start`. SDI_DAEMON_BIN is the
+  // primary contract in the Rust resolver (crates/cli daemon_cmd::resolve_sdid);
+  // without it `sdi` falls back to a layout search (sibling, then
+  // ../daemon/bin/sdid). In the dist tree `sdi` and `sdid` live in separate dirs
+  // (bin/ vs daemon/bin/), so this env is what keeps the two resolvers in lock-step.
   process.env.SDI_DAEMON_BIN = sdidBin;
 
   // Spawn daemon if not running.

@@ -8,6 +8,18 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.1.2] - 2026-05-25
+
+### Fixed
+- `sdi daemon start` failed with `spawn sdid: No such file or directory` on
+  marketplace installs. The daemon-binary resolver only looked for `sdid` as a
+  sibling of `sdi`, but the distribution layout splits them across directories
+  (`<root>/bin/sdi` vs `<root>/daemon/bin/sdid`) and the resolver ignored the
+  `SDI_DAEMON_BIN` hint the install gate already sets. Resolution now honors
+  `SDI_DAEMON_BIN` first, then the sibling (dev/workspace) path, then the
+  distribution `daemon/bin/sdid` path, then `PATH` — keeping the CLI and the
+  Node install-gate resolvers in lock-step.
+
 ## [0.1.1] - 2026-05-25
 
 ### Added
@@ -36,5 +48,6 @@ Initial public release. Built `sdi` + `sdid` binaries (macOS + Linux ×
 x86_64 + aarch64) attached to the GitHub Release; the `dist` branch carries the
 plugin shell + binaries that Claude Code's marketplace pulls from.
 
+[0.1.2]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.2
 [0.1.1]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.1
 [0.1.0]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.0

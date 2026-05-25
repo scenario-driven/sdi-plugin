@@ -6,19 +6,45 @@
 
 use anyhow::{anyhow, Context, Result};
 use sdi_db::Paths;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// Resolve the path to the `sdid` binary. We prefer a sibling of the running
-/// `sdi` binary (release/dev install layout), fall back to PATH, finally fall
-/// back to "sdid" and let the OS resolve it.
+/// Resolve the path to the `sdid` binary. Resolution order:
+///   1. `SDI_DAEMON_BIN` env — the install gate resolves the daemon path and
+///      hands it over (plugin/adapters/shared/sdi-hooks.cjs), so the Rust CLI
+///      and the Node hook share one layout contract.
+///   2. Sibling of the running `sdi` (`<dir>/sdid`) — the dev/workspace layout
+///      where `cargo build` drops both binaries into `target/<profile>/`.
+///   3. Distribution layout (`<dir>/../daemon/bin/sdid`) — the marketplace tree
+///      ships `sdi` under `bin/` and `sdid` under `daemon/bin/`.
+///   4. Bare `"sdid"`, letting the OS resolve it from PATH.
 pub fn sdid_bin() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let sibling = dir.join("sdid");
-            if sibling.exists() {
-                return sibling;
+    resolve_sdid(
+        std::env::var_os("SDI_DAEMON_BIN"),
+        std::env::current_exe().ok(),
+    )
+}
+
+/// Pure resolution policy split out from [`sdid_bin`] so the lookup order is
+/// testable without touching the process environment or the real executable.
+fn resolve_sdid(env_override: Option<OsString>, current_exe: Option<PathBuf>) -> PathBuf {
+    if let Some(env) = env_override {
+        let p = PathBuf::from(env);
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Some(dir) = current_exe.as_deref().and_then(Path::parent) {
+        let sibling = dir.join("sdid");
+        if sibling.exists() {
+            return sibling;
+        }
+        if let Some(root) = dir.parent() {
+            let dist = root.join("daemon").join("bin").join("sdid");
+            if dist.exists() {
+                return dist;
             }
         }
     }
@@ -170,4 +196,84 @@ pub fn status(paths: &Paths) -> Status {
     let running = pid.map(pid_alive).unwrap_or(false);
     let port = read_port(&paths.port_file);
     Status { running, pid, port }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_sdid;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("sdi_sdid_{}_{}", tag, std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn touch(p: &PathBuf) {
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(p, b"#!/bin/sh\n").unwrap();
+    }
+
+    #[test]
+    fn env_override_wins_when_file_exists() {
+        let dir = scratch("env");
+        let target = dir.join("custom-sdid");
+        touch(&target);
+        let got = resolve_sdid(Some(target.clone().into_os_string()), None);
+        assert_eq!(got, target);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn env_override_ignored_when_file_missing() {
+        let dir = scratch("envmiss");
+        let exe = dir.join("bin").join("sdi");
+        let sdid = dir.join("daemon").join("bin").join("sdid");
+        touch(&exe);
+        touch(&sdid);
+        // Env points at a nonexistent path → fall through to layout search.
+        let got = resolve_sdid(Some("/no/such/sdid".into()), Some(exe));
+        assert_eq!(got, sdid);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sibling_layout_resolves() {
+        // Dev/workspace: sdi and sdid side by side in target/<profile>/.
+        let dir = scratch("sib");
+        let exe = dir.join("sdi");
+        let sdid = dir.join("sdid");
+        touch(&exe);
+        touch(&sdid);
+        let got = resolve_sdid(None, Some(exe));
+        assert_eq!(got, sdid);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dist_layout_resolves_daemon_bin() {
+        // Marketplace tree: <root>/bin/sdi + <root>/daemon/bin/sdid.
+        let dir = scratch("dist");
+        let exe = dir.join("bin").join("sdi");
+        let sdid = dir.join("daemon").join("bin").join("sdid");
+        touch(&exe);
+        touch(&sdid);
+        let got = resolve_sdid(None, Some(exe));
+        assert_eq!(got, sdid);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn falls_back_to_bare_name() {
+        let dir = scratch("bare");
+        let exe = dir.join("bin").join("sdi");
+        touch(&exe); // no sdid anywhere
+        let got = resolve_sdid(None, Some(exe));
+        assert_eq!(got, PathBuf::from("sdid"));
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
