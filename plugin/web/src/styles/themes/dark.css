@@ -1,0 +1,40 @@
+/*
+ * Dark theme — semantic colors (Stitch high-contrast minimal workbench).
+ * Mirrors Clawket's dark theme verbatim so SDI and Clawket present an
+ * identical surface across the two products.
+ */
+:root,
+:root[data-theme="dark"] {
+  --color-background: #0a0a0a;
+  --color-surface-low: #000000;
+  --color-surface: #141414;
+  --color-surface-high: #1f1f1f;
+  --color-surface-hover: #1f1f1f;
+  --color-overlay: rgba(0, 0, 0, 0.60);
+
+  --color-foreground: #ededed;
+  --color-foreground-muted: #a1a1a1;
+  --color-foreground-subtle: #525252;
+
+  --color-border: #262626;
+  --color-border-muted: #525252;
+
+  --color-primary: #ffffff;
+  --color-primary-hover: #e5e5e5;
+  --color-primary-foreground: #0a0a0a;
+
+  --color-success: #22c55e;
+  --color-success-foreground: #0a0a0a;
+
+  --color-warning: #f59e0b;
+  --color-warning-foreground: #0a0a0a;
+
+  --color-danger: #ef4444;
+  --color-danger-foreground: #ffffff;
+
+  --color-secondary: #8b5cf6;
+  --color-secondary-foreground: #ffffff;
+
+  --color-ring: var(--color-primary);
+  --focus-ring-color: var(--color-primary);
+}
