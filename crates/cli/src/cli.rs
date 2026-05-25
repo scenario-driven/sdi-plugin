@@ -26,12 +26,13 @@ use clap::{Args, Parser, Subcommand};
     about = "Scenario-Driven Implementation — LLM-era successor to TDD/BDD."
 )]
 pub struct App {
-    /// Output format hint (json | text). JSON is the default for entity-emitting
-    /// commands; text is a future affordance reserved for tables/summaries.
+    /// Output format: `json` (default) or `text`.
+    /// `text` is reserved for future tabular output; commands fall back to
+    /// `json` when `text` is not yet supported.
     #[arg(long, global = true, default_value = "json")]
     pub format: String,
 
-    /// Quiet mode: entity-emitting commands print only the id.
+    /// Quiet mode: print only the entity id on success.
     #[arg(long, short = 'q', global = true, default_value_t = false)]
     pub quiet: bool,
 
@@ -44,48 +45,56 @@ pub enum Cmd {
     /// Daemon lifecycle (`start` / `stop` / `status`).
     #[command(subcommand)]
     Daemon(DaemonCmd),
-    /// Environment diagnostics (paths, LM-8, db, daemon liveness).
+    /// Environment diagnostics (XDG paths, database, daemon liveness). `--format` is ignored.
+    // XDG path invariant lineage: Clawket LM-8.
     Doctor,
     /// Project: multi-project root entity.
     #[command(subcommand)]
     Project(ProjectCmd),
-    /// Plan: D1/D8 lifecycle (draft → active → completed).
+    /// Plan: lifecycle (draft → active → completed).
+    // D1 (plan identity) / D8 (approve gate: ≥1 confirmed scenario).
     #[command(subcommand)]
     Plan(PlanCmd),
-    /// Requirement: D12 SNAPSHOT (overwrite-in-place, no versioning).
-    #[command(subcommand)]
+    /// Requirement: snapshot doc (overwrite in place, no versioning).
+    // D12 SNAPSHOT semantics.
+    #[command(subcommand, alias = "requirement")]
     Req(RequirementCmd),
-    /// Scenario: D5 GWT-strict acceptance criteria.
+    /// Scenario: strict Given/When/Then acceptance criterion.
+    // D5 GWT-strict.
     #[command(subcommand)]
     Scenario(ScenarioCmd),
-    /// Round: D6 regression-defaulting iteration (R1, R2…).
+    /// Round: regression-defaulting iteration (R1, R2…).
+    // D6 strict-regression default.
     #[command(subcommand)]
     Round(RoundCmd),
-    /// Task: D3 runtime artifact, requires evidence on `done` (PRD §6.6).
+    /// Task: runtime work unit; `done` requires evidence.
+    // D3 runtime artifact, PRD §6.6 evidence mandatory on complete.
     #[command(subcommand)]
     Task(TaskCmd),
-    /// Decision: D12 append-only ADR log with supersession chain.
+    /// Decision: append-only ADR log with supersession chain.
+    // D12 append-only.
     #[command(subcommand)]
     Decision(DecisionCmd),
-    /// Knowledge: rag / reference / archive scopes (PRD §5.4).
+    /// Knowledge: knowledge artifacts under `rag` / `reference` / `archive` scopes.
+    // PRD §5.4 scope model.
     #[command(subcommand)]
     Knowledge(KnowledgeCmd),
     /// Comment: polymorphic anchor (plan / task / scenario / round).
     #[command(subcommand)]
     Comment(CommentCmd),
-    /// Question: open/answered Q&A (anchored to plan).
+    /// Question: open / answered Q&A, anchored to a plan.
     #[command(subcommand)]
     Question(QuestionCmd),
-    /// Run: task execution attempt (start / finish / list).
+    /// Run: a single execution attempt of a task (`start` → `finish`).
     #[command(subcommand)]
     Run(RunCmd),
-    /// Usage: token/tool-call accounting + preflight estimate.
+    /// Token and tool-call accounting plus preflight cost estimate.
     #[command(subcommand)]
     Usage(UsageCmd),
     /// Aggregate dashboard (active plan + counts + recent activity).
     Dashboard(DashboardArgs),
-    /// Project handoff bundle (session pickup).
-    Handoff { project_id: String },
+    /// Project handoff bundle (hand a session over to another agent).
+    Handoff(HandoffArgs),
     /// Activity timeline for a project.
     Timeline(TimelineArgs),
     /// Project-scoped board view (in-flight + backlog).
@@ -94,9 +103,9 @@ pub enum Cmd {
     Wiki(WikiArgs),
     /// Project summary (counts + active plan).
     Summary(SummaryArgs),
-    /// Prometheus metrics dump.
+    /// Prometheus metrics dump (text exposition format). `--format` is ignored.
     Metrics,
-    /// Replay events from the durable log.
+    /// Replay recorded events from the persistent event log.
     Replay(ReplayArgs),
     /// JSON import/export of plan-scoped state.
     #[command(subcommand)]
@@ -104,36 +113,38 @@ pub enum Cmd {
     /// JSON import (matching `export` shape).
     #[command(subcommand)]
     Import(ImportCmd),
-    /// Autonomy: D14/D17/D18 per-scope L3/L4/L5 policy.
+    /// Autonomy: per-scope L3 / L4 / L5 policy and circuit breaker.
+    // D14 (entity) / D17 (mode defaults) / D18 (circuit breaker).
     #[command(subcommand)]
     Autonomy(AutonomyCmd),
-    /// AgentNote: M1 blackboard + M2 hand-off receipts.
+    /// Agent note: shared blackboard + agent-to-agent hand-off receipts.
+    // PRD §5 layer M1 (blackboard) / M2 (hand-off).
     #[command(subcommand, name = "agent-note")]
     AgentNote(AgentNoteCmd),
-    /// Consensus: M3 4-stage negotiation status (D20).
+    /// Consensus: 4-stage proposal / critique / consensus / dissensus status.
+    // PRD §5 layer M3, D20 unit of autonomy gate.
     #[command(subcommand)]
     Consensus(ConsensusCmd),
-    /// CollaborationPattern: D22 7th first-class entity. CRUD + lifecycle +
-    /// parent→child tree. Daemon enforces D26 shape gate at pending→active
-    /// and D24 depth/cycle on create.
+    /// Collaboration pattern: workflow / graph / swarm / agents-as-tools / direct.
+    // D22 entity, D24 parent-child DAG, D26 shape gate at pending→active.
     #[command(subcommand)]
     Pattern(PatternCmd),
-    /// MCP server (stdio JSON-RPC, exposes scope=rag only).
+    /// MCP server (stdio JSON-RPC, exposes the rag scope only).
     Mcp,
     /// Initialise a project anchored to the current cwd (idempotent).
     Init(InitArgs),
-    /// Backup the SQLite DB to a target path.
-    Backup { output: String },
-    /// Restore the SQLite DB from a backup path (destructive).
-    Restore { input: String },
-    /// Print effective config (paths + daemon liveness).
+    /// Back up the SQLite database to a target path.
+    Backup(BackupArgs),
+    /// Restore the SQLite database from a backup path (destructive).
+    Restore(RestoreArgs),
+    /// Print the resolved configuration: data paths and daemon liveness. `--format` is ignored.
     Config,
-    /// Tail the daemon's log file.
+    /// Tail the daemon log.
     Log(LogArgs),
     /// Watch the SSE stream and print events.
     Watch(WatchArgs),
-    /// Emit shell completion script for the given shell.
-    Completions { shell: String },
+    /// Emit a shell completion script for the given shell.
+    Completions(CompletionsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -144,6 +155,30 @@ pub struct InitArgs {
     /// Display name. Defaults to cwd basename.
     #[arg(long)]
     pub name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct HandoffArgs {
+    /// Project id whose handoff bundle to print.
+    pub project_id: String,
+}
+
+#[derive(Debug, Args)]
+pub struct BackupArgs {
+    /// Destination file path for the SQLite backup copy.
+    pub output: String,
+}
+
+#[derive(Debug, Args)]
+pub struct RestoreArgs {
+    /// Source file path of a prior backup. Replaces the current database.
+    pub input: String,
+}
+
+#[derive(Debug, Args)]
+pub struct CompletionsArgs {
+    /// Target shell: `bash` | `zsh` | `fish` | `powershell` | `elvish`.
+    pub shell: String,
 }
 
 #[derive(Debug, Args)]
@@ -183,16 +218,32 @@ pub enum ProjectCmd {
     /// List all projects.
     List,
     /// Show a project by id.
-    View { id: String },
-    /// Show the project owning a given cwd.
-    ByCwd { cwd: String },
+    View {
+        /// Project id.
+        id: String,
+    },
+    /// Show the project owning a given working directory.
+    ByCwd {
+        /// Absolute working-directory path to look up.
+        cwd: String,
+    },
     /// Update a project's name. Slug and key are immutable identifiers — to
     /// change them, create a new project.
     Update(ProjectUpdateArgs),
     /// Attach a working-directory to a project.
-    CwdAttach { project_id: String, cwd: String },
-    /// Detach a working-directory.
-    CwdDetach { project_id: String, cwd: String },
+    CwdAttach {
+        /// Project id.
+        project_id: String,
+        /// Absolute working-directory path to attach.
+        cwd: String,
+    },
+    /// Detach a working-directory from a project.
+    CwdDetach {
+        /// Project id.
+        project_id: String,
+        /// Absolute working-directory path to detach.
+        cwd: String,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -211,7 +262,9 @@ pub struct ProjectCreateArgs {
 
 #[derive(Debug, Args)]
 pub struct ProjectUpdateArgs {
+    /// Project id.
     pub id: String,
+    /// New display name.
     #[arg(long)]
     pub name: Option<String>,
 }
@@ -221,39 +274,62 @@ pub enum PlanCmd {
     /// Create a plan (status starts at `draft`).
     Create(PlanCreateArgs),
     /// List plans for a project.
-    List { project_id: String },
+    List {
+        /// Project id.
+        project_id: String,
+    },
     /// Show a plan by id.
-    View { id: String },
-    /// Replace title/body of a plan in place (SNAPSHOT-style).
+    View {
+        /// Plan id.
+        id: String,
+    },
+    /// Replace the title and body of a plan in place (snapshot-style).
     Update(PlanUpdateArgs),
-    /// Approve a plan (D8: requires ≥1 confirmed scenario).
-    Approve { id: String },
+    /// Approve a plan. Requires at least one confirmed scenario.
+    // D8 approve gate.
+    Approve {
+        /// Plan id.
+        id: String,
+    },
     /// Complete a plan.
-    Complete { id: String },
+    Complete {
+        /// Plan id.
+        id: String,
+    },
     /// Show the active plan for a project (404 if none).
-    Active { project_id: String },
+    Active {
+        /// Project id.
+        project_id: String,
+    },
     /// Composite snapshot: plan + scenarios + in-flight tasks + decisions.
-    /// Mirrors the MCP `get_plan_context` tool (PRD §5.4).
-    Context { id: String },
+    // Mirrors the MCP `get_plan_context` tool (PRD §5.4).
+    Context {
+        /// Plan id.
+        id: String,
+    },
 }
 
 #[derive(Debug, Args)]
 pub struct PlanCreateArgs {
+    /// Project id this plan belongs to.
     pub project_id: String,
-    /// Short code (e.g. "SDI-1").
+    /// Short stable code (e.g. `SDI-1`).
     pub short_code: String,
     /// Title.
     pub title: String,
-    /// Body markdown. Use "-" to read from stdin.
+    /// Body markdown. Use `-` to read from stdin.
     #[arg(long, default_value = "")]
     pub body: String,
 }
 
 #[derive(Debug, Args)]
 pub struct PlanUpdateArgs {
+    /// Plan id.
     pub id: String,
+    /// New title.
     #[arg(long)]
     pub title: Option<String>,
+    /// New body markdown.
     #[arg(long)]
     pub body: Option<String>,
 }
@@ -263,20 +339,34 @@ pub enum RequirementCmd {
     /// Create a requirement under a plan.
     Create(RequirementCreateArgs),
     /// List requirements for a plan.
-    List { plan_id: String },
+    List {
+        /// Plan id.
+        plan_id: String,
+    },
     /// Show a requirement by id.
-    View { id: String },
-    /// Overwrite a requirement in place (SNAPSHOT semantics, D12).
+    View {
+        /// Requirement id.
+        id: String,
+    },
+    /// Overwrite a requirement in place (snapshot semantics).
+    // D12 SNAPSHOT.
     Update(RequirementUpdateArgs),
     /// Delete a requirement.
-    Delete { id: String },
+    Delete {
+        /// Requirement id.
+        id: String,
+    },
 }
 
 #[derive(Debug, Args)]
 pub struct RequirementCreateArgs {
+    /// Plan id this requirement belongs to.
     pub plan_id: String,
+    /// Short stable code (e.g. `REQ-1`).
     pub short_code: String,
+    /// Title.
     pub title: String,
+    /// Body markdown.
     #[arg(long, default_value = "")]
     pub body: String,
     /// Free-form source reference (file:line, ticket URL, …).
@@ -286,41 +376,64 @@ pub struct RequirementCreateArgs {
 
 #[derive(Debug, Args)]
 pub struct RequirementUpdateArgs {
+    /// Requirement id.
     pub id: String,
+    /// New title.
     #[arg(long)]
     pub title: Option<String>,
+    /// New body markdown.
     #[arg(long)]
     pub body: Option<String>,
+    /// New source reference.
     #[arg(long)]
     pub source: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ScenarioCmd {
-    /// Create a scenario (D5 GWT-strict).
+    /// Create a scenario. All three of `given` / `when` / `then` are required.
+    // D5 GWT-strict.
     Create(ScenarioCreateArgs),
     /// List scenarios for a plan.
-    List { plan_id: String },
+    List {
+        /// Plan id.
+        plan_id: String,
+    },
     /// Show a scenario by id.
-    View { id: String },
-    /// Replace given/when/then in place (SNAPSHOT).
+    View {
+        /// Scenario id.
+        id: String,
+    },
+    /// Replace given / when / then in place (snapshot).
     Update(ScenarioUpdateArgs),
-    /// Mark a scenario as confirmed (advances the D8 approve gate).
-    Confirm { id: String },
-    /// FTS5 search across one plan's scenarios. Mirrors the MCP
-    /// `search_scenarios` tool (PRD §5.4).
+    /// Mark a scenario as confirmed (counts toward the plan approve gate).
+    // Advances the D8 approve gate.
+    Confirm {
+        /// Scenario id.
+        id: String,
+    },
+    /// Full-text search across one plan's scenarios.
+    // FTS5; mirrors the MCP `search_scenarios` tool (PRD §5.4).
     Search(ScenarioSearchArgs),
-    /// D29 — transition this scenario's claim_status to `active` (the LLM
-    /// is expected to run overlap detection against
-    /// `GET /scenarios/active-claims` first; the daemon does not yet compute
-    /// the glob intersection itself).
-    Claim { id: String },
-    /// D29 — transition this scenario's claim_status to `released`.
-    Release { id: String },
+    /// Mark this scenario's resource claim as active before editing.
+    // D29 multi-session claim ledger. Callers should pre-check
+    // `GET /scenarios/active-claims` for overlap; the daemon does not yet
+    // compute glob intersection itself.
+    Claim {
+        /// Scenario id.
+        id: String,
+    },
+    /// Release this scenario's resource claim once editing is done.
+    // D29.
+    Release {
+        /// Scenario id.
+        id: String,
+    },
 }
 
 #[derive(Debug, Args)]
 pub struct ScenarioSearchArgs {
+    /// Plan id whose scenarios to search.
     pub plan_id: String,
     /// FTS5 MATCH expression. Quote multi-word queries.
     pub query: String,
@@ -331,12 +444,17 @@ pub struct ScenarioSearchArgs {
 
 #[derive(Debug, Args)]
 pub struct ScenarioCreateArgs {
+    /// Plan id this scenario belongs to.
     pub plan_id: String,
+    /// Short stable code (e.g. `SCN-1`).
     pub short_code: String,
+    /// Given clause (precondition).
     #[arg(long)]
     pub given: String,
+    /// When clause (action/event).
     #[arg(long, name = "when")]
     pub when_: String,
+    /// Then clause (expected outcome).
     #[arg(long, name = "then")]
     pub then_: String,
     /// Mark as confirmed immediately (default: draft).
@@ -346,11 +464,15 @@ pub struct ScenarioCreateArgs {
 
 #[derive(Debug, Args)]
 pub struct ScenarioUpdateArgs {
+    /// Scenario id.
     pub id: String,
+    /// New Given clause.
     #[arg(long)]
     pub given: Option<String>,
+    /// New When clause.
     #[arg(long, name = "when")]
     pub when_: Option<String>,
+    /// New Then clause.
     #[arg(long, name = "then")]
     pub then_: Option<String>,
 }
@@ -360,33 +482,53 @@ pub enum RoundCmd {
     /// Create a round (defaults: strict-regression, needs-review, pause-in-flight).
     Create(RoundCreateArgs),
     /// List rounds for a plan.
-    List { plan_id: String },
+    List {
+        /// Plan id.
+        plan_id: String,
+    },
     /// Show a round by id.
-    View { id: String },
-    /// Activate a round (R2+ auto-carries verdicts under strict-regression).
-    Activate { id: String },
+    View {
+        /// Round id.
+        id: String,
+    },
+    /// Activate a round. From R2 onwards, prior verdicts auto-carry under strict-regression mode.
+    Activate {
+        /// Round id.
+        id: String,
+    },
     /// Complete a round.
-    Complete { id: String },
+    Complete {
+        /// Round id.
+        id: String,
+    },
     /// Record a per-scenario verdict.
     Result(RoundResultArgs),
     /// List all results for a round.
-    Results { id: String },
+    Results {
+        /// Round id.
+        id: String,
+    },
     /// Show the active round for a plan.
-    Active { plan_id: String },
+    Active {
+        /// Plan id.
+        plan_id: String,
+    },
 }
 
 #[derive(Debug, Args)]
 pub struct RoundCreateArgs {
+    /// Plan id this round belongs to.
     pub plan_id: String,
+    /// Short stable code (e.g. `R1`).
     pub short_code: String,
-    /// Mode: strict-regression (default) | additive | disruption (D6).
+    /// Regression mode: `strict-regression` (default) | `additive` | `disruption`.
     #[arg(long)]
     pub mode: Option<String>,
-    /// In-flight policy: pause (default) | abort | continue-on-noimpact (D10).
+    /// In-flight task policy: `pause` (default) | `abort` | `continue-on-noimpact`.
     #[arg(long)]
     pub in_flight: Option<String>,
-    /// Disruption policy: needs-review (default) | auto (D9). `auto` only
-    /// changes how the LLM proposes resolutions; human-confirm is universal.
+    /// Disruption resolution policy: `needs-review` (default) | `auto`. `auto`
+    /// only changes how the LLM proposes resolutions; human-confirm is universal.
     #[arg(long)]
     pub disruption: Option<String>,
 }
@@ -398,7 +540,7 @@ pub struct RoundResultArgs {
     /// Scenario id.
     #[arg(long)]
     pub scenario: String,
-    /// Result: passing | failing | impacted | retired (matches ScenarioResult).
+    /// Result: `passing` | `failing` | `impacted` | `retired`.
     #[arg(long)]
     pub result: String,
     /// Evidence reference (file:line, log path, etc.).
@@ -411,42 +553,76 @@ pub enum TaskCmd {
     /// Create a task tied to a round.
     Create(TaskCreateArgs),
     /// List tasks for a round.
-    List { round_id: String },
+    List {
+        /// Round id.
+        round_id: String,
+    },
     /// Show a task by id.
-    View { id: String },
-    /// Pick up a task (todo → in_progress).
-    Start { id: String },
-    /// Block on external dependency.
-    Block { id: String },
+    View {
+        /// Task id.
+        id: String,
+    },
+    /// Pick up a task (`todo` → `in_progress`).
+    Start {
+        /// Task id.
+        id: String,
+    },
+    /// Block on an external dependency.
+    Block {
+        /// Task id.
+        id: String,
+    },
     /// Cancel a task.
-    Cancel { id: String },
-    /// Complete a task with evidence (PRD §6.6 — `--evidence` mandatory).
+    Cancel {
+        /// Task id.
+        id: String,
+    },
+    /// Complete a task. `--evidence` is mandatory (one per parent scenario).
+    // PRD §6.6 evidence gate.
     Complete(TaskCompleteArgs),
     /// Decompose a task into subtasks (parent relations created automatically).
     Decompose(TaskDecomposeArgs),
-    /// Show ancestor chain.
-    Ancestors { id: String },
-    /// Show descendant chain.
-    Descendants { id: String },
-    /// Show subtree (root + descendants).
-    Subtree { id: String },
+    /// Show the ancestor chain for a task.
+    Ancestors {
+        /// Task id.
+        id: String,
+    },
+    /// Show the descendant chain for a task.
+    Descendants {
+        /// Task id.
+        id: String,
+    },
+    /// Show the subtree (root + descendants) for a task.
+    Subtree {
+        /// Task id.
+        id: String,
+    },
     /// List non-parent relations on a task.
-    Relations { id: String },
-    /// Add a non-parent relation.
+    Relations {
+        /// Task id.
+        id: String,
+    },
+    /// Add a non-parent relation between two tasks.
     Relate(TaskRelateArgs),
     /// Remove a relation by id.
-    Unrelate { relation_id: String },
-    /// Acquire a lease (single-writer mutex).
+    Unrelate {
+        /// Relation id.
+        relation_id: String,
+    },
+    /// Acquire a lease on a task (single-writer mutex).
     Lease(TaskLeaseArgs),
-    /// Heartbeat an existing lease.
+    /// Heartbeat an existing lease to extend its TTL.
     Heartbeat(TaskLeaseArgs),
-    /// Release a lease.
+    /// Release a lease on a task.
     Release(TaskLeaseReleaseArgs),
-    /// Show current lease (if any).
-    LeaseInfo { id: String },
+    /// Show the current lease on a task (if any).
+    LeaseInfo {
+        /// Task id.
+        id: String,
+    },
     /// Status histogram across all tasks.
     Stats,
-    /// Preflight: estimate cost for a task (uses tier history).
+    /// Preflight: estimate cost for a task using prior tier history.
     Preflight(TaskPreflightArgs),
 }
 
@@ -466,42 +642,51 @@ pub struct TaskDecomposeArgs {
 pub struct TaskRelateArgs {
     /// Parent task id (the relation's "from" side).
     pub id: String,
-    /// Child task id.
+    /// Child task id (the relation's "to" side).
     #[arg(long)]
     pub child: String,
-    /// blocks | depends-on | duplicates | related (default: related).
+    /// Relation kind: `blocks` | `depends-on` | `duplicates` | `related` (default).
     #[arg(long, default_value = "related")]
     pub kind: String,
 }
 
 #[derive(Debug, Args)]
 pub struct TaskLeaseArgs {
+    /// Task id.
     pub id: String,
+    /// Holder label (agent name or session id).
     #[arg(long)]
     pub holder: String,
+    /// Lease TTL in seconds (default 120).
     #[arg(long, default_value_t = 120)]
     pub ttl_seconds: i64,
 }
 
 #[derive(Debug, Args)]
 pub struct TaskLeaseReleaseArgs {
+    /// Task id.
     pub id: String,
+    /// Holder label (must match the current lease holder).
     #[arg(long)]
     pub holder: String,
 }
 
 #[derive(Debug, Args)]
 pub struct TaskPreflightArgs {
+    /// Task id.
     pub id: String,
-    /// Override the task's own tier (low | med | high).
+    /// Override the task's own tier (`low` | `med` | `high`).
     #[arg(long)]
     pub tier: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct TaskCreateArgs {
+    /// Round id this task belongs to.
     pub round_id: String,
+    /// Short stable code (e.g. `TASK-1`).
     pub short_code: String,
+    /// One-line description.
     pub description: String,
     /// Parent scenario ids (repeatable). Required to evidence at completion.
     #[arg(long = "scenario")]
@@ -513,8 +698,9 @@ pub struct TaskCreateArgs {
 
 #[derive(Debug, Args)]
 pub struct TaskCompleteArgs {
+    /// Task id.
     pub id: String,
-    /// Scenario verdict: `--evidence SCN-…=passing@file:line` (repeatable).
+    /// Per-scenario verdict (repeatable). Format: `SCN-…=passing@file:line`.
     #[arg(long = "evidence", required = true)]
     pub evidence: Vec<String>,
     /// Optional summary line.
@@ -527,23 +713,33 @@ pub enum DecisionCmd {
     /// Capture an ADR (defaults status=accepted).
     Create(DecisionCreateArgs),
     /// List decisions for a plan.
-    List { plan_id: String },
+    List {
+        /// Plan id.
+        plan_id: String,
+    },
     /// Show a decision by id.
-    View { id: String },
-    /// Supersede an existing decision (creates a new accepted decision and
-    /// flips the predecessor to `superseded`).
+    View {
+        /// Decision id.
+        id: String,
+    },
+    /// Supersede an existing decision. Creates a new accepted decision and
+    /// flips the predecessor to `superseded`.
     Supersede(DecisionSupersedeArgs),
-    /// Append a D28 rollback decision (kind=consensus, reversal_of=<id>).
-    /// The original decision is never mutated; this is the auditable inverse
-    /// row a reversal-runner appends after applying the rollback action.
+    /// Append a rollback decision that reverses an earlier one (append-only;
+    /// the original is never mutated).
+    // D28 reversibility: kind=consensus, reversal_of=<id>.
     Rollback(DecisionRollbackArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct DecisionCreateArgs {
+    /// Plan id this decision belongs to.
     pub plan_id: String,
+    /// Short stable code (e.g. `DEC-1`).
     pub short_code: String,
+    /// Title.
     pub title: String,
+    /// Body markdown.
     #[arg(long, default_value = "")]
     pub body: String,
 }
@@ -555,10 +751,13 @@ pub struct DecisionSupersedeArgs {
     /// Plan id for the new decision.
     #[arg(long)]
     pub plan_id: String,
+    /// Short stable code for the new decision row.
     #[arg(long)]
     pub short_code: String,
+    /// Title of the new decision row.
     #[arg(long)]
     pub title: String,
+    /// Body markdown of the new decision row.
     #[arg(long, default_value = "")]
     pub body: String,
 }
@@ -576,15 +775,17 @@ pub struct DecisionRollbackArgs {
     /// Body for the rollback decision row.
     #[arg(long, default_value = "")]
     pub body: String,
-    /// D28 — the rollback decision's own reversal_plan JSON (in case the
-    /// reversal itself needs to be reversed). Daemon re-validates the JSON.
-    /// Use `--reversal-plan-from-file path` to read it from disk instead.
+    /// The rollback's own reversal_plan JSON (in case the reversal itself
+    /// needs to be reversed). Daemon re-validates the JSON. Use
+    /// `--reversal-plan-from-file path` to read it from disk instead.
+    // D28 reversibility.
     #[arg(long, conflicts_with = "reversal_plan_from_file")]
     pub reversal_plan: Option<String>,
     /// Read the reversal_plan JSON from the given file path.
     #[arg(long)]
     pub reversal_plan_from_file: Option<String>,
-    /// D28 — `blast_radius_score` for the rollback row (default 5).
+    /// Blast-radius score for the rollback row (default 5).
+    // D28 reversibility scoring.
     #[arg(long)]
     pub blast_radius_score: Option<i32>,
     /// Optional `produced_via_pattern_id` for the rollback row; the daemon
@@ -598,65 +799,84 @@ pub struct DecisionRollbackArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum KnowledgeCmd {
-    /// Create a knowledge artifact (PRD §5.4 scope-aware).
+    /// Create a knowledge artifact in one of the rag / reference / archive scopes.
+    // PRD §5.4 scope model.
     Create(KnowledgeCreateArgs),
     /// List knowledge for a project.
     List(KnowledgeListArgs),
     /// Show a knowledge artifact.
-    View { id: String },
-    /// Update title/body/tags.
+    View {
+        /// Knowledge artifact id.
+        id: String,
+    },
+    /// Update title / body / tags.
     Update(KnowledgeUpdateArgs),
     /// Delete a knowledge artifact.
-    Delete { id: String },
-    /// Full-text search.
+    Delete {
+        /// Knowledge artifact id.
+        id: String,
+    },
+    /// Full-text search across knowledge artifacts.
     Search(KnowledgeSearchArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct KnowledgeCreateArgs {
+    /// Project id this artifact belongs to.
     pub project_id: String,
-    /// rag | reference | archive (default: rag).
+    /// Visibility scope: `rag` (default) | `reference` | `archive`.
     #[arg(long, default_value = "rag")]
     pub scope: String,
-    /// Free-form kind (decision | runbook | note | …).
+    /// Free-form kind tag (e.g. `decision` | `runbook` | `note`).
     #[arg(long)]
     pub kind: String,
+    /// Title.
     pub title: String,
+    /// Body markdown.
     #[arg(long, default_value = "")]
     pub body: String,
-    /// Repeatable tag flag.
+    /// Repeatable tag.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
+    /// Free-form source reference (URL, file:line, …).
     #[arg(long)]
     pub source: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct KnowledgeListArgs {
+    /// Project id.
     pub project_id: String,
-    /// Optional scope filter (rag | reference | archive).
+    /// Optional scope filter (`rag` | `reference` | `archive`).
     #[arg(long)]
     pub scope: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct KnowledgeUpdateArgs {
+    /// Knowledge artifact id.
     pub id: String,
+    /// New title.
     #[arg(long)]
     pub title: String,
+    /// New body markdown.
     #[arg(long)]
     pub body: String,
+    /// Replacement tag set (repeatable).
     #[arg(long = "tag")]
     pub tags: Vec<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct KnowledgeSearchArgs {
+    /// Project id.
     pub project_id: String,
-    /// Query string (FTS5 MATCH).
+    /// Query string (FTS5 MATCH expression).
     pub q: String,
+    /// Optional scope filter (`rag` | `reference` | `archive`).
     #[arg(long)]
     pub scope: Option<String>,
+    /// Maximum results to return.
     #[arg(long, default_value_t = 20)]
     pub limit: usize,
 }
@@ -672,20 +892,29 @@ pub enum CommentCmd {
     /// List comments by anchor (`--on plan=PLAN-…`) or by project.
     List(CommentListArgs),
     /// Show a comment by id.
-    View { id: String },
-    /// Edit the body (SNAPSHOT semantics).
+    View {
+        /// Comment id.
+        id: String,
+    },
+    /// Edit the body (snapshot semantics).
     Update(CommentUpdateArgs),
     /// Delete a comment.
-    Delete { id: String },
+    Delete {
+        /// Comment id.
+        id: String,
+    },
 }
 
 #[derive(Debug, Args)]
 pub struct CommentCreateArgs {
+    /// Project id.
     pub project_id: String,
+    /// Author label.
     pub author: String,
-    /// Anchor: `plan=PLAN-…` or `task=TASK-…` or `scenario=SCN-…` or `round=ROUND-…`.
+    /// Anchor: `plan=PLAN-…` | `task=TASK-…` | `scenario=SCN-…` | `round=ROUND-…`.
     #[arg(long)]
     pub on: String,
+    /// Comment body markdown.
     pub body: String,
 }
 
@@ -701,7 +930,9 @@ pub struct CommentListArgs {
 
 #[derive(Debug, Args)]
 pub struct CommentUpdateArgs {
+    /// Comment id.
     pub id: String,
+    /// New body markdown.
     #[arg(long)]
     pub body: String,
 }
@@ -712,32 +943,50 @@ pub struct CommentUpdateArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum QuestionCmd {
+    /// Post a new question under a plan (status starts at `open`).
     Create(QuestionCreateArgs),
+    /// List questions for a plan, optionally filtered by status.
     List(QuestionListArgs),
-    View { id: String },
+    /// Show a question by id.
+    View(QuestionViewArgs),
+    /// Answer an open question (transitions status to `answered`).
     Answer(QuestionAnswerArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct QuestionCreateArgs {
+    /// Project id the plan belongs to.
     pub project_id: String,
+    /// Plan id this question is anchored to.
     pub plan_id: String,
+    /// Author label (e.g. agent name or human handle).
     pub author: String,
+    /// Question body (markdown supported).
     pub body: String,
 }
 
 #[derive(Debug, Args)]
 pub struct QuestionListArgs {
+    /// Plan id whose questions to list.
     pub plan_id: String,
-    /// Filter: open | answered (default: all).
+    /// Filter: `open` | `answered` (default: all).
     #[arg(long)]
     pub status: Option<String>,
 }
 
 #[derive(Debug, Args)]
-pub struct QuestionAnswerArgs {
+pub struct QuestionViewArgs {
+    /// Question id.
     pub id: String,
+}
+
+#[derive(Debug, Args)]
+pub struct QuestionAnswerArgs {
+    /// Question id being answered.
+    pub id: String,
+    /// Author label of the responder.
     pub author: String,
+    /// Answer body (markdown supported).
     pub answer: String,
 }
 
@@ -751,35 +1000,45 @@ pub enum RunCmd {
     Start(RunStartArgs),
     /// Mark a run terminal.
     Finish(RunFinishArgs),
-    /// Show a run.
-    View { id: String },
+    /// Show a run by id.
+    View {
+        /// Run id.
+        id: String,
+    },
     /// List runs by task or session.
     List(RunListArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct RunStartArgs {
+    /// Task id this run targets.
     pub task_id: String,
+    /// Actor label (default: `agent`).
     #[arg(long, default_value = "agent")]
     pub actor: String,
+    /// Optional session id to group related runs.
     #[arg(long)]
     pub session_id: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct RunFinishArgs {
+    /// Run id.
     pub id: String,
-    /// success | failure | aborted.
+    /// Terminal result: `success` | `failure` | `aborted`.
     #[arg(long)]
     pub result: String,
+    /// Optional free-form notes.
     #[arg(long)]
     pub notes: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct RunListArgs {
+    /// Filter by task id.
     #[arg(long)]
     pub task_id: Option<String>,
+    /// Filter by session id.
     #[arg(long)]
     pub session_id: Option<String>,
 }
@@ -794,43 +1053,62 @@ pub enum UsageCmd {
     Record(UsageRecordArgs),
     /// List usage rows by scope.
     List(UsageListArgs),
-    /// Plan rollup.
-    Plan { plan_id: String },
+    /// Aggregated usage rollup for a plan.
+    #[command(alias = "plan")]
+    Rollup {
+        /// Plan id.
+        plan_id: String,
+    },
 }
 
 #[derive(Debug, Args)]
 pub struct UsageRecordArgs {
+    /// Project id this usage row belongs to.
     pub project_id: String,
+    /// Optional plan id.
     #[arg(long)]
     pub plan_id: Option<String>,
+    /// Optional task id.
     #[arg(long)]
     pub task_id: Option<String>,
+    /// Optional run id (a single execution attempt of a task).
     #[arg(long)]
     pub run_id: Option<String>,
-    #[arg(long, default_value = "")]
+    /// Model name (e.g. `claude-opus-4-7`). Blank if unknown.
+    #[arg(long, default_value = "", hide_default_value = true)]
     pub model: String,
+    /// Cost tier (`low` | `med` | `high`).
     #[arg(long)]
     pub tier: Option<String>,
+    /// Input tokens consumed.
     #[arg(long, default_value_t = 0)]
     pub input_tokens: i64,
+    /// Output tokens produced.
     #[arg(long, default_value_t = 0)]
     pub output_tokens: i64,
+    /// Prompt-cache read tokens.
     #[arg(long, default_value_t = 0)]
     pub cache_read: i64,
+    /// Prompt-cache write tokens.
     #[arg(long, default_value_t = 0)]
     pub cache_write: i64,
+    /// Tool-call count.
     #[arg(long, default_value_t = 0)]
     pub tool_calls: i64,
+    /// Cost in USD.
     #[arg(long, default_value_t = 0.0)]
     pub cost_usd: f64,
 }
 
 #[derive(Debug, Args)]
 pub struct UsageListArgs {
+    /// Filter by project id.
     #[arg(long)]
     pub project_id: Option<String>,
+    /// Filter by plan id.
     #[arg(long)]
     pub plan_id: Option<String>,
+    /// Filter by task id.
     #[arg(long)]
     pub task_id: Option<String>,
 }
@@ -842,7 +1120,7 @@ pub struct UsageListArgs {
 #[derive(Debug, Args)]
 pub struct DashboardArgs {
     /// Resolve project by cwd (default: current working directory).
-    #[arg(long)]
+    #[arg(long, conflicts_with = "project")]
     pub cwd: Option<String>,
     /// Resolve project explicitly by id or key.
     #[arg(long)]
@@ -851,36 +1129,44 @@ pub struct DashboardArgs {
 
 #[derive(Debug, Args)]
 pub struct TimelineArgs {
+    /// Project id whose activity timeline to print.
     pub project_id: String,
+    /// Maximum number of events to return.
     #[arg(long, default_value_t = 50)]
     pub limit: usize,
 }
 
 #[derive(Debug, Args)]
 pub struct BoardArgs {
+    /// Project id whose board view to render.
     pub project_id: String,
 }
 
 #[derive(Debug, Args)]
 pub struct WikiArgs {
+    /// Project id whose wiki view to render.
     pub project_id: String,
 }
 
 #[derive(Debug, Args)]
 pub struct SummaryArgs {
-    #[arg(long)]
+    /// Resolve project by cwd (default: current working directory).
+    #[arg(long, conflicts_with = "project")]
     pub cwd: Option<String>,
+    /// Resolve project explicitly by id or key.
     #[arg(long)]
     pub project: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct ReplayArgs {
+    /// Project id filter (default: all projects).
     #[arg(long)]
     pub project_id: Option<String>,
     /// RFC3339 timestamp lower bound.
     #[arg(long)]
     pub since: Option<String>,
+    /// Maximum number of events to return.
     #[arg(long, default_value_t = 200)]
     pub limit: usize,
 }
@@ -892,37 +1178,45 @@ pub struct ReplayArgs {
 #[derive(Debug, Subcommand)]
 pub enum ExportCmd {
     /// Export all plan-scoped state for a project as JSON.
-    Plans { project_id: String },
-    /// Export knowledge (optionally filtered by scope).
+    Plans {
+        /// Project id.
+        project_id: String,
+    },
+    /// Export knowledge artifacts (optionally filtered by scope).
     Knowledge(ExportKnowledgeArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct ExportKnowledgeArgs {
+    /// Project id.
     pub project_id: String,
+    /// Optional scope filter (`rag` | `reference` | `archive`).
     #[arg(long)]
     pub scope: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ImportCmd {
-    /// Import plans (input path or "-" for stdin).
+    /// Import plans from a JSON file (or `-` for stdin).
     Plans(ImportPlansArgs),
-    /// Import knowledge.
+    /// Import knowledge artifacts from a JSON file (or `-` for stdin).
     Knowledge(ImportKnowledgeArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct ImportPlansArgs {
+    /// Input file path, or `-` for stdin.
     pub input: String,
-    /// Override every plan's project_id during import.
+    /// Override every plan's `project_id` during import.
     #[arg(long)]
     pub project_id: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct ImportKnowledgeArgs {
+    /// Input file path, or `-` for stdin.
     pub input: String,
+    /// Override every artifact's `project_id` during import.
     #[arg(long)]
     pub project_id: Option<String>,
 }
@@ -933,53 +1227,64 @@ pub struct ImportKnowledgeArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum AutonomyCmd {
-    /// Set a policy (scope = global | plan | decision_kind). Upsert semantics.
+    /// Set a policy at a scope (`global` | `plan` | `decision_kind`). Upsert semantics.
     Set(AutonomySetArgs),
-    /// Resolve the effective policy at a scope (plan > decision_kind > global).
+    /// Resolve the effective policy. Specificity wins: plan > decision_kind > global.
     Get(AutonomyGetArgs),
     /// List every policy on a project.
-    List { project_id: String },
-    /// D18 circuit breaker — demote every policy in a project to L3.
+    List {
+        /// Project id.
+        project_id: String,
+    },
+    /// Circuit breaker: demote every policy in a project to L3 (always-ask).
+    // D18 panic switch.
     CircuitBreaker(AutonomyCircuitBreakerArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct AutonomySetArgs {
+    /// Project id.
     pub project_id: String,
-    /// global | plan | decision_kind.
+    /// Scope: `global` | `plan` | `decision_kind`.
     #[arg(long)]
     pub scope: String,
-    /// L3 | L4 | L5.
+    /// Autonomy mode: `L3` | `L4` | `L5`.
     #[arg(long)]
     pub mode: String,
-    /// Required when scope=plan.
+    /// Required when `--scope plan`.
     #[arg(long)]
     pub plan_id: Option<String>,
-    /// Required when scope=decision_kind (architecture | schema | naming-canonical | …).
+    /// Required when `--scope decision_kind` (e.g. `architecture` | `schema` | `naming-canonical`).
     #[arg(long)]
     pub decision_kind: Option<String>,
-    /// Who set it (default: agent).
+    /// Who set it (default: `agent`).
     #[arg(long, default_value = "agent")]
     pub set_by: String,
+    /// Free-form rationale recorded with the policy.
     #[arg(long)]
     pub reason: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct AutonomyGetArgs {
+    /// Project id.
     pub project_id: String,
+    /// Resolve the policy effective at this plan scope.
     #[arg(long)]
     pub plan_id: Option<String>,
+    /// Resolve the policy effective at this decision_kind scope.
     #[arg(long)]
     pub decision_kind: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct AutonomyCircuitBreakerArgs {
+    /// Project id.
     pub project_id: String,
     /// Required — the panic-switch always records a reason.
     #[arg(long)]
     pub reason: String,
+    /// Actor label (default: `user`).
     #[arg(long, default_value = "user")]
     pub actor: String,
 }
@@ -990,49 +1295,60 @@ pub struct AutonomyCircuitBreakerArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum AgentNoteCmd {
-    /// Append a note to the blackboard. `--kind handoff` plus `--to` triggers
-    /// the hand-off receipt path.
+    /// Append a note to the shared blackboard. `--kind handoff` plus `--to`
+    /// turns the note into a hand-off receipt addressed to another agent.
     Append(AgentNoteAppendArgs),
     /// List active notes anchored at a scope.
     List(AgentNoteListArgs),
     /// List pending hand-offs addressed to an agent.
-    Handoffs { to_agent: String },
-    /// Acknowledge a hand-off (clears it from pending queue).
-    Ack { id: String },
+    Handoffs {
+        /// Recipient agent name (matches the `--to` field on `append`).
+        to_agent: String,
+    },
+    /// Acknowledge a hand-off (clears it from the pending queue).
+    Ack {
+        /// Note id of the hand-off being acknowledged.
+        id: String,
+    },
     /// Retire a note (non-destructive; reason required).
     Retire(AgentNoteRetireArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct AgentNoteAppendArgs {
+    /// Project id.
     pub project_id: String,
-    /// Scope of the note (plan | round | scenario | task | global).
+    /// Anchor scope: `plan` | `round` | `scenario` | `task` | `global`.
     #[arg(long)]
     pub scope: String,
-    /// Note kind (handoff | observation | question | answer | warning | summary).
+    /// Note kind: `handoff` | `observation` | `question` | `answer` | `warning` | `summary`.
     #[arg(long)]
     pub kind: String,
-    /// Agent emitting the note.
+    /// Name of the agent emitting the note.
     #[arg(long)]
     pub from: String,
-    /// Anchor ids — set whichever matches the scope.
+    /// Anchor plan id (set when `--scope plan`).
     #[arg(long)]
     pub plan_id: Option<String>,
+    /// Anchor round id (set when `--scope round`).
     #[arg(long)]
     pub round_id: Option<String>,
+    /// Anchor scenario id (set when `--scope scenario`).
     #[arg(long)]
     pub scenario_id: Option<String>,
+    /// Anchor task id (set when `--scope task`).
     #[arg(long)]
     pub task_id: Option<String>,
-    /// Target agent (required when kind=handoff).
+    /// Target agent (required when `--kind handoff`).
     #[arg(long)]
     pub to: Option<String>,
+    /// Note body markdown.
     pub body: String,
 }
 
 #[derive(Debug, Args)]
 pub struct AgentNoteListArgs {
-    /// Scope (plan | round | scenario | task | global).
+    /// Anchor scope: `plan` | `round` | `scenario` | `task` | `global`.
     #[arg(long)]
     pub scope: String,
     /// Anchor id matching the scope.
@@ -1045,7 +1361,9 @@ pub struct AgentNoteListArgs {
 
 #[derive(Debug, Args)]
 pub struct AgentNoteRetireArgs {
+    /// Note id.
     pub id: String,
+    /// Free-form reason for retiring.
     #[arg(long)]
     pub reason: String,
 }
@@ -1056,12 +1374,14 @@ pub struct AgentNoteRetireArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum ConsensusCmd {
-    /// Group a plan's decisions by proposal and report 4-stage progress.
+    /// Group a plan's decisions by proposal and report 4-stage progress
+    /// (proposal → critique → consensus → dissensus).
     Status(ConsensusStatusArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct ConsensusStatusArgs {
+    /// Plan id whose decisions to group.
     pub plan_id: String,
     /// Filter to a single proposal id.
     #[arg(long)]
@@ -1074,21 +1394,26 @@ pub struct ConsensusStatusArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum PatternCmd {
-    /// Create a CollaborationPattern row (lifecycle starts at `pending`).
-    /// Boxed: `PatternCreateArgs` is ~5x larger than the next variant
-    /// because of the four (json | from-file) shape flag pairs.
+    /// Create a collaboration pattern row (lifecycle starts at `pending`).
+    // PatternCreateArgs is Box<>'d because it's ~5x the next variant
+    // (four `*-json` / `*-from-file` shape flag pairs).
     Create(Box<PatternCreateArgs>),
-    /// List patterns for a plan, or `--active` to list every active row.
+    /// List patterns for a plan, or `--active` to list every active row across plans.
     List(PatternListArgs),
     /// Show a pattern by id.
-    Show { id: String },
-    /// Transition the pattern lifecycle. `pending → active` runs the D26
-    /// shape gate; terminal targets (`converged`/`dissensus`/`aborted`)
-    /// stamp `decided_at` automatically.
+    Show {
+        /// Pattern id.
+        id: String,
+    },
+    /// Transition the pattern lifecycle. `pending → active` runs the shape
+    /// gate; terminal targets (`converged` / `dissensus` / `aborted`) stamp
+    /// `decided_at` automatically.
+    // D26 shape gate at pending→active.
     Transition(PatternTransitionArgs),
     /// Sugar for `transition --to aborted`.
     Abort(PatternAbortArgs),
-    /// Render the plan's pattern parent→child tree (D24).
+    /// Render the plan's pattern parent→child tree.
+    // D24 DAG.
     Tree(PatternTreeArgs),
 }
 
@@ -1103,14 +1428,15 @@ pub struct PatternCreateArgs {
     /// `workflow` | `graph` | `swarm` | `agents-as-tools` | `direct`.
     #[arg(long)]
     pub kind: String,
-    /// The work entity the pattern produces:
-    /// `plan` | `requirement` | `scenario` | `task` | `decision` | `round`.
+    /// Entity kind the pattern produces (must match `--scope-id`).
+    /// One of: `plan` | `requirement` | `scenario` | `task` | `decision` | `round`.
     #[arg(long = "applies-to")]
     pub applies_to: String,
-    /// Id of the work entity (must match `applies_to`).
+    /// Id of the work entity (must match the kind in `--applies-to`).
     #[arg(long = "scope-id")]
     pub scope_id: String,
-    /// Optional parent pattern id; daemon enforces D24 cycle + depth cap.
+    /// Optional parent pattern id; daemon rejects cycles and enforces depth cap.
+    // D24 DAG enforcement.
     #[arg(long = "parent")]
     pub parent_pattern_id: Option<String>,
     /// Workflow `steps` JSON (array of {idx, agent, action}). Required when
@@ -1160,8 +1486,9 @@ pub struct PatternListArgs {
 
 #[derive(Debug, Args)]
 pub struct PatternTransitionArgs {
+    /// Pattern id.
     pub id: String,
-    /// One of `pending` | `active` | `converged` | `dissensus` | `aborted`.
+    /// Target lifecycle state: `pending` | `active` | `converged` | `dissensus` | `aborted`.
     #[arg(long = "to")]
     pub to: String,
     /// Free-form reason recorded in `decided_reason`.
@@ -1171,6 +1498,7 @@ pub struct PatternTransitionArgs {
 
 #[derive(Debug, Args)]
 pub struct PatternAbortArgs {
+    /// Pattern id.
     pub id: String,
     /// Free-form reason recorded in `decided_reason`.
     #[arg(long)]

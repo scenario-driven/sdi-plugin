@@ -10,7 +10,7 @@ pub async fn run(cli: &Client, cmd: UsageCmd, quiet: bool) -> Result<()> {
     match cmd {
         UsageCmd::Record(args) => record(cli, args, quiet).await,
         UsageCmd::List(args) => list(cli, args).await,
-        UsageCmd::Plan { plan_id } => {
+        UsageCmd::Rollup { plan_id } => {
             let v: Value = cli.get_json(&format!("/plans/{plan_id}/usage")).await?;
             emit(&v, false)
         }

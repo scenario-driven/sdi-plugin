@@ -10,8 +10,8 @@ pub async fn run(cli: &Client, cmd: QuestionCmd, quiet: bool) -> Result<()> {
     match cmd {
         QuestionCmd::Create(args) => create(cli, args, quiet).await,
         QuestionCmd::List(args) => list(cli, args).await,
-        QuestionCmd::View { id } => {
-            let v: Value = cli.get_json(&format!("/questions/{id}")).await?;
+        QuestionCmd::View(args) => {
+            let v: Value = cli.get_json(&format!("/questions/{}", args.id)).await?;
             emit(&v, quiet)
         }
         QuestionCmd::Answer(args) => answer(cli, args, quiet).await,

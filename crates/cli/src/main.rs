@@ -44,8 +44,8 @@ async fn main() -> Result<()> {
         Cmd::Run(sub) => commands::run::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Usage(sub) => commands::usage::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Dashboard(args) => commands::aggregate::dashboard(&entity_client().await?, args).await,
-        Cmd::Handoff { project_id } => {
-            commands::aggregate::handoff(&entity_client().await?, &project_id).await
+        Cmd::Handoff(args) => {
+            commands::aggregate::handoff(&entity_client().await?, &args.project_id).await
         }
         Cmd::Timeline(args) => commands::aggregate::timeline(&entity_client().await?, args).await,
         Cmd::Board(args) => commands::aggregate::board(&entity_client().await?, args).await,
@@ -56,12 +56,12 @@ async fn main() -> Result<()> {
         Cmd::Export(sub) => commands::impexp::export(&entity_client().await?, sub).await,
         Cmd::Import(sub) => commands::impexp::import(&entity_client().await?, sub).await,
         Cmd::Init(args) => commands::ops::init(&entity_client().await?, args).await,
-        Cmd::Backup { output } => commands::ops::backup(&Paths::resolve()?, &output),
-        Cmd::Restore { input } => commands::ops::restore(&Paths::resolve()?, &input),
+        Cmd::Backup(args) => commands::ops::backup(&Paths::resolve()?, &args.output),
+        Cmd::Restore(args) => commands::ops::restore(&Paths::resolve()?, &args.input),
         Cmd::Config => commands::ops::config(&Paths::resolve()?),
         Cmd::Log(args) => commands::ops::log(&Paths::resolve()?, args),
         Cmd::Watch(args) => commands::ops::watch(&entity_client().await?, args).await,
-        Cmd::Completions { shell } => commands::ops::completions(&shell),
+        Cmd::Completions(args) => commands::ops::completions(&args.shell),
     }
 }
 

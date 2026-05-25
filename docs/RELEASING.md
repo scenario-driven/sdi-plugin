@@ -1,9 +1,8 @@
 # Releasing
 
-> **Pre-release state.** No GitHub Release exists yet. The user has explicitly
-> excluded "git repo / org creation / distribution" from the current scope.
-> This document is the policy snapshot — it specifies how the first release
-> will be cut, not a procedure currently being executed.
+> **Active.** Releases are cut by pushing a `v*.*.*` tag; `.github/workflows/release.yml`
+> then builds the four-target binaries, creates the GitHub Release, and force-pushes
+> the `dist` branch the marketplace pulls from. `v0.1.0` is the first published release.
 
 ## One workspace, one version
 
@@ -59,7 +58,7 @@ install, and binaries have no place in the source review.
 
 ## Pre-release checklist
 
-For the first `v0.1.0` (when ready):
+Before tagging any release:
 
 - [ ] `cargo test --workspace` green on macOS + Linux × x86_64 + aarch64.
 - [ ] `node --test plugin/tests/` green.
