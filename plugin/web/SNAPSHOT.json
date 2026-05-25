@@ -1,0 +1,10 @@
+{
+  "source_repo": "github.com/scenario-driven/sdi-web",
+  "source_commit": "e8cb44893606f211f78c7ca89d3be3e2d78e52e0",
+  "source_commit_subject": "docs(readme): update dashboard views and multi-agent governance specs",
+  "imported_at": "2026-05-24",
+  "import_method": "snapshot",
+  "absorbed_into": "github.com/scenario-driven/sdi-plugin",
+  "downstream_owner": "sdi-plugin only; sdi-web repo is archived (read-only)",
+  "rebuild_command": "pnpm --dir plugin/web install && pnpm --dir plugin/web build"
+}
