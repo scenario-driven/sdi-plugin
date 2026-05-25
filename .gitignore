@@ -25,6 +25,9 @@ Cargo.lock.bak
 *.sqlite3
 *.db
 
+# Claude Code scheduled-tasks lock (per-process runtime state: pid/session/acquiredAt)
+.claude/scheduled_tasks.lock
+
 # Plugin distribution binaries (populated on the dist branch / by install gate
 # at runtime). PRD §5.1: main carries src; dist carries built binaries.
 plugin/bin/*
