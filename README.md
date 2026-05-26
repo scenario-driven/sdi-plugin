@@ -1,4 +1,10 @@
-# SDI — Scenario-Driven Implementation
+<p align="center">
+  <img src="./assets/sdi-logo.svg" alt="SDI — Scenario-Driven Implementation" width="440">
+</p>
+
+<p align="center">
+  <strong>English</strong> · <a href="./README.ko.md">한국어</a>
+</p>
 
 > Natural-language GWT scenarios as first-class citizens. Multiple LLM agents propose, critique, and reach consensus on what to build, then implement, verify, and auto-regress across rounds — under a per-scope autonomy policy the user controls without staying tethered to the prompt.
 
@@ -90,12 +96,14 @@ sdi-plugin/
 │   ├── daemon/              # `sdid` binary — background daemon (HTTP + unix socket).
 │   ├── mcp/                 # stdio MCP server library, embedded into cli.
 │   ├── core/                # Domain model: Plan / Requirement / Decision / Scenario / Round / AutonomyPolicy / CollaborationPattern + AgentNote / AgentSpec.
-│   └── db/                  # SQLite (rusqlite + sqlite-vec) storage adapter.
+│   └── db/                  # SQLite storage adapter (rusqlite + r2d2; FTS5 keyword search, vector search deferred).
 ├── plugin/                  # Claude Code plugin shell
 │   ├── .claude-plugin/plugin.json
 │   ├── .mcp.json
 │   ├── hooks/hooks.json
+│   ├── web/                 # dashboard SPA (Vite/React 19/Tailwind 4); `sdid` serves dist/.
 │   └── README.md
+├── assets/                  # logo + brand SVGs
 ├── docs/
 │   ├── PRD.md               # canonical product spec (D1–D29)
 │   ├── ARCHITECTURE.md      # this repo's architecture + multi-agent layers
@@ -106,21 +114,40 @@ sdi-plugin/
 └── .gitignore
 ```
 
-Add-on repositories (separate org repos):
+The dashboard SPA lives in this repository at [`plugin/web/`](./plugin/web/) and is served directly by `sdid` over tower-http `ServeDir`. The autonomy panel, decision timeline, agent-notes blackboard, and pattern views all render from the daemon's HTTP API + `/events` SSE.
 
-- [`sdi-web`](https://github.com/scenario-driven/sdi-web) — Vite/React dashboard SPA. Consumes the `sdid` HTTP API + `/events` SSE. Surfaces the autonomy panel, decision timeline, agent-notes blackboard, and pattern views.
-- [`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) — Tauri 2 shell. Bundles `sdi-web/dist` and spawns `sdid` as a sidecar. Mirrors the resolved autonomy mode + active-pattern badge into the window title and tray, and exposes the circuit breaker as a global shortcut (Cmd+Shift+L / Ctrl+Shift+L).
-- [`sdi-docs`](https://github.com/scenario-driven/sdi-docs) — Astro/Starlight landing + bilingual (ko / en) guide site. Presentation layer mirroring this repo's `docs/PRD.md` to a navigable site at `https://scenario-driven.github.io/sdi-docs/`.
+Two separate org repositories accompany this one:
+
+- [`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) — Tauri 2 shell. Bundles `plugin/web/dist` and spawns `sdid` as a sidecar. Mirrors the resolved autonomy mode + active-pattern badge into the window title and tray, and exposes the circuit breaker as a global shortcut (Cmd+Shift+L / Ctrl+Shift+L).
+- [`sdi-docs`](https://github.com/scenario-driven/sdi-docs) — Astro/Starlight landing + bilingual (ko / en) guide site. Presentation layer mirroring this repo's `docs/PRD.md`.
 
 ---
 
-## Build
+## Install
+
+Pre-built `sdi` + `sdid` binaries (macOS + Linux × x86_64 + aarch64) ship via the Claude Code plugin marketplace — no Rust toolchain required.
+
+```text
+/plugin marketplace add scenario-driven/sdi-plugin
+/plugin install sdi@scenario-driven-sdi-plugin
+```
+
+The plugin shell lives under [`plugin/`](./plugin/); the marketplace pulls it from the `dist` branch (binaries attached to each [GitHub Release](https://github.com/scenario-driven/sdi-plugin/releases)).
+
+---
+
+## Build from source
 
 ```sh
 cargo build
 ```
 
-Builds two binaries: `sdi` (cli) and `sdid` (daemon).
+Builds two binaries: `sdi` (cli) and `sdid` (daemon). To rebuild the dashboard SPA:
+
+```sh
+pnpm --dir plugin/web install
+pnpm --dir plugin/web build
+```
 
 ---
 
