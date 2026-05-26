@@ -9,6 +9,7 @@
 
 use sdi_daemon::AppState;
 use sdi_db::Paths;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -994,5 +995,139 @@ async fn carry_over_excludes_unevaluated_scenarios_prd_6_3() {
     assert!(
         arr.iter().all(|r| r["scenario_id"] != scn_b_id),
         "SCN-B must NOT be auto-passed in R2",
+    );
+}
+
+/// Build a project with an approved plan and an active R1; returns
+/// `(project_id, round_id)`. One confirmed scenario satisfies the D8 approve
+/// gate.
+async fn mk_active_round(base: &str, suffix: &str) -> (String, String) {
+    let cli = c();
+    let (project_id, plan_id) = mk_plan(base, suffix).await;
+    cli.post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-{}", &suffix[..6]),
+            "given": "g", "when": "w", "then": "t",
+            "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("R1-{}", &suffix[..6])
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+    (project_id, r1_id)
+}
+
+async fn mk_task(base: &str, round_id: &str, suffix: &str) -> String {
+    let task: serde_json::Value = c()
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": round_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "work"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    task["id"].as_str().unwrap().to_string()
+}
+
+async fn stats_map(base: &str, project_id: Option<&str>) -> HashMap<String, i64> {
+    let url = match project_id {
+        Some(p) => format!("{}/tasks/stats?project_id={}", base, p),
+        None => format!("{}/tasks/stats", base),
+    };
+    let v: serde_json::Value = c().get(url).send().await.unwrap().json().await.unwrap();
+    v["by_status"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["status"].as_str().unwrap().to_string(),
+                e["count"].as_i64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// `/tasks/stats?project_id=` and the dashboard's `task_status` must count only
+/// the named project's tasks — a global histogram would leak other projects'
+/// tasks in the shared multi-project DB. The no-arg `/tasks/stats` stays global
+/// (the `/metrics` server-wide gauge semantic).
+#[tokio::test]
+async fn task_stats_is_project_scoped() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+
+    // Distinct leading chars so the two projects derive distinct keys/slugs
+    // (mk_plan keys off suffix[..4]; sibling ULIDs share their timestamp prefix).
+    // Project A: one task left in `todo`.
+    let sa = format!("AAAA{}", ulid::Ulid::new());
+    let (pa, ra) = mk_active_round(&base, &sa).await;
+    mk_task(&base, &ra, &sa).await;
+
+    // Project B: one task moved to `in_progress`.
+    let sb = format!("BBBB{}", ulid::Ulid::new());
+    let (pb, rb) = mk_active_round(&base, &sb).await;
+    let tb = mk_task(&base, &rb, &sb).await;
+    cli.post(format!("{}/tasks/{}/status", base, tb))
+        .json(&serde_json::json!({"status": "in_progress"}))
+        .send()
+        .await
+        .unwrap();
+
+    // Scoped to A: only `todo`, never B's `in_progress`.
+    let a_stats = stats_map(&base, Some(&pa)).await;
+    assert_eq!(a_stats.get("todo"), Some(&1));
+    assert_eq!(a_stats.get("in_progress"), None);
+
+    // Scoped to B: only `in_progress`, never A's `todo`.
+    let b_stats = stats_map(&base, Some(&pb)).await;
+    assert_eq!(b_stats.get("in_progress"), Some(&1));
+    assert_eq!(b_stats.get("todo"), None);
+
+    // Global (no project_id): sees both.
+    let g_stats = stats_map(&base, None).await;
+    assert_eq!(g_stats.get("todo"), Some(&1));
+    assert_eq!(g_stats.get("in_progress"), Some(&1));
+
+    // Dashboard task_status mirrors the project-scoped histogram for A.
+    let dash: serde_json::Value = cli
+        .get(format!("{}/dashboard?project={}", base, pa))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let ts = dash["task_status"].as_array().unwrap();
+    assert!(ts.iter().any(|e| e["status"] == "todo" && e["count"] == 1));
+    assert!(
+        ts.iter().all(|e| e["status"] != "in_progress"),
+        "dashboard task_status must not leak project B's in_progress task"
     );
 }

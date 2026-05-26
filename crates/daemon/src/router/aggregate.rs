@@ -118,7 +118,7 @@ async fn dashboard(
 
     let recent_activity = collab_repo::list_activity_by_project(&conn, &project.id, 20)?;
     let usage = usage_repo::rollup_for_project(&conn, &project.id)?;
-    let task_status = run_repo::status_counts(&conn)?;
+    let task_status = run_repo::status_counts_for_project(&conn, &project.id)?;
 
     Ok(Json(json!({
         "project": project,

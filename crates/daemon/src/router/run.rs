@@ -417,9 +417,21 @@ async fn get_lease(
 // stats
 // ---------------------------------------------------------------------------
 
-async fn stats(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+#[derive(Debug, Deserialize)]
+struct StatsQuery {
+    #[serde(default)]
+    project_id: Option<String>,
+}
+
+async fn stats(
+    State(state): State<AppState>,
+    Query(q): Query<StatsQuery>,
+) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
-    let rows = repo::status_counts(&conn)?;
+    let rows = match q.project_id {
+        Some(pid) => repo::status_counts_for_project(&conn, &Id::from(pid))?,
+        None => repo::status_counts(&conn)?,
+    };
     let items: Vec<_> = rows
         .into_iter()
         .map(|(s, n)| json!({ "status": s, "count": n }))

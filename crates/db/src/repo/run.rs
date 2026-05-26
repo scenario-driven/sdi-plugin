@@ -240,14 +240,43 @@ pub fn descendants(conn: &Connection, task_id: &Id) -> DomainResult<Vec<Id>> {
     Ok(out)
 }
 
-/// Top-level task stats — counts grouped by status across the entire DB or a
-/// single project (caller can join in SQL if a project-scoped variant is needed).
+/// Task status histogram across the entire DB. Correct for `/metrics`, where a
+/// server-wide gauge spanning every project is the intended Prometheus semantic.
 pub fn status_counts(conn: &Connection) -> DomainResult<Vec<(String, i64)>> {
     let mut stmt = conn
         .prepare("SELECT status, COUNT(*) FROM tasks GROUP BY status")
         .map_err(map_sqlite_err)?;
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+        .map_err(map_sqlite_err)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(map_sqlite_err)?);
+    }
+    Ok(out)
+}
+
+/// Task status histogram scoped to one project, joining tasks → rounds → plans.
+/// Correct for `/dashboard` and `sdi task stats`, where a global count would
+/// leak other projects' tasks in a shared multi-project database.
+pub fn status_counts_for_project(
+    conn: &Connection,
+    project_id: &Id,
+) -> DomainResult<Vec<(String, i64)>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.status, COUNT(*) \
+             FROM tasks t \
+             JOIN rounds r ON t.round_id = r.id \
+             JOIN plans p ON r.plan_id = p.id \
+             WHERE p.project_id = ?1 \
+             GROUP BY t.status",
+        )
+        .map_err(map_sqlite_err)?;
+    let rows = stmt
+        .query_map([project_id.as_str()], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })
         .map_err(map_sqlite_err)?;
     let mut out = Vec::new();
     for r in rows {

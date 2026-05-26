@@ -8,6 +8,29 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.1.3] - 2026-05-26
+
+### Fixed
+- `sdi dashboard` (and `sdi summary`) reported a `task_status` histogram counted
+  across **all** projects in the shared database, while every sibling count on
+  the same payload was project-scoped. In a multi-project install the field
+  leaked other projects' task counts. The histogram is now scoped to the matched
+  project by joining `tasks → rounds → plans`; the server-wide `/metrics` gauge
+  keeps its global count.
+
+### Added
+- `sdi task stats` now selects a project the same three ways every other
+  project-scoped command does — a positional id/key, `--project <id|key>`, or
+  `--cwd <path>` — defaulting to the current directory. It previously returned a
+  global, cross-project histogram with no way to scope it.
+
+### Changed
+- Project selection is unified across `dashboard`, `summary`, `handoff`,
+  `board`, `wiki`, `timeline`, and `task stats` via a shared selector: a
+  positional id/key, `--project`, or `--cwd` (mutually exclusive), defaulting to
+  the current directory. `handoff`, `board`, `wiki`, and `timeline` previously
+  required an explicit project id.
+
 ## [0.1.2] - 2026-05-25
 
 ### Fixed
@@ -48,6 +71,7 @@ Initial public release. Built `sdi` + `sdid` binaries (macOS + Linux ×
 x86_64 + aarch64) attached to the GitHub Release; the `dist` branch carries the
 plugin shell + binaries that Claude Code's marketplace pulls from.
 
+[0.1.3]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.3
 [0.1.2]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.2
 [0.1.1]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.1
 [0.1.0]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.0

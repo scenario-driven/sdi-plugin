@@ -1,19 +1,27 @@
 //! `sdi dashboard | handoff | summary | board | wiki | timeline | metrics | replay`.
 //! Read-only views that pull pre-computed aggregates from the daemon.
 
-use crate::cli::{BoardArgs, DashboardArgs, ReplayArgs, SummaryArgs, TimelineArgs, WikiArgs};
+use crate::cli::{
+    BoardArgs, DashboardArgs, HandoffArgs, ProjectSelector, ReplayArgs, SummaryArgs, TimelineArgs,
+    WikiArgs,
+};
 use crate::http::Client;
 use crate::output::emit;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
 pub async fn dashboard(cli: &Client, args: DashboardArgs) -> Result<()> {
-    let path = build_dashboard_path("/dashboard", args.cwd.as_deref(), args.project.as_deref())?;
+    let path = build_dashboard_path(
+        "/dashboard",
+        args.selector.cwd.as_deref(),
+        args.selector.explicit(),
+    )?;
     let v: Value = cli.get_json(&path).await?;
     emit(&v, false)
 }
 
-pub async fn handoff(cli: &Client, project_id: &str) -> Result<()> {
+pub async fn handoff(cli: &Client, args: HandoffArgs) -> Result<()> {
+    let project_id = resolve_project_id(cli, &args.selector).await?;
     let v: Value = cli
         .get_json(&format!("/projects/{project_id}/handoff"))
         .await?;
@@ -21,7 +29,11 @@ pub async fn handoff(cli: &Client, project_id: &str) -> Result<()> {
 }
 
 pub async fn summary(cli: &Client, args: SummaryArgs) -> Result<()> {
-    let path = build_dashboard_path("/dashboard", args.cwd.as_deref(), args.project.as_deref())?;
+    let path = build_dashboard_path(
+        "/dashboard",
+        args.selector.cwd.as_deref(),
+        args.selector.explicit(),
+    )?;
     let raw: Value = cli.get_json(&path).await?;
     // Reshape: counts + active plan only.
     let summary = json!({
@@ -34,8 +46,9 @@ pub async fn summary(cli: &Client, args: SummaryArgs) -> Result<()> {
 }
 
 pub async fn board(cli: &Client, args: BoardArgs) -> Result<()> {
+    let project_id = resolve_project_id(cli, &args.selector).await?;
     let v: Value = cli
-        .get_json(&format!("/projects/{}/handoff", args.project_id))
+        .get_json(&format!("/projects/{project_id}/handoff"))
         .await?;
     let board = json!({
         "in_flight_tasks": v.get("in_flight_tasks").cloned().unwrap_or(Value::Array(vec![])),
@@ -45,23 +58,39 @@ pub async fn board(cli: &Client, args: BoardArgs) -> Result<()> {
 }
 
 pub async fn wiki(cli: &Client, args: WikiArgs) -> Result<()> {
+    let project_id = resolve_project_id(cli, &args.selector).await?;
     let v: Value = cli
         .get_json(&format!(
-            "/knowledge/export?project_id={}&scope=rag",
-            args.project_id
+            "/knowledge/export?project_id={project_id}&scope=rag"
         ))
         .await?;
     emit(&v, false)
 }
 
 pub async fn timeline(cli: &Client, args: TimelineArgs) -> Result<()> {
+    let project_id = resolve_project_id(cli, &args.selector).await?;
     let v: Value = cli
         .get_json(&format!(
-            "/activity?project_id={}&limit={}",
-            args.project_id, args.limit
+            "/activity?project_id={project_id}&limit={}",
+            args.limit
         ))
         .await?;
     emit(&v, false)
+}
+
+/// Resolve a [`ProjectSelector`] to a concrete `PROJ-…` id by routing through
+/// `/dashboard`, which already accepts a project id, a project key, or a cwd
+/// path and returns the matched project. Centralizing resolution here lets the
+/// per-project view endpoints (handoff / board / wiki / timeline / task stats)
+/// accept the same id-or-key-or-cwd selector as the dashboard.
+pub(crate) async fn resolve_project_id(cli: &Client, sel: &ProjectSelector) -> Result<String> {
+    let path = build_dashboard_path("/dashboard", sel.cwd.as_deref(), sel.explicit())?;
+    let v: Value = cli.get_json(&path).await?;
+    v.get("project")
+        .and_then(|p| p.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("no project matched the given selector (id / key / cwd)"))
 }
 
 pub async fn metrics(cli: &Client) -> Result<()> {

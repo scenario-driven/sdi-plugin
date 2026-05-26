@@ -35,7 +35,10 @@ pub async fn run(cli: &Client, cmd: TaskCmd, quiet: bool) -> Result<()> {
         TaskCmd::Heartbeat(args) => lease_action(cli, args, "/lease/heartbeat").await,
         TaskCmd::Release(args) => release(cli, args).await,
         TaskCmd::LeaseInfo { id } => simple_get(cli, &format!("/tasks/{id}/lease")).await,
-        TaskCmd::Stats => simple_get(cli, "/tasks/stats").await,
+        TaskCmd::Stats(sel) => {
+            let project_id = crate::commands::aggregate::resolve_project_id(cli, &sel).await?;
+            simple_get(cli, &format!("/tasks/stats?project_id={project_id}")).await
+        }
         TaskCmd::Preflight(args) => preflight(cli, args).await,
     }
 }

@@ -159,8 +159,8 @@ pub struct InitArgs {
 
 #[derive(Debug, Args)]
 pub struct HandoffArgs {
-    /// Project id whose handoff bundle to print.
-    pub project_id: String,
+    #[command(flatten)]
+    pub selector: ProjectSelector,
 }
 
 #[derive(Debug, Args)]
@@ -620,8 +620,8 @@ pub enum TaskCmd {
         /// Task id.
         id: String,
     },
-    /// Status histogram across all tasks.
-    Stats,
+    /// Task status histogram for one project (default: current directory).
+    Stats(ProjectSelector),
     /// Preflight: estimate cost for a task using prior tier history.
     Preflight(TaskPreflightArgs),
 }
@@ -1117,20 +1117,39 @@ pub struct UsageListArgs {
 // Aggregate views
 // ---------------------------------------------------------------------------
 
+/// Shared project selector for every project-scoped command. A project may be
+/// named three interchangeable ways: a positional id/key, `--project <id|key>`,
+/// or `--cwd <path>`. When none is given, the current working directory is used.
+#[derive(Debug, Args)]
+pub struct ProjectSelector {
+    /// Project id or key. Omit to use `--project`, `--cwd`, or the current directory.
+    pub project_id: Option<String>,
+    /// Resolve project explicitly by id or key (alternative to the positional).
+    #[arg(long, conflicts_with = "project_id")]
+    pub project: Option<String>,
+    /// Resolve project by path (default: current working directory).
+    #[arg(long, conflicts_with_all = ["project_id", "project"])]
+    pub cwd: Option<String>,
+}
+
+impl ProjectSelector {
+    /// The explicit id/key form, taken from the positional or `--project`
+    /// (mutually exclusive). `None` means resolve by `--cwd` / current dir.
+    pub fn explicit(&self) -> Option<&str> {
+        self.project_id.as_deref().or(self.project.as_deref())
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct DashboardArgs {
-    /// Resolve project by cwd (default: current working directory).
-    #[arg(long, conflicts_with = "project")]
-    pub cwd: Option<String>,
-    /// Resolve project explicitly by id or key.
-    #[arg(long)]
-    pub project: Option<String>,
+    #[command(flatten)]
+    pub selector: ProjectSelector,
 }
 
 #[derive(Debug, Args)]
 pub struct TimelineArgs {
-    /// Project id whose activity timeline to print.
-    pub project_id: String,
+    #[command(flatten)]
+    pub selector: ProjectSelector,
     /// Maximum number of events to return.
     #[arg(long, default_value_t = 50)]
     pub limit: usize,
@@ -1138,24 +1157,20 @@ pub struct TimelineArgs {
 
 #[derive(Debug, Args)]
 pub struct BoardArgs {
-    /// Project id whose board view to render.
-    pub project_id: String,
+    #[command(flatten)]
+    pub selector: ProjectSelector,
 }
 
 #[derive(Debug, Args)]
 pub struct WikiArgs {
-    /// Project id whose wiki view to render.
-    pub project_id: String,
+    #[command(flatten)]
+    pub selector: ProjectSelector,
 }
 
 #[derive(Debug, Args)]
 pub struct SummaryArgs {
-    /// Resolve project by cwd (default: current working directory).
-    #[arg(long, conflicts_with = "project")]
-    pub cwd: Option<String>,
-    /// Resolve project explicitly by id or key.
-    #[arg(long)]
-    pub project: Option<String>,
+    #[command(flatten)]
+    pub selector: ProjectSelector,
 }
 
 #[derive(Debug, Args)]
