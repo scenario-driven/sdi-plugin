@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="SDI logomark">
+  <rect width="128" height="128" rx="26" fill="#0f172a"/>
+  <!-- scenario flow: Given / When / Then as connected nodes -->
+  <line x1="34" y1="40" x2="34" y2="88" stroke="#22d3ee" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="34" cy="40" r="7.5" fill="#22d3ee"/>
+  <circle cx="34" cy="64" r="7.5" fill="#22d3ee"/>
+  <circle cx="34" cy="88" r="7.5" fill="#22d3ee"/>
+  <rect x="50" y="34" width="46" height="12" rx="6" fill="#38bdf8"/>
+  <rect x="50" y="58" width="32" height="12" rx="6" fill="#38bdf8"/>
+  <rect x="50" y="82" width="52" height="12" rx="6" fill="#22d3ee"/>
+</svg>

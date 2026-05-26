@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 120" role="img" aria-label="SDI — Scenario-Driven Implementation">
+  <rect width="440" height="120" rx="22" fill="#0f172a"/>
+  <!-- mark: Given / When / Then scenario flow -->
+  <line x1="44" y1="34" x2="44" y2="86" stroke="#22d3ee" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="44" cy="34" r="7" fill="#22d3ee"/>
+  <circle cx="44" cy="60" r="7" fill="#22d3ee"/>
+  <circle cx="44" cy="86" r="7" fill="#22d3ee"/>
+  <rect x="58" y="28" width="40" height="12" rx="6" fill="#38bdf8"/>
+  <rect x="58" y="54" width="28" height="12" rx="6" fill="#38bdf8"/>
+  <rect x="58" y="80" width="46" height="12" rx="6" fill="#22d3ee"/>
+  <!-- wordmark -->
+  <text x="140" y="70" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="52" font-weight="800" fill="#22d3ee">SDI</text>
+  <text x="142" y="93" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" letter-spacing="2.4" fill="#64748b">SCENARIO-DRIVEN IMPLEMENTATION</text>
+</svg>
