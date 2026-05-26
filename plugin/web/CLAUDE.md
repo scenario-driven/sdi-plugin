@@ -50,7 +50,7 @@ never patch around the daemon.
 `SNAPSHOT.json` records the upstream sdi-web commit this tree was imported
 from. Per the absorption decision (U2 of the SDI-144 plan), `plugin/web/` is
 the only source of truth going forward; the upstream `scenario-driven/sdi-web`
-repository is archived (read-only).
+repository is no longer maintained and is being retired.
 
 ## Verification before claiming complete
 

@@ -181,7 +181,7 @@ function resolveSdidBin(root, sdiBin) {
   return null;
 }
 
-// Locate the sdi-web SPA bundle for the active install layout.
+// Locate the dashboard SPA bundle (plugin/web) for the active install layout.
 //
 // Returns one of:
 //   { state: 'ready',     dist: '<abs path to dist/>' }   // built bundle present

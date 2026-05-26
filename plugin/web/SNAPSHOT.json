@@ -5,6 +5,6 @@
   "imported_at": "2026-05-24",
   "import_method": "snapshot",
   "absorbed_into": "github.com/scenario-driven/sdi-plugin",
-  "downstream_owner": "sdi-plugin only; sdi-web repo is archived (read-only)",
+  "downstream_owner": "sdi-plugin only; plugin/web/ is the sole source of truth and the upstream sdi-web repo is no longer maintained",
   "rebuild_command": "pnpm --dir plugin/web install && pnpm --dir plugin/web build"
 }
