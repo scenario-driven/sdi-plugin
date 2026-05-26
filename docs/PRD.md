@@ -1151,7 +1151,7 @@ GWT 시나리오는 신규 개념이므로 v3 데이터에 존재하지 않는�
 | **v0.2** | `/round start` + 자동 회귀 검증 흐름 기본 동작 | 완료 |
 | **v0.3** | **PRD/문서 갱신만** — Multi-agent Collaboration Governance (D13~D20 + 6 entity + Layer 2.5 substrate + 5-flow matrix + §6 인수기준 #11~#14). | 완료 |
 | **v0.4** | **entity 코드 구현 (M1~M5 substrate)** — AgentNote (M1), AutonomyPolicy (D14), AgentSpec (specialist 등재), Decision.kind 확장 (M3), Scenario.depends_on / produced_by / verified_by (M4) + D21 delegation gate (Layer 1.5). v0.3 PRD 가 ground truth. | 완료 |
-| **v0.5** | **Pattern as First-Class Multi-Agent Enforcement** — D22~D29 + 7번째 entity CollaborationPattern + Layer 2.6 (Pattern Enforcement) + Layer 2.7 (Reversibility) + Layer 2.8 (Resource Claims) + 3 신규 meta-specialist (pattern-orchestrator/pattern-critic/reversal-runner) + sdi-web 실시간 패턴 timeline + sdi-desktop tray badge + §6 인수기준 #16~#22. **차별점**: 시나리오 기반 (Clawket 와 동일) 위에 **실제 작업 패턴 = 4 멀티에이전트 협업 패턴의 메커니컬 강제**. multi-session daemon-centric. | 진행 중 (본 plan) |
+| **v0.5** | **Pattern as First-Class Multi-Agent Enforcement** — D22~D29 + 7번째 entity CollaborationPattern + Layer 2.6 (Pattern Enforcement) + Layer 2.7 (Reversibility) + Layer 2.8 (Resource Claims) + 3 신규 meta-specialist (pattern-orchestrator/pattern-critic/reversal-runner) + 대시보드(plugin/web) 실시간 패턴 timeline + sdi-desktop tray badge + §6 인수기준 #16~#22. **차별점**: 시나리오 기반 (Clawket 와 동일) 위에 **실제 작업 패턴 = 4 멀티에이전트 협업 패턴의 메커니컬 강제**. multi-session daemon-centric. | 진행 중 (본 plan) |
 | **v0.6** | Disruption needs-review (§4.3) + In-flight Task pause (§4.5) 의 multi-agent 흐름 구현 | 미시작 |
 | **v1.0** | §6 인수 기준 #1~#22 전부 충족 + Clawket v3.0 → SDI 마이그레이션 도구 (§9) | 미시작 |
 

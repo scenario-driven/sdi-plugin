@@ -1,8 +1,8 @@
 # Compatibility
 
-SDI ships as one Cargo workspace whose plugin shell, CLI, and daemon move in
-lock-step. The web and desktop surfaces are independent crates that ride on
-the daemon's HTTP contract and ship on their own cadences.
+SDI ships as one Cargo workspace whose plugin shell, CLI, daemon, and dashboard
+SPA (`plugin/web/`) move in lock-step. The desktop surface is an independent
+repository that rides on the daemon's HTTP contract and ships on its own cadence.
 
 ## Workspace version is the only pin
 
@@ -17,23 +17,24 @@ The release-fetch path (`SDI_RELEASE_FETCH=1`) is structurally present in
 the install gate but errors out until a GitHub Release exists — distribution
 is excluded from current scope.
 
-## Wire-shape contract (sdi-web / sdi-desktop)
+## Wire-shape contract (sdi-desktop)
 
-The separate [`sdi-web`](https://github.com/scenario-driven/sdi-web) and
-[`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) repositories couple
-to this daemon **only** through:
+The dashboard SPA at `plugin/web/` ships inside this workspace, but it still
+couples to the daemon **only** through the wire shape below — there is no
+compile-time link to the Rust crates. The separate
+[`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) repository
+couples through the same contract:
 
 - HTTP routes: `/plans`, `/requirements`, `/decisions`, `/scenarios`,
   `/rounds`, `/tasks`, `/knowledge/*`, `/health`.
 - SSE stream on `/events` carrying `scenario.*`, `round.*`, `plan.*`,
   `knowledge.*` event shapes.
 
-Both add-on repositories ship independently. There is no shared release
-manifest with this workspace, and they are not version-pinned against
-each other or against the CLI/daemon. The daemon's versioned API is the
-only coupling point — any break to the wire shape on a route consumed by
-`sdi-web` is a workspace major bump here, but `sdi-web` / `sdi-desktop`
-tags themselves move on their own cadence in their own repos.
+`sdi-desktop` ships independently: no shared release manifest with this
+workspace, not version-pinned against the CLI/daemon. The daemon's versioned
+API is the only coupling point — any break to the wire shape on a consumed
+route is a workspace major bump here, while `sdi-desktop` tags move on their
+own cadence in their own repo.
 
 ## Breaking-change gates
 

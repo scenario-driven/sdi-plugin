@@ -122,25 +122,27 @@ semantics.
 
 The CLI / daemon / MCP / core / db quintet is the load-bearing surface
 and ships under one workspace version (`Cargo.toml [workspace.package].version`).
-This is the entirety of `sdi-plugin`. There are no `crates/web` or
-`crates/desktop` inside this repository.
+There are no `crates/web` or `crates/desktop` inside this repository.
 
-Two add-on surfaces live in **separate repositories** under the same
-GitHub org and consume the daemon's public HTTP contract:
+The **dashboard SPA lives in this repository** at `plugin/web/` (React +
+Vite + Tailwind). It talks only to the daemon over HTTP + SSE — no
+compile-time coupling to the Rust crates — and `sdid` serves its `dist/`
+over tower-http `ServeDir`. The plugin shell and SPA ship together under
+the one workspace version.
 
-- **[`sdi-web`](https://github.com/scenario-driven/sdi-web)** — React + Vite SPA.
-  Talks only to the daemon over HTTP + SSE; no compile-time coupling to
-  the Rust crates here.
+One add-on surface lives in a **separate repository** under the same
+GitHub org and consumes the daemon's public HTTP contract:
+
 - **[`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop)** — Tauri 2 shell.
-  Hosts the `sdi-web` build (`../sdi-web/dist` by sibling convention) in a
-  native window and spawns `sdid` as a child process via the resolver in
-  its `src/daemon.rs` (env / plugin layout / XDG / PATH). The desktop
-  binary embeds no daemon code; it is a thin launcher.
+  Hosts the `plugin/web/dist` bundle in a native window and spawns `sdid`
+  as a child process via the resolver in its `src/daemon.rs` (env / plugin
+  layout / XDG / PATH). The desktop binary embeds no daemon code; it is a
+  thin launcher.
 
-Because both surfaces ride on the daemon's stable HTTP contract, they are
-not version-pinned against this workspace and have no shared release
-manifest with each other. Each ships on its own cadence; the daemon's
-versioned API is the only coupling point.
+Because it rides on the daemon's stable HTTP contract, `sdi-desktop` is
+not version-pinned against this workspace and has no shared release
+manifest with it. It ships on its own cadence; the daemon's versioned API
+is the only coupling point.
 
 ## Multi-agent governance (PRD §5 Layer 0 / 1 / 1.5 / 2 / 2.5 / 2.6 / 2.7 / 2.8 / 3 / 4)
 
@@ -256,8 +258,8 @@ empty agents-as-tools registry) cannot reach `active` and thus never
 unlock L4/L5 mode. The `direct` row is the only legitimate path for
 solo-flow entities, and it pays the L3 cap + visible badge cost.
 
-The pattern row also drives the `sdi-web` timeline view — each
-`/events` `pattern_lifecycle` payload moves the entity through the
+The pattern row also drives the dashboard timeline view (`plugin/web/`)
+— each `/events` `pattern_lifecycle` payload moves the entity through the
 dashboard's pattern-tree visualization.
 
 ### Layer 2.7 — Reversibility (D28 L5 recovery-cost gate)
@@ -360,7 +362,7 @@ Changing `AgentSpec.system_prompt` is itself a Decision of
   unattended use (`sdi pattern create / show / advance`, `sdi decision
   rollback`, `sdi scenario claim`) and as the MCP server via `sdi mcp`
   for in-IDE LLM consumption.
-- **`sdi-web` (add-on SPA)** renders the AutonomyPanel (per-scope
+- **the dashboard SPA (`plugin/web/`)** renders the AutonomyPanel (per-scope
   L3/L4/L5 chips + circuit-breaker button), the Decision timeline with
   `kind` + `reversal_plan` + `blast_radius_score` badges, the
   AgentNotesPanel (live blackboard / hand-off inbox), the new
