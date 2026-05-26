@@ -7,16 +7,17 @@
 ## One workspace, one version
 
 SDI is a single Cargo workspace (`crates/cli`, `crates/daemon`, `crates/mcp`,
-`crates/core`, `crates/db`) plus the plugin shell at `plugin/`. There is no
-per-component manifest: `Cargo.toml [workspace.package].version` is the
-single source of truth for the CLI + daemon + plugin tag, and the plugin
-shell ships in lock-step with the workspace it lives in.
+`crates/core`, `crates/db`) plus the plugin shell at `plugin/` — including the
+dashboard SPA at `plugin/web/`. There is no per-component manifest:
+`Cargo.toml [workspace.package].version` is the single source of truth for the
+CLI + daemon + plugin tag, and the plugin shell (SPA included) ships in
+lock-step with the workspace it lives in. The release pipeline builds
+`plugin/web/dist` before packaging.
 
-[`sdi-web`](https://github.com/scenario-driven/sdi-web) and
-[`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) live in separate
-repositories, ride on the daemon's HTTP contract, and ship on
-independent cadences. They are not tagged together with this workspace
-and carry no shared release manifest.
+[`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) lives in a
+separate repository, rides on the daemon's HTTP contract, and ships on an
+independent cadence. It is not tagged together with this workspace and carries
+no shared release manifest.
 
 ## Release order
 
@@ -28,10 +29,11 @@ When the first tagged release ships, the order is **fixed**:
 2. **Plugin dist branch** — push the built binaries under `plugin/bin/` and
    `plugin/daemon/bin/` to the `dist` branch (see Branch model below).
    Claude Code's marketplace pulls from this branch.
-3. **Web / desktop** (independent) — the separate `sdi-web` and
-   `sdi-desktop` repositories release on their own cadence against this
-   daemon's HTTP contract. No shared release manifest with this
-   workspace; coordination is done at the wire-shape level only.
+3. **Desktop** (independent) — the separate `sdi-desktop` repository
+   releases on its own cadence against this daemon's HTTP contract. No
+   shared release manifest with this workspace; coordination is done at
+   the wire-shape level only. (The dashboard SPA at `plugin/web/` is part
+   of this workspace and ships with the plugin tag, not independently.)
 
 ## Branch model
 
@@ -54,14 +56,14 @@ install, and binaries have no place in the source review.
   (e.g., `v0.1.0`). Tagged from `main`, attached to a GitHub Release with
   both binaries; the `dist` branch carries the same tag with the built
   artifacts checked in.
-- `sdi-web` / `sdi-desktop` (separate repos): their own tags, their own cadences. Independent.
+- `sdi-desktop` (separate repo): its own tags, its own cadence. Independent.
 
 ## Pre-release checklist
 
 Before tagging any release:
 
 - [ ] `cargo test --workspace` green on macOS + Linux × x86_64 + aarch64.
-- [ ] `node --test plugin/tests/` green.
+- [ ] `node --test "plugin/tests/*.test.cjs"` green.
 - [ ] `cargo build --release --workspace` produces working `sdi` and `sdid`.
 - [ ] `sdi doctor` passes on a fresh `SDI_HOME=$(mktemp -d)` shell.
 - [ ] PRD §6 acceptance criteria 1–10 verified against built artifacts.

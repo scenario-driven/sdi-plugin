@@ -1,5 +1,7 @@
 # SDI — Claude Code plugin shell
 
+**English** · [한국어](./README.ko.md)
+
 This directory is the **Claude Code plugin surface** for SDI (Scenario-Driven
 Implementation). It is part of the same repository as the SDI body
 (`crates/` workspace: `cli` + `daemon` + `mcp` + `core` + `db`). The plugin
@@ -94,11 +96,11 @@ User data resolves under XDG paths (`~/.local/share/sdi/`, `~/.cache/sdi/`,
 reports overlap as a fatal error. The plugin gate only writes binaries /
 bundles under `pluginRoot`, never user state.
 
-## Sibling repositories
+## Related surfaces
 
-- [`sdi-web`](https://github.com/scenario-driven/sdi-web) — Vite/React dashboard SPA over `sdid` HTTP + SSE.
-- [`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) — Tauri 2 shell that bundles `sdi-web` and spawns `sdid`.
-- [`sdi-docs`](https://github.com/scenario-driven/sdi-docs) — Landing + bilingual guide site.
+- [`web/`](./web/) — the dashboard SPA (Vite/React 19/Tailwind 4) lives in this same repository; `sdid` serves its `dist/` over `/` and feeds it via the HTTP API + `/events` SSE.
+- [`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) — separate org repo. Tauri 2 shell that bundles `plugin/web/dist` and spawns `sdid` as a sidecar.
+- [`sdi-docs`](https://github.com/scenario-driven/sdi-docs) — separate org repo. Astro/Starlight landing + bilingual (ko / en) guide site mirroring the repo's `docs/PRD.md`.
 
 For the full identity statement and D1–D29 invariants, see the repository root
 [`README.md`](../README.md) and [`CLAUDE.md`](../CLAUDE.md).
