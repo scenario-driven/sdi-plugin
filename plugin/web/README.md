@@ -1,5 +1,7 @@
 # plugin/web — SDI dashboard SPA
 
+**English** · [한국어](./README.ko.md)
+
 Dashboard SPA bundled into the `@scenario-driven/sdi-plugin` Claude Code plugin.
 One-way consumer of the `sdid` HTTP API + `/events` SSE — surfaces every
 first-class entity the daemon owns and the multi-agent governance surface laid
