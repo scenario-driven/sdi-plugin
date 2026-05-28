@@ -558,6 +558,17 @@ function isReadOnlyBash(cmd) {
   );
 }
 
+// Claude Code dispatches plugin-namespaced agent types as "<plugin>:<bare>"
+// (e.g. "sdi:impl-coder"), while our AgentSpec frontmatter stores the bare
+// name. Strip any namespace prefix so registry comparisons, activity feed
+// payloads, and daemon-bound identifiers all converge on the canonical bare
+// form. Returns the input unchanged when no ':' is present.
+function normalizeAgentType(value) {
+  if (typeof value !== 'string' || value.length === 0) return value;
+  const i = value.lastIndexOf(':');
+  return i >= 0 ? value.slice(i + 1) : value;
+}
+
 const _agentRegistryCache = new Map();
 function loadAgentSpecRegistry(root) {
   if (_agentRegistryCache.has(root)) return _agentRegistryCache.get(root);
@@ -922,7 +933,8 @@ async function runPreToolUse(input) {
   // D21 — rogue specialist guard. Sub-agents must come from a registered spec.
   if (!isMain && agentType) {
     const registry = loadAgentSpecRegistry(pluginRoot());
-    if (registry.size > 0 && !registry.has(agentType)) {
+    const bareType = normalizeAgentType(agentType);
+    if (registry.size > 0 && !registry.has(bareType)) {
       emitDeny(
         `[sdi] D21 rogue-specialist: agent_type "${agentType}" is not registered in ` +
           `plugin/agents/. Register an AgentSpec entry or use one of: ` +
@@ -1071,7 +1083,8 @@ async function runPostToolUse(input) {
 async function runSubagentStart(input) {
   const activeTaskId = readActiveTaskHint();
   if (!activeTaskId) return;
-  const agent = (input && input.subagent_type) || (input && input.agent_name) || 'unknown';
+  const rawAgent = (input && input.subagent_type) || (input && input.agent_name) || 'unknown';
+  const agent = normalizeAgentType(rawAgent);
   appendHookLog('subagent_start', { task_id: activeTaskId, agent });
   const cwd = (input && input.cwd) || process.cwd();
   const project = await projectByCwd(cwd).catch(() => null);
@@ -1090,7 +1103,8 @@ async function runSubagentStart(input) {
 async function runSubagentStop(input) {
   const activeTaskId = readActiveTaskHint();
   if (!activeTaskId) return;
-  const agent = (input && input.subagent_type) || (input && input.agent_name) || 'unknown';
+  const rawAgent = (input && input.subagent_type) || (input && input.agent_name) || 'unknown';
+  const agent = normalizeAgentType(rawAgent);
   const result = (input && input.result) || (input && input.summary) || null;
   appendHookLog('subagent_stop', { task_id: activeTaskId, agent, result });
   const cwd = (input && input.cwd) || process.cwd();

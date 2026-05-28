@@ -16,6 +16,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use sdi_core::agent_spec::AgentSpec;
 use sdi_core::decision::{Decision, DecisionKind, DecisionStatus};
 use sdi_core::error::DomainError;
 use sdi_core::ids::{now, Id, IdKind};
@@ -83,6 +84,14 @@ async fn create(
     } else {
         None
     };
+    // Reject namespace-prefixed or otherwise unregistered Layer-2 specialist
+    // identifiers at the gate — DB columns store the canonical bare name
+    // (`STOCK_AGENTS` ∪ `STOCK_META_AGENTS`). Without this check a client that
+    // reports itself as e.g. `sdi:impl-coder` would silently corrupt later
+    // grouping / lookup against AgentSpec rows.
+    if let Some(name) = b.agent_name.as_deref() {
+        AgentSpec::validate_name(name)?;
+    }
     // D28 — reject malformed reversal_plan JSON at the gate, before SQL.
     if let Some(plan) = b.reversal_plan.as_deref() {
         validate_reversal_plan_json(plan)?;
@@ -204,6 +213,8 @@ async fn rollback(
     let orig_id = Id::from(original_id.clone());
     // Pull the original to copy plan_id + emit a meaningful initiated event.
     let original = repo::get(&conn, &orig_id)?;
+    // Same Layer-2 specialist contract as `create` — bare canonical name only.
+    AgentSpec::validate_name(&b.agent_name)?;
     // D28 — validate the rollback plan JSON before any SQL.
     validate_reversal_plan_json(&b.reversal_plan)?;
     let score = b.blast_radius_score.unwrap_or(5);

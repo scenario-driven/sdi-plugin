@@ -415,6 +415,37 @@ test('D21: PreToolUse passes registered sub-agent through delegation gate', asyn
   }
 });
 
+// Regression — Claude Code dispatches namespaced agent types ("sdi:impl-coder").
+// The rogue-specialist guard must compare against the bare AgentSpec name from
+// frontmatter, not the raw namespaced string. Before the normalization fix the
+// guard wrongly blocked every legitimate plugin specialist (every Edit call
+// from `sdi:impl-coder` denied with rogue-specialist), so this case stays as a
+// permanent regression anchor.
+test('D21: PreToolUse accepts namespace-prefixed sub-agent type (sdi:impl-coder)', async () => {
+  const home = mkTempHome('sdi-d21-namespaced');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Edit',
+        agent_id: '00000000-0000-0000-0000-000000000003',
+        agent_type: 'sdi:impl-coder',
+      }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /rogue-specialist/);
+    assert.doesNotMatch(r.stdout, /D21 delegation gate/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('D21: SDI_DELEGATION_BYPASS=1 unblocks main + audits the bypass', async () => {
   const home = mkTempHome('sdi-d21-bypass');
   const { server, port } = await startMockSdiDaemon();
