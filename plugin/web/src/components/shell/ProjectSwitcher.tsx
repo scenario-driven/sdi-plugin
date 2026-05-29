@@ -9,6 +9,10 @@ interface ProjectSwitcherProps {
   fallbackLabel?: string;
   /** Click handler for "+ New project" footer item. Sidebar owns the create flow. */
   onCreateProject?: () => void;
+  /** Click handler for the per-project gear icon. Sidebar owns the
+   *  settings modal lifecycle (lifted because the modal needs to
+   *  re-fetch the project list after edits/deletes). */
+  onOpenSettings?: (projectId: string) => void;
 }
 
 function projectLabel(p: Project): string {
@@ -31,6 +35,7 @@ export function ProjectSwitcher({
   onSelect,
   fallbackLabel = 'Loading…',
   onCreateProject,
+  onOpenSettings,
 }: ProjectSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -135,7 +140,7 @@ export function ProjectSwitcher({
               sorted.map((p) => {
                 const isActive = p.id === activeProjectId;
                 return (
-                  <li key={p.id}>
+                  <li key={p.id} className="group flex items-stretch">
                     <button
                       type="button"
                       data-testid={`project-switcher-option-${p.id}`}
@@ -146,11 +151,17 @@ export function ProjectSwitcher({
                         closeMenu();
                       }}
                       className={cn(
-                        'flex w-full items-center gap-2 px-3 py-1.5',
+                        'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5',
                         'text-left text-sm text-foreground',
                         'hover:bg-surface focus:bg-surface focus:outline-none cursor-pointer',
                         isActive && 'bg-surface',
+                        p.enabled === false && 'opacity-60',
                       )}
+                      title={
+                        p.enabled === false
+                          ? 'Disabled — SDI hooks skip this project'
+                          : undefined
+                      }
                     >
                       <span className="min-w-0 flex-1 truncate">{projectLabel(p)}</span>
                       <span
@@ -159,10 +170,39 @@ export function ProjectSwitcher({
                       >
                         {p.key}
                       </span>
+                      {p.enabled === false && (
+                        <span
+                          aria-label="Disabled"
+                          title="Disabled"
+                          className="text-[10px] uppercase tracking-wide text-muted"
+                        >
+                          off
+                        </span>
+                      )}
                       {isActive && (
                         <span aria-hidden className="text-xs text-muted">✓</span>
                       )}
                     </button>
+                    {onOpenSettings && (
+                      <button
+                        type="button"
+                        aria-label={`Settings for ${p.name}`}
+                        data-testid={`project-switcher-settings-${p.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          closeMenu();
+                          onOpenSettings(p.id);
+                        }}
+                        className={cn(
+                          'px-2 text-muted hover:text-foreground',
+                          'opacity-0 group-hover:opacity-100 focus:opacity-100',
+                          'focus:outline-none cursor-pointer transition-opacity',
+                        )}
+                        title="Settings"
+                      >
+                        ⚙
+                      </button>
+                    )}
                   </li>
                 );
               })

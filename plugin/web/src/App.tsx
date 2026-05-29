@@ -25,6 +25,7 @@ import { RoundDetail } from './components/RoundDetail';
 import { RequirementDetail } from './components/RequirementDetail';
 import { DecisionDetail } from './components/DecisionDetail';
 import { ProjectCreateModal } from './components/ProjectCreateModal';
+import { ProjectSettingsModal } from './components/ProjectSettingsModal';
 import { CreatePlanModal } from './components/CreatePlanModal';
 import { CommandPalette } from './components/CommandPalette';
 import { ToastContainer } from './components/Toast';
@@ -132,6 +133,11 @@ export function App() {
   const [activePatterns, setActivePatterns] = useState<CollaborationPattern[]>([]);
 
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  /** Project id whose settings drawer is open; null = closed. Lifted to
+   *  App so the modal sees the freshly-fetched project list (the same
+   *  list Sidebar/ProjectSwitcher use), and a delete-cascade can update
+   *  every consumer in one revalidation pass. */
+  const [settingsProjectId, setSettingsProjectId] = useState<string | null>(null);
   const [planCreateOpen, setPlanCreateOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -165,6 +171,21 @@ export function App() {
       navigate('/summary', { replace: true });
     }
   }, [location.pathname, navigate]);
+
+  // Re-fetch the project list. Used by ProjectSettingsModal after edits +
+  // delete-cascade so every consumer (sidebar switcher, settings drawer,
+  // active-project state) lands on the same snapshot.
+  const refetchProjects = useCallback(async () => {
+    try {
+      const list = await getJson<Project[]>('/projects');
+      setProjects(list);
+      return list;
+    } catch (err) {
+      console.error('Failed to refetch projects:', err);
+      setDaemonHealthy(false);
+      return [] as Project[];
+    }
+  }, []);
 
   // Initial project list.
   useEffect(() => {
@@ -377,6 +398,7 @@ export function App() {
         selectedId={selectedProjectId}
         onSelect={selectProject}
         onOpenProjectCreate={() => setProjectCreateOpen(true)}
+        onOpenProjectSettings={(id) => setSettingsProjectId(id)}
         refreshKey={sseState.structuralSeq}
         selectedItem={selectedItem}
         onSelectItem={setSelectedItem}
@@ -420,6 +442,34 @@ export function App() {
           }}
         />
       )}
+      {settingsProjectId &&
+        (() => {
+          const project = projects.find((p) => p.id === settingsProjectId);
+          if (!project) {
+            // Project was deleted (or list hasn't loaded yet); fall through.
+            return null;
+          }
+          return (
+            <ProjectSettingsModal
+              project={project}
+              onClose={() => setSettingsProjectId(null)}
+              onProjectChange={refetchProjects}
+              onDeleted={async () => {
+                const list = await refetchProjects();
+                setSettingsProjectId(null);
+                if (selectedProjectId === project.id) {
+                  if (list.length > 0) {
+                    setSelectedProjectId(list[0].id);
+                    navigate(`/${list[0].id}/summary`, { replace: true });
+                  } else {
+                    setSelectedProjectId(null);
+                    navigate('/summary', { replace: true });
+                  }
+                }
+              }}
+            />
+          );
+        })()}
       {planCreateOpen && selectedProjectId && (
         <CreatePlanModal
           projectId={selectedProjectId}

@@ -18,6 +18,7 @@ import type {
   CollaborationPattern,
   Decision,
   PatternLifecycle,
+  Project,
   ScenarioClaim,
 } from '../types/entities';
 
@@ -110,6 +111,76 @@ export function patchJson<T>(path: string, body: unknown): Promise<T> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+// ─── Project lifecycle (v0.3) ────────────────────────────────────────────────
+
+/** PATCH-style update body. Each field is optional; only the keys present in
+ *  the patch are sent to the daemon, so callers can mix-and-match without
+ *  reading back the current state first. `description: null` clears the
+ *  field (distinct from omitting the key); `wiki_paths` replaces the array
+ *  in full. */
+export interface UpdateProjectPatch {
+  name?: string;
+  description?: string | null;
+  enabled?: boolean;
+  wiki_paths?: string[];
+}
+
+export function updateProject(
+  id: string,
+  patch: UpdateProjectPatch,
+): Promise<Project> {
+  return putJson<Project>(`/projects/${encodeURIComponent(id)}`, patch);
+}
+
+/** Soft-disable the project. Idempotent; daemon returns the fresh project
+ *  row with `enabled: false`. The hook layer (`projectByCwd` consumers in
+ *  the plugin shell) will skip every mutating gate for the project's
+ *  anchored cwds until `enableProject` flips it back. */
+export function disableProject(id: string): Promise<Project> {
+  return postJson<Project>(`/projects/${encodeURIComponent(id)}/disable`);
+}
+
+/** Re-enable a previously disabled project. Idempotent. */
+export function enableProject(id: string): Promise<Project> {
+  return postJson<Project>(`/projects/${encodeURIComponent(id)}/enable`);
+}
+
+/** Hard-delete the project + every PROJ-scoped row across the schema.
+ *  Default behaviour refuses deletion when any task under the project is
+ *  `in_progress`; pass `force: true` to override. */
+export function deleteProject(
+  id: string,
+  opts: { force?: boolean } = {},
+): Promise<{ ok: true; deleted: string; forced: boolean }> {
+  const qs = opts.force ? '?force=true' : '';
+  return deleteJson<{ ok: true; deleted: string; forced: boolean }>(
+    `/projects/${encodeURIComponent(id)}${qs}`,
+  );
+}
+
+/** Attach a working directory to the project. */
+export function addProjectCwd(id: string, cwd: string): Promise<{ cwds: string[] }> {
+  return postJson<{ cwds: string[] }>(
+    `/projects/${encodeURIComponent(id)}/cwds`,
+    { cwd },
+  );
+}
+
+/** Detach a working directory from the project. */
+export function removeProjectCwd(
+  id: string,
+  cwd: string,
+): Promise<{ cwds: string[]; removed: boolean }> {
+  return request<{ cwds: string[]; removed: boolean }>(
+    `/projects/${encodeURIComponent(id)}/cwds`,
+    {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cwd }),
+    },
+  );
 }
 
 // ─── CollaborationPattern (D22, D26, D27) ────────────────────────────────────

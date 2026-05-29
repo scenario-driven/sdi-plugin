@@ -57,7 +57,18 @@ export interface Project {
   slug: string;
   /** Anchored working directories — entry to "active project" detection. */
   cwds: string[];
+  /** Free-form description shown in the project settings drawer. Daemon
+   *  omits the field when unset (Option<None>), so callers must treat
+   *  missing and empty as the same "no description" state. */
   description?: string;
+  /** Soft-disable flag (v0.3). When `false`, the hook layer skips every
+   *  mutating gate for the project's anchored cwds — Claude Code drives
+   *  the repo without SDI governance until the user re-enables. */
+  enabled: boolean;
+  /** Wiki tree roots (relative to project cwd, or absolute). Default is a
+   *  single `docs` entry; the dashboard's WikiView renders one tree per
+   *  path. */
+  wiki_paths: string[];
   created_at: string;
   updated_at: string;
 }

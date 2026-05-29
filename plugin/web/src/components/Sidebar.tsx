@@ -84,6 +84,9 @@ interface SidebarProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onOpenProjectCreate: () => void;
+  /** Lifted to App so the ProjectSettingsModal sees the same project list
+   *  the sidebar maintains. Triggered by the gear icon in the switcher. */
+  onOpenProjectSettings?: (projectId: string) => void;
   /** Bumps when SSE structural events fire so the active context refreshes. */
   refreshKey?: number;
   selectedItem: SelectedItem | null;
@@ -96,6 +99,7 @@ export default function Sidebar({
   selectedId,
   onSelect,
   onOpenProjectCreate,
+  onOpenProjectSettings,
   refreshKey = 0,
   selectedItem,
   onSelectItem,
@@ -287,6 +291,7 @@ export default function Sidebar({
             activeProjectId={selectedId}
             onSelect={onSelect}
             onCreateProject={onOpenProjectCreate}
+            onOpenSettings={onOpenProjectSettings}
             fallbackLabel={activeProject ? activeProject.name : 'Select project'}
           />
         </div>
