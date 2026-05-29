@@ -1010,10 +1010,24 @@ async function runPreToolUse(input) {
   // skipped — matching Clawket's allow-on-`isProjectDisabled`/missing-context
   // pattern (claude-hooks.cjs:2074-2077) so the hook never bleeds onto repos
   // SDI does not own.
+  //
+  // `project.enabled === false` (soft-disabled via `sdi project disable` or
+  // the dashboard settings) collapses to the same skip path: the user has
+  // explicitly opted the project out of SDI governance, so the hook layer
+  // steps aside until they re-enable. The daemon serialises `enabled` as a
+  // bool; defensively handle the legacy 0/1 integer shape too.
   const cwd = (input && input.cwd) || process.cwd();
   const project = await projectByCwd(cwd).catch(() => null);
   if (!project) {
     appendHookLog('pre_tool_use_skip', { tool: toolName, reason: 'cwd-not-in-sdi-project' });
+    return;
+  }
+  if (project.enabled === false || project.enabled === 0) {
+    appendHookLog('pre_tool_use_skip', {
+      tool: toolName,
+      reason: 'project-disabled',
+      project_id: project.id,
+    });
     return;
   }
 

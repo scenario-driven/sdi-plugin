@@ -276,9 +276,30 @@ pub enum ProjectCmd {
         /// Absolute working-directory path to look up.
         cwd: String,
     },
-    /// Update a project's name. Slug and key are immutable identifiers — to
-    /// change them, create a new project.
+    /// PATCH-style update — every field is optional; only those passed are
+    /// changed. Slug and key are immutable identifiers; to change them,
+    /// create a new project.
     Update(ProjectUpdateArgs),
+    /// Soft-disable the project. The hook layer (`projectByCwd` consumers
+    /// in the plugin shell) skips every mutating gate for the project's
+    /// anchored cwds while disabled, so Claude Code drives the repo
+    /// without SDI governance. Idempotent.
+    Disable {
+        /// Project id.
+        id: String,
+    },
+    /// Re-enable a previously disabled project. Idempotent.
+    Enable {
+        /// Project id.
+        id: String,
+    },
+    /// Hard-delete the project and every PROJ-scoped row (plans,
+    /// requirements, scenarios, rounds, tasks, decisions, comments,
+    /// questions, knowledge, agent_notes, autonomy_policies,
+    /// collaboration_patterns, activity events). Default behavior refuses
+    /// deletion if any task under the project is `in_progress`; pass
+    /// `--force` to delete anyway. Irreversible.
+    Delete(ProjectDeleteArgs),
     /// Attach a working-directory to a project.
     CwdAttach {
         /// Project id.
@@ -313,9 +334,27 @@ pub struct ProjectCreateArgs {
 pub struct ProjectUpdateArgs {
     /// Project id.
     pub id: String,
-    /// New display name.
+    /// New display name. Whitespace-only values are rejected.
     #[arg(long)]
     pub name: Option<String>,
+    /// New free-form description. Pass an empty string to clear.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Replace the wiki path roots (repeatable; relative to cwd or absolute).
+    /// Passing `--wiki-path` zero times leaves the array untouched; pass it
+    /// at least once to replace.
+    #[arg(long = "wiki-path")]
+    pub wiki_paths: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ProjectDeleteArgs {
+    /// Project id.
+    pub id: String,
+    /// Skip the in-flight task guard. Defaults to false (delete refuses
+    /// when any task under the project is `in_progress`).
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 #[derive(Debug, Subcommand)]

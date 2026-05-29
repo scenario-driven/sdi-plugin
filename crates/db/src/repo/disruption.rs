@@ -182,6 +182,9 @@ mod tests {
             name: "n".into(),
             slug: format!("s-{}", ulid::Ulid::new()),
             cwds: vec![],
+            description: None,
+            enabled: true,
+            wiki_paths: vec!["docs".into()],
             created_at: now(),
             updated_at: now(),
         };

@@ -171,6 +171,9 @@ mod tests {
             name: "Test".into(),
             slug: format!("tst-{}", ulid::Ulid::new()),
             cwds: vec![],
+            description: None,
+            enabled: true,
+            wiki_paths: vec!["docs".into()],
             created_at: now(),
             updated_at: now(),
         };

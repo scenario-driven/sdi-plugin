@@ -1,10 +1,10 @@
 //! `sdi project …` — thin client over the `/projects` HTTP router.
 
-use crate::cli::{ProjectCmd, ProjectCreateArgs, ProjectUpdateArgs};
+use crate::cli::{ProjectCmd, ProjectCreateArgs, ProjectDeleteArgs, ProjectUpdateArgs};
 use crate::http::Client;
 use crate::output::emit;
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 pub async fn run(cli: &Client, cmd: ProjectCmd, quiet: bool) -> Result<()> {
     match cmd {
@@ -13,6 +13,9 @@ pub async fn run(cli: &Client, cmd: ProjectCmd, quiet: bool) -> Result<()> {
         ProjectCmd::View { id } => view(cli, &id, quiet).await,
         ProjectCmd::ByCwd { cwd } => by_cwd(cli, &cwd).await,
         ProjectCmd::Update(args) => update(cli, args, quiet).await,
+        ProjectCmd::Disable { id } => disable(cli, &id, quiet).await,
+        ProjectCmd::Enable { id } => enable(cli, &id, quiet).await,
+        ProjectCmd::Delete(args) => delete(cli, args, quiet).await,
         ProjectCmd::CwdAttach { project_id, cwd } => attach_cwd(cli, &project_id, &cwd).await,
         ProjectCmd::CwdDetach { project_id, cwd } => detach_cwd(cli, &project_id, &cwd).await,
     }
@@ -50,12 +53,57 @@ async fn by_cwd(cli: &Client, cwd: &str) -> Result<()> {
 }
 
 async fn update(cli: &Client, args: ProjectUpdateArgs, quiet: bool) -> Result<()> {
-    let name = args
-        .name
-        .ok_or_else(|| anyhow::anyhow!("project update requires --name"))?;
+    let mut patch = Map::new();
+    if let Some(name) = args.name {
+        patch.insert("name".into(), Value::String(name));
+    }
+    // `--description ""` clears the field (daemon treats null = clear);
+    // `--description "<text>"` sets it.
+    if let Some(desc) = args.description {
+        if desc.is_empty() {
+            patch.insert("description".into(), Value::Null);
+        } else {
+            patch.insert("description".into(), Value::String(desc));
+        }
+    }
+    if !args.wiki_paths.is_empty() {
+        patch.insert(
+            "wiki_paths".into(),
+            Value::Array(args.wiki_paths.into_iter().map(Value::String).collect()),
+        );
+    }
+    if patch.is_empty() {
+        return Err(anyhow::anyhow!(
+            "project update requires at least one of --name, --description, --wiki-path"
+        ));
+    }
     let v: Value = cli
-        .put_json(&format!("/projects/{}", args.id), &json!({ "name": name }))
+        .put_json(&format!("/projects/{}", args.id), &Value::Object(patch))
         .await?;
+    emit(&v, quiet)
+}
+
+async fn disable(cli: &Client, id: &str, quiet: bool) -> Result<()> {
+    let v: Value = cli
+        .post_json(&format!("/projects/{}/disable", id), &json!({}))
+        .await?;
+    emit(&v, quiet)
+}
+
+async fn enable(cli: &Client, id: &str, quiet: bool) -> Result<()> {
+    let v: Value = cli
+        .post_json(&format!("/projects/{}/enable", id), &json!({}))
+        .await?;
+    emit(&v, quiet)
+}
+
+async fn delete(cli: &Client, args: ProjectDeleteArgs, quiet: bool) -> Result<()> {
+    let path = if args.force {
+        format!("/projects/{}?force=true", args.id)
+    } else {
+        format!("/projects/{}", args.id)
+    };
+    let v: Value = cli.delete_json(&path).await?;
     emit(&v, quiet)
 }
 

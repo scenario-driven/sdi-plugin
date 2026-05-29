@@ -1053,6 +1053,113 @@ test('bypass marker (plain text, backward compat): treated as armed-forever and 
   }
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// Project soft-disable (v0.3) — `project.enabled === false` collapses every
+// downstream mutating gate to the same skip path the unregistered-cwd case
+// uses. Mirrors Clawket's `isProjectDisabled` allow-on-disable pattern so the
+// user can run `sdi project disable` to step SDI governance aside on a repo.
+
+test('project enabled=false: PreToolUse skips every mutating gate + audits project-disabled', async () => {
+  const home = mkTempHome('sdi-project-disabled');
+  const { server, port } = await startMockSdiDaemon({
+    project: {
+      id: 'PROJ-disabled',
+      key: 'DIS',
+      name: 'Disabled',
+      cwd: PROJECT_CWD,
+      enabled: false,
+    },
+  });
+  try {
+    pinDaemonPort(home, port);
+    // Main session calling Edit would normally trip D21 first. With the
+    // project disabled, the project-scope gate short-circuits before D21
+    // even runs, so no deny payload is emitted.
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /D21 delegation gate/);
+    assert.doesNotMatch(r.stdout, /no active task/);
+    assert.equal(r.stdout, '', 'no deny payload should be emitted for disabled project');
+    const log = path.join(home, '.local/state/sdi/hook.log');
+    const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.ok(
+      entries.some(
+        (e) =>
+          e.event === 'pre_tool_use_skip' &&
+          e.reason === 'project-disabled' &&
+          e.project_id === 'PROJ-disabled',
+      ),
+      `audit log missing project-disabled skip:\n${JSON.stringify(entries, null, 2)}`,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('project enabled=0 (legacy integer shape): same skip path', async () => {
+  const home = mkTempHome('sdi-project-disabled-int');
+  const { server, port } = await startMockSdiDaemon({
+    project: {
+      id: 'PROJ-disabled-int',
+      key: 'DI2',
+      name: 'Disabled (int)',
+      cwd: PROJECT_CWD,
+      enabled: 0,
+    },
+  });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Edit',
+        agent_id: '00000000-0000-0000-0000-0000000000aa',
+        agent_type: 'impl-coder',
+      }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.equal(r.stdout, '', 'no deny payload should be emitted');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('project enabled=true: normal D21 enforcement remains (regression anchor)', async () => {
+  const home = mkTempHome('sdi-project-enabled-d21');
+  const { server, port } = await startMockSdiDaemon({
+    project: {
+      id: 'PROJ-enabled',
+      key: 'EN1',
+      name: 'Enabled',
+      cwd: PROJECT_CWD,
+      enabled: true,
+    },
+  });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
+    assert.match(r.stdout, /D21 delegation gate/, 'enabled project must keep D21 active');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('SessionStart runs ensureInstalled against workspace binaries and spawns the daemon', { timeout: 20000 }, async () => {
   const home = mkTempHome('sdi-session');
   let pid = null;

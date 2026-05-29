@@ -29,6 +29,7 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "v0.5 pattern enforcement",
         MIGRATION_007_V05_PATTERN_ENFORCEMENT,
     ),
+    (8, "project metadata", MIGRATION_008_PROJECT_METADATA),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -39,6 +40,7 @@ const MIGRATION_005_USAGE: &str = include_str!("./migrations/005_usage.sql");
 const MIGRATION_006_V04_MULTI_AGENT: &str = include_str!("./migrations/006_v04_multi_agent.sql");
 const MIGRATION_007_V05_PATTERN_ENFORCEMENT: &str =
     include_str!("./migrations/007_v05_pattern_enforcement.sql");
+const MIGRATION_008_PROJECT_METADATA: &str = include_str!("./migrations/008_project_metadata.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {
@@ -216,6 +218,21 @@ mod tests {
                 "agent_specs missing column {col}"
             );
         }
+        // 008_project_metadata.sql — Project lifecycle columns.
+        let project_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(projects)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        for col in ["description", "enabled", "wiki_paths_json"] {
+            assert!(
+                project_cols.iter().any(|c| c == col),
+                "projects missing column {col}"
+            );
+        }
+
         for col in ["produced_via_pattern_id"] {
             for table in ["plans", "requirements", "tasks", "rounds"] {
                 let cols: Vec<String> = conn

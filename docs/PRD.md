@@ -293,6 +293,25 @@ Plan                            (produced_via_pattern_id → CollaborationPatter
 - **CollaborationPattern**: `pending → active → converged | dissensus | aborted` (D22). `pending → active` 전이 시 D26 shape validation 강제 통과.
 - **AgentNote**: 상태 없음. append-only journal. 합의 이전의 사고 흐름.
 - **AgentSpec**: `active → expired`. `expires_at` 도달 또는 명시적 폐기로 expired.
+- **Project**: 상태 없음. `enabled` 플래그 (default `true`) 가 hook layer 의 게이트 활성 여부를 결정 — `false` 면 `projectByCwd` 소비처가 모든 변경 게이트(D21 / 활성 태스크 / D29) 를 skip 하고 `audit=project-disabled` 적재. `enabled` 토글은 멱등이고 `enabled=false` 상태에서도 데몬 데이터는 보존된다 (cascade 삭제는 `DELETE /projects/:id` 만 일으킨다).
+
+### 3.1.1 Project 스키마
+
+```
+Project {
+  id: ULID                              -- "PROJ-<ulid>"
+  key: string                           -- ticket prefix (예 "SDI"), 전역 unique
+  name: string
+  slug: string                          -- name 으로부터 유도, 전역 unique
+  cwds: string[]                        -- 앵커된 작업 디렉터리 (project_cwds 테이블)
+  description: string | null            -- 자유 텍스트, 대시보드 설정 패널 표시
+  enabled: bool                         -- 기본 true. false → hook 게이트 skip
+  wiki_paths: string[]                  -- wiki 트리 루트 (기본 ["docs"]); 상대/절대 경로
+  created_at, updated_at: timestamp
+}
+```
+
+`description` / `wiki_paths` / `enabled` 는 v0.3 에서 추가됐고 SNAPSHOT-ONLY 로 in-place 갱신된다 — 이력 보존은 append-only Decision / activity feed 가 담당. `key` / `slug` 는 불변 식별자 (변경하려면 새 프로젝트 생성). `DELETE /projects/:id` 는 PROJ-scoped 모든 row 를 cascade 로 정리하며, 기본 `in_progress` task 가 있으면 409 Conflict — `?force=true` 로 override.
 
 ### 3.2 시나리오 스키마
 
