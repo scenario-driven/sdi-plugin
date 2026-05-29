@@ -19,6 +19,7 @@ path = "src/main.rs"
 sdi-core = { workspace = true }
 sdi-db = { workspace = true }
 sdi-mcp = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 futures = { workspace = true }

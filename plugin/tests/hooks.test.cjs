@@ -458,9 +458,12 @@ test('D21: SDI_DELEGATION_BYPASS=1 unblocks main + audits the bypass', async () 
       JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
     );
     assert.equal(r.status, 0, `stderr=${r.stderr}`);
-    // Delegation bypassed — falls through to active-task gate (no active task here).
+    // SDI_DELEGATION_BYPASS=1 + bypass marker now unlock every mutating gate
+    // (D21 delegation, active-task, D29) — one consciously armed emergency
+    // bypass clears every block in one shot. The active-task gate that used
+    // to fire next is also bypassed; only "allow" remains.
     assert.doesNotMatch(r.stdout, /D21 delegation gate/);
-    assert.match(r.stdout, /no active task/);
+    assert.doesNotMatch(r.stdout, /no active task/);
     // stderr surfaces the bypass warning.
     assert.match(r.stderr, /SDI_DELEGATION_BYPASS=1/);
     const log = path.join(home, '.local/state/sdi/hook.log');
@@ -498,7 +501,10 @@ test('D21: bypass-once marker file unblocks main + is consumed (one-shot)', asyn
       JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
     );
     assert.equal(r1.status, 0, `stderr=${r1.stderr}`);
+    // One armed marker unlocks every mutating gate (D21 + active-task + D29)
+    // for one invocation — no blocking JSON should be emitted.
     assert.doesNotMatch(r1.stdout, /D21 delegation gate/);
+    assert.doesNotMatch(r1.stdout, /no active task/);
     assert.match(r1.stderr, /D21 bypass via marker/);
     assert.match(r1.stderr, /investigating D21 env propagation/);
     // Marker auto-consumed — file must be gone.
@@ -524,11 +530,14 @@ test('D21: bypass-once marker file unblocks main + is consumed (one-shot)', asyn
   }
 });
 
-// D21 deny message must point users at both bypass surfaces — the marker
-// path (works without restarting Claude Code) and the env (works only when
-// exported before launch). Regression anchor for "users see only env hint
-// even though env never propagates."
-test('D21: deny message advertises marker-file override path', async () => {
+// D21 deny message must point users at the recommended bypass surface —
+// `sdi bypass arm`, the daemon-friendly CLI verb. `sdi` is on the D21
+// read-only Bash whitelist so the main session can call it directly,
+// breaking the self-deadlock where the only way to clear the gate was a
+// `touch` (mutating Bash, itself blocked by D21). Regression anchor for
+// "deny message must surface the CLI verb, not just a marker path users
+// can't reach without delegation."
+test('D21: deny message advertises `sdi bypass arm` override surface', async () => {
   const home = mkTempHome('sdi-d21-hint');
   const { server, port } = await startMockSdiDaemon();
   try {
@@ -540,7 +549,7 @@ test('D21: deny message advertises marker-file override path', async () => {
       JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
     );
     assert.match(r.stdout, /D21 delegation gate/);
-    assert.match(r.stdout, /bypass-once/, 'deny message must mention marker path');
+    assert.match(r.stdout, /sdi bypass arm/, 'deny message must surface the `sdi bypass arm` CLI verb');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
@@ -838,6 +847,206 @@ test('D29: SDI_HOOK_V05_DISABLE=1 bypasses the claim gate even when overlap exis
     );
     assert.equal(r.status, 0, `expected exit 0 under bypass, got ${r.status} stderr=${r.stderr}`);
     assert.doesNotMatch(r.stdout, /sdi_claim_overlap/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Unified bypass marker — JSON+TTL shape (current `sdi bypass arm` surface).
+//
+// `sdi bypass arm` writes a JSON body with `{reason, armed_at, expires_at,
+// ttl_seconds}`. The hook reads + parses it, treats `expires_at <= now` as
+// expired (cleanup-only, does NOT open the gate), and applies the same
+// marker to every mutating gate (D21 / active-task / D29) within a single
+// invocation. Plain-text bodies (legacy `touch`) stay backward-compatible.
+
+function writeJsonMarker(home, { reason, ttlSeconds }) {
+  const marker = path.join(home, '.cache/sdi/bypass-once');
+  fs.mkdirSync(path.dirname(marker), { recursive: true });
+  const now = Date.now();
+  const body = {
+    reason: reason || null,
+    armed_at: new Date(now).toISOString(),
+    expires_at: new Date(now + ttlSeconds * 1000).toISOString(),
+    ttl_seconds: ttlSeconds,
+  };
+  fs.writeFileSync(marker, JSON.stringify(body, null, 2) + '\n');
+  return marker;
+}
+
+test('bypass marker (JSON, valid TTL): unlocks D21 + auto-consumes', async () => {
+  const home = mkTempHome('sdi-bypass-json-valid');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const marker = writeJsonMarker(home, { reason: 'emergency hotfix', ttlSeconds: 60 });
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /D21 delegation gate/);
+    assert.match(r.stderr, /D21 bypass via marker/);
+    assert.match(r.stderr, /emergency hotfix/);
+    assert.equal(fs.existsSync(marker), false, 'marker should be consumed');
+    const log = path.join(home, '.local/state/sdi/hook.log');
+    const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const bypassEntry = entries.find((e) => e.event === 'pre_tool_use_delegation_bypass');
+    assert.ok(bypassEntry, 'audit row missing');
+    assert.equal(bypassEntry.reason, 'emergency hotfix');
+    assert.equal(bypassEntry.source, 'marker');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('bypass marker (JSON, expired): does NOT unlock; marker is cleaned up', async () => {
+  const home = mkTempHome('sdi-bypass-json-expired');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const marker = path.join(home, '.cache/sdi/bypass-once');
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    // Negative TTL → expires_at in the past.
+    const now = Date.now();
+    fs.writeFileSync(
+      marker,
+      JSON.stringify({
+        reason: 'stale',
+        armed_at: new Date(now - 120000).toISOString(),
+        expires_at: new Date(now - 60000).toISOString(),
+        ttl_seconds: 60,
+      }) + '\n',
+    );
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    // Expired marker does not open the gate.
+    assert.match(r.stdout, /D21 delegation gate/);
+    // But it IS cleaned up so it doesn't linger.
+    assert.equal(fs.existsSync(marker), false, 'expired marker should be deleted');
+    const log = path.join(home, '.local/state/sdi/hook.log');
+    const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.ok(
+      entries.some((e) => e.event === 'bypass_marker_expired'),
+      'expected bypass_marker_expired audit row',
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('bypass marker: same marker unlocks the active-task gate (registered sub-agent, no SDI_ACTIVE_TASK)', async () => {
+  const home = mkTempHome('sdi-bypass-active-task');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    writeJsonMarker(home, { reason: 'fixing CI', ttlSeconds: 60 });
+    // Registered sub-agent → passes D21. No SDI_ACTIVE_TASK → would normally
+    // block on active-task gate. Marker must lift it.
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Edit',
+        agent_id: '00000000-0000-0000-0000-0000000000a1',
+        agent_type: 'impl-coder',
+      }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /no active task/);
+    assert.match(r.stderr, /active-task bypass via marker/);
+    const log = path.join(home, '.local/state/sdi/hook.log');
+    const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.ok(
+      entries.some((e) => e.event === 'pre_tool_use_active_task_bypass' && e.reason === 'fixing CI'),
+      `audit log missing active-task bypass entry:\n${JSON.stringify(entries, null, 2)}`,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('bypass marker: same marker unlocks the D29 claim-overlap gate', async () => {
+  const home = mkTempHome('sdi-bypass-claim');
+  const { server, port } = await startMockSdiDaemon({
+    scenarios: [
+      {
+        id: 'SCN-OTHER',
+        claimed_resources_json: JSON.stringify(['crates/db/src/migrations/*.sql']),
+      },
+    ],
+  });
+  try {
+    pinDaemonPort(home, port);
+    writeJsonMarker(home, { reason: 'cross-scenario coordination', ttlSeconds: 60 });
+    const env = shimEnv(home, {
+      SDI_BYPASS_HOOKS: '',
+      SDI_ACTIVE_TASK: 'TASK-D29',
+      SDI_ACTIVE_SCENARIO: 'SCN-MINE',
+    });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Edit',
+        tool_input: { file_path: 'crates/db/src/migrations/008_x.sql' },
+        agent_id: '00000000-0000-0000-0000-0000000000c1',
+        agent_type: 'impl-coder',
+      }),
+    );
+    assert.equal(r.status, 0, `expected exit 0 under marker bypass, got ${r.status} stderr=${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /sdi_claim_overlap/);
+    assert.match(r.stderr, /D29 bypass via marker/);
+    const log = path.join(home, '.local/state/sdi/hook.log');
+    const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.ok(
+      entries.some(
+        (e) =>
+          e.event === 'pre_tool_use_claim_bypass' &&
+          e.reason === 'cross-scenario coordination',
+      ),
+      `audit log missing claim bypass entry:\n${JSON.stringify(entries, null, 2)}`,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('bypass marker (plain text, backward compat): treated as armed-forever and consumed', async () => {
+  const home = mkTempHome('sdi-bypass-plain');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const marker = path.join(home, '.cache/sdi/bypass-once');
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    // Legacy v0.1.4 shape — what `touch ~/.cache/sdi/bypass-once` produced.
+    fs.writeFileSync(marker, 'legacy plain-text reason\n');
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /D21 delegation gate/);
+    assert.match(r.stderr, /legacy plain-text reason/);
+    assert.equal(fs.existsSync(marker), false, 'plain-text marker should be consumed too');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });

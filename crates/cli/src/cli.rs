@@ -145,6 +145,35 @@ pub enum Cmd {
     Watch(WatchArgs),
     /// Emit a shell completion script for the given shell.
     Completions(CompletionsArgs),
+    /// Arm, disarm, or inspect the emergency hook-bypass marker.
+    // The marker file lives at `~/.cache/sdi/bypass-once` and unlocks every
+    // mutating hook gate (D21 delegation, active-task, D29 claim overlap) for
+    // the next mutating tool invocation. The main session can call this verb
+    // because `sdi` is on the read-only Bash whitelist (D21 unconditional pass).
+    #[command(subcommand)]
+    Bypass(BypassCmd),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BypassCmd {
+    /// Create the bypass marker. Consumed on the next mutating hook invocation.
+    Arm(BypassArmArgs),
+    /// Remove the bypass marker.
+    Disarm,
+    /// Report the marker state (`armed` | `expired` | `absent`) and TTL remainder.
+    Status,
+}
+
+#[derive(Debug, Args)]
+pub struct BypassArmArgs {
+    /// Free-form reason recorded inside the marker. Surfaces in the hook's
+    /// stderr warning + audit log so future spelunkers know why the bypass fired.
+    #[arg(long)]
+    pub reason: Option<String>,
+    /// Seconds before the marker self-expires. Default 60s — short enough that
+    /// a forgotten marker doesn't silently disarm every gate forever.
+    #[arg(long, default_value_t = 60)]
+    pub ttl: i64,
 }
 
 #[derive(Debug, Args)]

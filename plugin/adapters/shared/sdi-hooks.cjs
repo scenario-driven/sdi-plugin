@@ -56,12 +56,18 @@ function stateDir() {
 function hookLog() {
   return path.join(stateDir(), 'hook.log');
 }
-// Marker-file bypass surface for D21. Inline `VAR=1 cmd` env prefixes never
-// reach this hook — Claude Code spawns PreToolUse before any user shell
-// expands the prefix, so env is the wrong substrate. A user-writable file in
-// XDG cache is a substrate both sides own. Existence consumes one D21
-// main-session block; the hook deletes the file before honoring it so the
-// bypass is naturally one-shot and audit-symmetric with the env path.
+// Marker-file bypass surface — daemon-friendly substrate for emergency hook
+// bypass. Inline `VAR=1 cmd` env prefixes never reach this hook (Claude Code
+// spawns PreToolUse before any user shell expands the prefix), so env is the
+// wrong substrate for one-shot overrides. A user-writable file in XDG cache
+// works for both sides. Authored by `sdi bypass arm` (the CLI is on the D21
+// read-only Bash whitelist so the main session can call it directly); the
+// hook consumes it once, then deletes it.
+//
+// One marker unlocks every mutating gate: D21 delegation, active-task, D29
+// claim overlap. Splitting the surface per gate would re-introduce the
+// self-deadlock the marker exists to fix (user disarms one gate, next one
+// blocks them again).
 function bypassOnceFile() {
   return path.join(xdgHome(), '.cache', 'sdi', 'bypass-once');
 }
@@ -104,13 +110,28 @@ function appendHookLog(event, payload) {
   }
 }
 
-// Returns the bypass source if a D21 main-session bypass is armed for this
-// hook invocation, else null. The marker file is consumed on hit (deleted
-// before honoring) so the bypass is one-shot. The env path is non-consuming
-// — useful when the user starts Claude Code from a shell that already
-// exported the var, but it does not catch the `VAR=1 cmd` inline pattern
-// (env never reaches the hook spawn).
-function consumeDelegationBypass() {
+// Returns the bypass source if an emergency main-session bypass is armed for
+// this hook invocation, else null. The marker file is consumed on hit
+// (deleted before honoring) so the bypass is one-shot.
+//
+// Marker body shapes (kept in lock-step with `sdi bypass arm`):
+//   - JSON `{reason, armed_at, expires_at, ttl_seconds}` (current shape).
+//     Expired markers are deleted but return null — they don't unlock the
+//     gate, they just clean themselves up.
+//   - Plain text (legacy v0.1.4 `touch ~/.cache/sdi/bypass-once` shape).
+//     Treated as armed-forever with the body as `reason` for backward
+//     compatibility; the recommended surface is `sdi bypass arm`.
+//
+// The env path (SDI_DELEGATION_BYPASS=1) is non-consuming — useful when the
+// user starts Claude Code from a shell that already exported the var, but it
+// does not catch the `VAR=1 cmd` inline pattern (env never reaches the hook
+// spawn). The marker exists for that gap.
+//
+// Renamed from `consumeDelegationBypass`: the same marker now unlocks every
+// mutating gate (D21 delegation, active-task, D29 claim overlap), not just
+// D21. Splitting the bypass surface per gate caused the self-deadlock this
+// function exists to break.
+function consumeBypassMarker() {
   if (process.env[DELEGATION_BYPASS_ENV] === '1') return { source: 'env' };
   const marker = bypassOnceFile();
   let stat;
@@ -120,9 +141,30 @@ function consumeDelegationBypass() {
     return null;
   }
   let reason = null;
-  if (stat.size > 0 && stat.size < 4096) {
+  let expiresAt = null;
+  let isExpired = false;
+  if (stat.size > 0 && stat.size < 8192) {
     try {
-      reason = fs.readFileSync(marker, 'utf8').trim() || null;
+      const raw = fs.readFileSync(marker, 'utf8').trim();
+      let parsed = null;
+      if (raw.startsWith('{')) {
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          // Body looked like JSON but didn't parse — fall through to plain-text.
+        }
+      }
+      if (parsed && typeof parsed === 'object') {
+        reason = typeof parsed.reason === 'string' && parsed.reason.length > 0 ? parsed.reason : null;
+        expiresAt = typeof parsed.expires_at === 'string' ? parsed.expires_at : null;
+        if (expiresAt) {
+          const exp = Date.parse(expiresAt);
+          if (Number.isFinite(exp) && exp <= Date.now()) isExpired = true;
+        }
+      } else {
+        // Legacy plain-text shape from `touch` + optional reason body.
+        reason = raw || null;
+      }
     } catch {
       // Unreadable marker still counts as armed — its presence is the
       // signal; the body is an optional audit annotation.
@@ -137,7 +179,11 @@ function consumeDelegationBypass() {
       `[sdi] WARNING: failed to consume ${marker} — bypass may repeat.\n`,
     );
   }
-  return { source: 'marker', reason };
+  if (isExpired) {
+    appendHookLog('bypass_marker_expired', { reason, expires_at: expiresAt });
+    return null;
+  }
+  return { source: 'marker', reason, expires_at: expiresAt };
 }
 
 function verifySdiSkills(root) {
@@ -898,6 +944,46 @@ async function runUserPromptSubmit(input) {
   );
 }
 
+// Unified bypass surface hint — `sdi bypass arm` is the recommended path
+// because the CLI is on the D21 read-only Bash whitelist (main session can
+// call it directly, no specialist needed). One marker armed via this verb
+// unlocks every mutating gate (D21 delegation, active-task, D29 claim
+// overlap) on the next invocation.
+const BYPASS_ARM_HINT =
+  'One-shot override (audited): `sdi bypass arm --reason "<short reason>"`. ' +
+  'Marker auto-expires in 60s (configurable via `--ttl`). ' +
+  '`sdi bypass status` to inspect, `sdi bypass disarm` to clear.';
+
+// Lazy marker consumer: at most one marker consumption per PreToolUse
+// invocation, shared across all three mutating gates. The first gate that
+// would block calls `tryBypass()` once; the result is reused by the others.
+// Without this caching, a single armed marker would only unlock the first
+// gate that fires and the next gate would still block the same invocation —
+// the original self-deadlock in different clothes.
+function makeBypassConsumer() {
+  let consumed = false;
+  let result = null;
+  return function tryBypass() {
+    if (consumed) return result;
+    consumed = true;
+    result = consumeBypassMarker();
+    return result;
+  };
+}
+
+function emitBypassWarning(gate, toolName, bypass, extra) {
+  const label =
+    bypass.source === 'env'
+      ? `${DELEGATION_BYPASS_ENV}=1`
+      : `marker ${bypassOnceFile()}`;
+  process.stderr.write(
+    `[sdi] WARNING: ${gate} bypass via ${label} — main session executing ${toolName}` +
+      (extra ? ` ${extra}` : '') +
+      (bypass.reason ? ` [reason: ${bypass.reason}]` : '') +
+      `. Routine bypass is a protocol violation; audit log records every use.\n`,
+  );
+}
+
 // PreToolUse: three gates, evaluated in order.
 //   1. D21 delegation gate — main session (no agent_id) cannot call execution
 //      tools. Edit/Write/MultiEdit/NotebookEdit always blocked; Bash blocked
@@ -908,6 +994,10 @@ async function runUserPromptSubmit(input) {
 //      for the active plan and downgrade to `permissionDecision: 'ask'`
 //      when the effective mode is L3. The communication substrate (M1~M5)
 //      stays mode-independent (D19); only the user-gate position moves.
+//
+// The bypass marker (armed via `sdi bypass arm`) unlocks every blocking gate
+// for one invocation. A single PreToolUse call consumes the marker at most
+// once, even if multiple gates would have blocked — see `makeBypassConsumer`.
 async function runPreToolUse(input) {
   if (process.env[BYPASS_ENV] === '1') return;
   const toolName = (input && input.tool_name) || '';
@@ -926,6 +1016,9 @@ async function runPreToolUse(input) {
     appendHookLog('pre_tool_use_skip', { tool: toolName, reason: 'cwd-not-in-sdi-project' });
     return;
   }
+
+  // One bypass consumption budget per PreToolUse invocation.
+  const tryBypass = makeBypassConsumer();
 
   // D21 — delegation gate.
   const agentId = (input && input.agent_id) || null;
@@ -946,17 +1039,13 @@ async function runPreToolUse(input) {
       }
     }
     if (blocked) {
-      const bypass = consumeDelegationBypass();
+      const bypass = tryBypass();
       if (bypass) {
-        const label =
-          bypass.source === 'env'
-            ? `${DELEGATION_BYPASS_ENV}=1`
-            : `marker ${bypassOnceFile()}`;
-        process.stderr.write(
-          `[sdi] WARNING: D21 bypass via ${label} — main session executing ${toolName}` +
-            (bashCmd ? ` (cmd preview: "${bashCmd.slice(0, 80)}")` : '') +
-            (bypass.reason ? ` [reason: ${bypass.reason}]` : '') +
-            `. Routine bypass is a D21 protocol violation; audit log records every use.\n`,
+        emitBypassWarning(
+          'D21',
+          toolName,
+          bypass,
+          bashCmd ? `(cmd preview: "${bashCmd.slice(0, 80)}")` : null,
         );
         appendHookLog('pre_tool_use_delegation_bypass', {
           tool: toolName,
@@ -965,17 +1054,14 @@ async function runPreToolUse(input) {
           reason: bypass.reason || null,
         });
       } else {
-        const overrideHint =
-          `One-shot override (audited): \`touch ${bypassOnceFile()}\` ` +
-          `(or export ${DELEGATION_BYPASS_ENV}=1 before launching Claude Code).`;
         const reason = bashCmd != null
           ? `[sdi] D21 delegation gate: main session may not run mutating Bash. ` +
             `Delegate to a specialist sub-agent via the Agent tool. ` +
             `cmd preview: "${bashCmd.slice(0, 80)}". ` +
-            overrideHint
+            BYPASS_ARM_HINT
           : `[sdi] D21 delegation gate: main session may not call ${toolName}. ` +
             `Delegate to a specialist sub-agent via the Agent tool. ` +
-            overrideHint;
+            BYPASS_ARM_HINT;
         emitDeny(reason);
         appendHookLog('pre_tool_use_blocked', {
           tool: toolName,
@@ -1023,13 +1109,23 @@ async function runPreToolUse(input) {
   // a task to already be in_progress.
   const activeTaskId = readActiveTaskHint();
   if (!activeTaskId && isExecutionTool(toolName)) {
-    emitDeny(
-      `[sdi] no active task — set one before mutating files. ` +
-        `Run \`sdi task list\` and \`sdi task update <TASK-ID> --status in_progress\`, ` +
-        `or set ${BYPASS_ENV}=1 to bypass.`,
-    );
-    appendHookLog('pre_tool_use_blocked', { tool: toolName, reason: 'no-active-task' });
-    return;
+    const bypass = tryBypass();
+    if (bypass) {
+      emitBypassWarning('active-task', toolName, bypass, null);
+      appendHookLog('pre_tool_use_active_task_bypass', {
+        tool: toolName,
+        source: bypass.source,
+        reason: bypass.reason || null,
+      });
+    } else {
+      emitDeny(
+        `[sdi] no active task — set one before mutating files. ` +
+          `Run \`sdi task list\` and \`sdi task update <TASK-ID> --status in_progress\`. ` +
+          BYPASS_ARM_HINT,
+      );
+      appendHookLog('pre_tool_use_blocked', { tool: toolName, reason: 'no-active-task' });
+      return;
+    }
   }
 
   // D29 — Resource claim overlap gate. Blocks Edit/Write/NotebookEdit when a
@@ -1040,28 +1136,48 @@ async function runPreToolUse(input) {
       () => ({ block: false }),
     );
     if (gate && gate.block) {
-      process.stdout.write(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason:
-              `[sdi] D29 claim overlap on ${gate.payload.target_path}. ` +
-              `Holders: ${gate.payload.holders.map((h) => h.scenario_id).join(', ')}. ` +
-              `${gate.payload.hint}.`,
-          },
-          sdiBlock: gate.payload,
-        }) + '\n',
-      );
-      appendHookLog('pre_tool_use_blocked', {
-        tool: toolName,
-        reason: 'claim-overlap',
-        task_id: activeTaskId,
-        target_path: gate.payload.target_path,
-        my_scenario: gate.payload.my_scenario,
-        holders: gate.payload.holders,
-      });
-      process.exit(2);
+      const bypass = tryBypass();
+      if (bypass) {
+        emitBypassWarning(
+          'D29',
+          toolName,
+          bypass,
+          `(target: ${gate.payload.target_path})`,
+        );
+        appendHookLog('pre_tool_use_claim_bypass', {
+          tool: toolName,
+          task_id: activeTaskId,
+          target_path: gate.payload.target_path,
+          my_scenario: gate.payload.my_scenario,
+          holders: gate.payload.holders,
+          source: bypass.source,
+          reason: bypass.reason || null,
+        });
+      } else {
+        process.stdout.write(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason:
+                `[sdi] D29 claim overlap on ${gate.payload.target_path}. ` +
+                `Holders: ${gate.payload.holders.map((h) => h.scenario_id).join(', ')}. ` +
+                `${gate.payload.hint}. ` +
+                BYPASS_ARM_HINT,
+            },
+            sdiBlock: gate.payload,
+          }) + '\n',
+        );
+        appendHookLog('pre_tool_use_blocked', {
+          tool: toolName,
+          reason: 'claim-overlap',
+          task_id: activeTaskId,
+          target_path: gate.payload.target_path,
+          my_scenario: gate.payload.my_scenario,
+          holders: gate.payload.holders,
+        });
+        process.exit(2);
+      }
     }
   }
 
@@ -1227,7 +1343,7 @@ module.exports = {
     daemonBase,
     appendHookLog,
     bypassOnceFile,
-    consumeDelegationBypass,
+    consumeBypassMarker,
     SDI_SKILLS,
   },
 };

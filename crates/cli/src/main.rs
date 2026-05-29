@@ -60,6 +60,7 @@ async fn main() -> Result<()> {
         Cmd::Log(args) => commands::ops::log(&Paths::resolve()?, args),
         Cmd::Watch(args) => commands::ops::watch(&entity_client().await?, args).await,
         Cmd::Completions(args) => commands::ops::completions(&args.shell),
+        Cmd::Bypass(sub) => commands::bypass::run(sub).await,
     }
 }
 
