@@ -8,6 +8,17 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.2.1] - 2026-05-29
+
+### Changed
+- Documentation-only release. `plugin/README.md`, `plugin/README.ko.md`, and
+  the `sdi bypass` clap `--help` text are now aligned with the v0.2.0
+  behavioral surface — `sdi bypass arm` is presented as the primary emergency
+  override, env switches (`SDI_DELEGATION_BYPASS`, `SDI_BYPASS_HOOKS`,
+  `SDI_HOOK_V05_DISABLE`) as startup-time shell-rc fallbacks. No behavioral
+  change vs v0.2.0. Cut to ship the refreshed guides + CLI help to installed
+  clients on the next marketplace pull.
+
 ## [0.2.0] - 2026-05-29
 
 ### Added
