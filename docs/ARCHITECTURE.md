@@ -199,17 +199,27 @@ Bypass paths (all audited):
 - Circuit-breaker trigger (Layer 3) → main session temporarily allowed
   to execute; `audit=circuit-override` is appended to the activity log
   for every tool call until the breaker resets.
-- `touch ~/.cache/sdi/bypass-once` → one-shot manual escape. The hook
-  deletes the marker before honoring it (naturally one-shot). Optional
-  body text in the marker becomes the audited reason. This is the
-  surface that works during an in-flight Claude Code session.
-- `SDI_DELEGATION_BYPASS=1` env-var → one-shot escape, scoped to
+- `sdi bypass arm --reason "<short reason>" [--ttl <seconds>]` →
+  primary one-shot escape. Writes a JSON marker
+  (`{reason, armed_at, expires_at, ttl_seconds}`) at
+  `~/.cache/sdi/bypass-once`. One armed marker unlocks every mutating
+  PreToolUse gate (D21 delegation, active-task, D29 claim overlap) for
+  the next single tool invocation, then auto-consumes; the hook deletes
+  the marker before honoring it. TTL default 60s; expired markers are
+  cleaned up but do NOT open the gate. `sdi` is on the D21 read-only
+  Bash whitelist so the main session can arm the marker directly — no
+  specialist required for the bypass path itself. `sdi bypass status`
+  reports state ∈ {`armed`, `expired`, `absent`} + TTL remainder;
+  `sdi bypass disarm` removes the marker (idempotent).
+- `SDI_DELEGATION_BYPASS=1` env-var → startup-time fallback, scoped to
   Claude Code sessions launched from a shell that exported the var.
   Does NOT catch inline `VAR=1 cmd` prefixes — Claude Code spawns the
   hook before any user shell expands the prefix.
-- All bypasses emit a stderr warning and `pre_tool_use_delegation_bypass`
-  (with `source` ∈ {`marker`, `env`}) in `~/.local/state/sdi/hook.log`.
-  Routine use is a protocol violation tracked by the auditor.
+- All bypasses emit a stderr warning + a gate-specific audit row
+  (`pre_tool_use_delegation_bypass`, `pre_tool_use_active_task_bypass`,
+  `pre_tool_use_claim_bypass`, with `source` ∈ {`marker`, `env`}) in
+  `~/.local/state/sdi/hook.log`. Routine use is a protocol violation
+  tracked by the auditor.
 
 Hook implementation lives at `plugin/hooks/pre-tool-use.cjs` and
 delegates to the shared helper in `plugin/hooks/lib/delegation.cjs`.

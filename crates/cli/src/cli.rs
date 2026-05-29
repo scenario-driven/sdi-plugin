@@ -146,32 +146,52 @@ pub enum Cmd {
     /// Emit a shell completion script for the given shell.
     Completions(CompletionsArgs),
     /// Arm, disarm, or inspect the emergency hook-bypass marker.
-    // The marker file lives at `~/.cache/sdi/bypass-once` and unlocks every
-    // mutating hook gate (D21 delegation, active-task, D29 claim overlap) for
-    // the next mutating tool invocation. The main session can call this verb
-    // because `sdi` is on the read-only Bash whitelist (D21 unconditional pass).
+    ///
+    /// One armed marker unlocks every mutating PreToolUse gate (D21
+    /// delegation, active-task, D29 claim overlap) for the next single
+    /// tool invocation, then auto-consumes. The marker file lives at
+    /// `~/.cache/sdi/bypass-once`. `sdi` is on the D21 read-only Bash
+    /// whitelist, so the main session can run `sdi bypass arm` directly
+    /// — no specialist delegation required.
     #[command(subcommand)]
     Bypass(BypassCmd),
 }
 
 #[derive(Debug, Subcommand)]
 pub enum BypassCmd {
-    /// Create the bypass marker. Consumed on the next mutating hook invocation.
+    /// Arm the marker so the next mutating tool call skips every gate.
+    ///
+    /// Recommended over the legacy env switches (`SDI_DELEGATION_BYPASS=1`,
+    /// `SDI_BYPASS_HOOKS=1`, `SDI_HOOK_V05_DISABLE=1`) — those work only
+    /// when exported from the shell that launched Claude Code, whereas
+    /// the marker works mid-session. Routine use is a protocol violation;
+    /// every arm + consumption is recorded in the hook audit log
+    /// (`~/.local/state/sdi/hook.log`).
     Arm(BypassArmArgs),
-    /// Remove the bypass marker.
+    /// Remove the bypass marker (idempotent — succeeds whether one exists or not).
     Disarm,
-    /// Report the marker state (`armed` | `expired` | `absent`) and TTL remainder.
+    /// Report the marker state (`armed` | `expired` | `absent`).
+    ///
+    /// Output includes the TTL remainder, the reason recorded at `arm`
+    /// time, and the on-disk marker path so you can confirm the hook is
+    /// reading the same file.
     Status,
 }
 
 #[derive(Debug, Args)]
 pub struct BypassArmArgs {
-    /// Free-form reason recorded inside the marker. Surfaces in the hook's
-    /// stderr warning + audit log so future spelunkers know why the bypass fired.
+    /// Free-form reason recorded inside the marker.
+    ///
+    /// Surfaces in the hook's stderr warning + audit log so future
+    /// spelunkers know why the bypass fired. Keep it short (e.g.
+    /// "investigating CI flake", "emergency rollback").
     #[arg(long)]
     pub reason: Option<String>,
-    /// Seconds before the marker self-expires. Default 60s — short enough that
-    /// a forgotten marker doesn't silently disarm every gate forever.
+    /// Seconds before the marker self-expires. Default 60s.
+    ///
+    /// Short enough that a forgotten marker doesn't silently disarm every
+    /// gate forever. Expired markers are cleaned up on the next hook hit
+    /// but do NOT open the gate.
     #[arg(long, default_value_t = 60)]
     pub ttl: i64,
 }

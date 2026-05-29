@@ -33,10 +33,13 @@ invariants:
    MultiEdit / NotebookEdit / Bash) and no agent-spawning tool (Agent / Task /
    TeamCreate / SendMessage) proceeds without an active Task. The shim emits a
    `permissionDecision: deny` payload with a self-recovery hint that names
-   `/scenario new` and `/round start` so the LLM can self-route.
-   `SDI_BYPASS_HOOKS=1` exists as an escape hatch for environments that
-   genuinely cannot register a task (e.g., test fixtures); production sessions
-   must not set it.
+   `/scenario new` and `/round start` so the LLM can self-route. The escape
+   hatch for environments that genuinely cannot register a task (test
+   fixtures, emergencies) is `sdi bypass arm --reason "<short reason>"`
+   (XDG-cache marker, one-shot, default TTL 60s, audit-logged); production
+   sessions must not arm it routinely. The startup-time `SDI_BYPASS_HOOKS=1`
+   env switch remains for shell-rc exports but does not catch inline
+   `VAR=1 cmd` prefixes.
 
 2. **LM-8 path invariant** (every event, structurally). Plugin code writes only
    under `pluginRoot` (version marker) and via `appendHookLog()` under XDG

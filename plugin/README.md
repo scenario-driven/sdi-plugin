@@ -72,8 +72,22 @@ and a structured `{ block: 'sdi_claim_overlap', target_path, my_scenario,
 holders, hint }` payload. Daemon unreachable → proceed (so an offline daemon
 never locks the editor).
 
-Emergency bypass: `SDI_HOOK_V05_DISABLE=1` is a single-invocation escape that
-is audit-logged on every use. Routine use is a protocol violation.
+Emergency bypass: `sdi bypass arm --reason "<short reason>"` writes a marker
+at `~/.cache/sdi/bypass-once` (XDG cache) that unlocks every mutating gate
+(D21 / active-task / D29) for the next single tool invocation, then
+auto-consumes. The TTL defaults to 60s (`--ttl <seconds>` to override).
+`sdi` is on the D21 read-only Bash whitelist so the main session can arm
+the marker directly; specialists are unnecessary for the bypass path
+itself. `sdi bypass status` inspects state and TTL remainder; `sdi bypass
+disarm` clears the marker. Every arm + consumption is recorded in the hook
+audit log; routine use is a protocol violation.
+
+Startup-time fallbacks (only effective when exported from the shell that
+launches Claude Code): `SDI_DELEGATION_BYPASS=1` mirrors the marker for
+D21 alone, `SDI_BYPASS_HOOKS=1` short-circuits the entire `PreToolUse`
+chain, `SDI_HOOK_V05_DISABLE=1` disables the D26 advisory + D29 claim
+block. These do not catch inline `VAR=1 cmd` prefixes (Claude Code spawns
+the hook before the shell expands them).
 
 The active scenario currently flows through the `SDI_ACTIVE_SCENARIO` env
 var until the daemon gains the `AgentRun ↔ Scenario` edge.

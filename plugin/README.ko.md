@@ -57,7 +57,9 @@ D26 패턴 무결성 (권고): `Agent` 또는 `Task` 디스패치가 멀티 에�
 
 D29 멀티세션 클레임: `Edit` / `Write` / `NotebookEdit` 에 대해 훅이 `/scenarios/active-claims` 를 조회한다. 세션 간 겹침은 코드 2 와 구조화된 `{ block: 'sdi_claim_overlap', target_path, my_scenario, holders, hint }` 페이로드로 종료된다. 데몬 도달 불가 → 진행 (오프라인 데몬이 결코 에디터를 잠그지 않도록).
 
-비상 우회: `SDI_HOOK_V05_DISABLE=1` 은 사용할 때마다 감사 로그가 남는 단일 호출 탈출구다. 일상적 사용은 프로토콜 위반이다.
+비상 우회: `sdi bypass arm --reason "<짧은 사유>"` 가 `~/.cache/sdi/bypass-once` (XDG 캐시) 에 마커를 남기고, 다음 한 번의 변경성 도구 호출에 대해 모든 변경 게이트(D21 / 활성 태스크 / D29) 를 해제한 뒤 자동 소비한다. TTL 기본값은 60초 (`--ttl <초>` 로 변경). `sdi` 는 D21 의 읽기 전용 Bash 화이트리스트에 들어 있으므로 메인 세션이 직접 마커를 무장(arm)할 수 있다 — 우회 자체에는 전문가 위임이 필요 없다. `sdi bypass status` 로 상태와 TTL 잔여를 확인하고, `sdi bypass disarm` 으로 마커를 제거한다. 매 무장 + 소비는 훅 감사 로그에 적재되며, 일상적 사용은 프로토콜 위반이다.
+
+기동 시점 폴백 (Claude Code 를 띄우는 셸에서 export 한 경우에만 유효): `SDI_DELEGATION_BYPASS=1` 은 D21 만 해제하고, `SDI_BYPASS_HOOKS=1` 은 `PreToolUse` 체인 전체를 단락시키며, `SDI_HOOK_V05_DISABLE=1` 은 D26 권고 + D29 클레임 차단을 끈다. 인라인 `VAR=1 cmd` 프리픽스는 Claude Code 가 셸 expand 전에 훅을 spawn 하므로 닿지 않는다.
 
 활성 시나리오는 데몬이 `AgentRun ↔ Scenario` 엣지를 갖기 전까지 현재 `SDI_ACTIVE_SCENARIO` 환경 변수를 통해 흐른다.
 
