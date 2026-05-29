@@ -8,6 +8,52 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.3.0] - 2026-05-29
+
+### Added
+- Project entity gains three first-class metadata fields: `description`
+  (free-form text, nullable), `enabled` (soft-disable flag, default
+  `true`), `wiki_paths` (array of wiki tree roots, default `["docs"]`).
+  Migration 008 backfills existing rows in place — `enabled=1`,
+  `description=NULL`, `wiki_paths_json='["docs"]'` — so no manual
+  intervention is required.
+- `sdi project disable <ID>` / `sdi project enable <ID>` (idempotent,
+  emit `project.disabled` / `project.enabled` SSE events) and
+  `sdi project delete <ID> [--force]` (cascades every PROJ-scoped row:
+  plans, requirements, scenarios, rounds, tasks, decisions, comments,
+  questions, knowledge, agent notes, autonomy policies, collaboration
+  patterns, activity events). Delete refuses by default when any task
+  under the project is `in_progress`; `--force` overrides.
+- `sdi project update <ID>` now accepts `--description "<text>"`
+  (empty string clears) and repeatable `--wiki-path <p>` alongside the
+  existing `--name`. PATCH-style — every flag is independently optional.
+- Daemon: `POST /projects/:id/disable`, `POST /projects/:id/enable`,
+  `DELETE /projects/:id[?force=true]`. `PUT /projects/:id` is now
+  PATCH-style — `name`, `description`, `enabled`, `wiki_paths` all
+  optional; `description: null` clears the field.
+- Dashboard SPA gains `ProjectSettings` (standalone view) and
+  `ProjectSettingsModal` (lifted into App.tsx). Project switcher rows
+  carry a gear icon to open settings, render disabled projects with a
+  muted `off` badge, and dim the entry text. Delete-cascade hands the
+  selection back to the next available project automatically.
+
+### Changed
+- `PUT /projects/:id` migrates from `{name}` only to PATCH-style. The
+  pre-v0.3 single-field shape still works (a body with just `name` is a
+  one-field PATCH), so existing CLI / web callers stay compatible.
+- PreToolUse hook honors `project.enabled === false` (or legacy integer
+  `0`) by short-circuiting every mutating gate (D21, active-task, D29).
+  Audit row `pre_tool_use_skip` carries `reason: 'project-disabled'`
+  plus the project id so the user can grep for sessions that ran in
+  ungoverned mode.
+
+### Migration
+- Automatic. The new project columns are added with SQL `DEFAULT`s, so
+  existing databases backfill cleanly on the first daemon start under
+  v0.3.0. `sdi doctor` reports the migration in the standard schema
+  version output. The pre-v0.3 `PUT /projects/:id {name: "x"}` request
+  shape continues to work without code changes on the client side.
+
 ## [0.2.1] - 2026-05-29
 
 ### Changed
@@ -148,6 +194,8 @@ Initial public release. Built `sdi` + `sdid` binaries (macOS + Linux ×
 x86_64 + aarch64) attached to the GitHub Release; the `dist` branch carries the
 plugin shell + binaries that Claude Code's marketplace pulls from.
 
+[0.3.0]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.3.0
+[0.2.1]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.2.1
 [0.2.0]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.2.0
 [0.1.4]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.4
 [0.1.3]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.3
