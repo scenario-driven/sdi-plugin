@@ -195,12 +195,20 @@ orchestrator session.
 | Specialist (`agent_id` present, `agent_type` ∈ AgentSpec registry) | nothing | full toolset |
 | Specialist (`agent_id` present, `agent_type` ∉ registry) | every execution tool with `rogue-specialist` code | read-only tools only |
 
-Bypass paths (both audited):
+Bypass paths (all audited):
 - Circuit-breaker trigger (Layer 3) → main session temporarily allowed
   to execute; `audit=circuit-override` is appended to the activity log
   for every tool call until the breaker resets.
-- `SDI_DELEGATION_BYPASS=1` env-var → one-shot escape. stderr warning
-  on every blocked tool, `audit=manual-override` in activity log.
+- `touch ~/.cache/sdi/bypass-once` → one-shot manual escape. The hook
+  deletes the marker before honoring it (naturally one-shot). Optional
+  body text in the marker becomes the audited reason. This is the
+  surface that works during an in-flight Claude Code session.
+- `SDI_DELEGATION_BYPASS=1` env-var → one-shot escape, scoped to
+  Claude Code sessions launched from a shell that exported the var.
+  Does NOT catch inline `VAR=1 cmd` prefixes — Claude Code spawns the
+  hook before any user shell expands the prefix.
+- All bypasses emit a stderr warning and `pre_tool_use_delegation_bypass`
+  (with `source` ∈ {`marker`, `env`}) in `~/.local/state/sdi/hook.log`.
   Routine use is a protocol violation tracked by the auditor.
 
 Hook implementation lives at `plugin/hooks/pre-tool-use.cjs` and

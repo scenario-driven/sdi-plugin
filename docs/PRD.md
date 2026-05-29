@@ -137,7 +137,7 @@ orchestrator (메인 세션) 는 **plan / decompose / dispatch** 만 수행한�
 - **read-only Bash 허용**: `git status`, `cargo check`, `pnpm typecheck` 등 부수효과 없는 명령. 화이트리스트 매칭 통과 시 메인도 직접 실행 가능. 매칭 실패 = 차단 → specialist 위임 필요.
 - **specialist 정합성**: sub-agent 의 `agent_type` 은 AgentSpec (§3.8) 에 등록된 specialist 이름과 일치해야 한다. 미등록 type 으로 spawn 된 sub-agent 의 execution 도 차단 (rogue agent 방지).
 - **L3 (circuit breaker / 신중 모드) 우회**: Layer 3 circuit breaker 가 트리거되면 메인에 한해 임시로 차단 해제 (사용자가 직접 통제 모드). 단 모든 차단 해제 호출은 `audit=manual-override` 로 활동 로그에 적재.
-- **emergency bypass**: `SDI_DELEGATION_BYPASS=1` env-var. 1회성 escape. 호출 시마다 stderr 경고 + activity log 적재. routine bypass 는 protocol violation — 이를 routine 으로 쓰는 agent / 사용자는 audit 대상.
+- **emergency bypass**: 두 surface. (a) `touch ~/.cache/sdi/bypass-once` — marker file 1회성 escape. hook 이 honor 직전 파일을 삭제. marker 본문이 있으면 audit 의 `reason` 필드로 적재. 실행 중인 Claude Code 세션에서 작동하는 surface. (b) `SDI_DELEGATION_BYPASS=1` env-var — Claude Code 를 해당 env 가 export 된 셸에서 새로 띄울 때만 작동. 인라인 `VAR=1 cmd` 프리픽스는 hook spawn 전에 expand 되지 않아 닿지 않음. 두 surface 모두 호출 시마다 stderr 경고 + `pre_tool_use_delegation_bypass` (with `source` ∈ {`marker`, `env`}) 적재. routine bypass 는 protocol violation — audit 대상.
 
 D21 은 D13 ("multi-agent orchestration is the body, single-@main solo flow is anti-pattern") 의 메커니컬 enforcement 면이다. D13 이 문서 규약, D21 은 그 규약을 런타임 게이트로 승격.
 
@@ -835,7 +835,9 @@ mutating Bash 판정은 화이트리스트 (read-only) + 블랙리스트 (`destr
 - 모든 해제는 `audit=circuit-override` 로 활동 로그.
 
 **Emergency bypass**:
-- `SDI_DELEGATION_BYPASS=1` env-var. 1회성. stderr 에 경고 출력 + activity log 적재.
+- `touch ~/.cache/sdi/bypass-once` — marker file 1회성 escape. hook 이 honor 직전 파일을 삭제하므로 자연스럽게 one-shot. 실행 중인 Claude Code 세션에서도 작동하는 primary surface.
+- `SDI_DELEGATION_BYPASS=1` env-var — Claude Code 를 해당 env 가 export 된 셸에서 새로 띄울 때만 작동 (legacy / startup-time surface). 인라인 `VAR=1 cmd` 프리픽스는 hook 에 닿지 않음.
+- 두 surface 모두 stderr 에 경고 출력 + `pre_tool_use_delegation_bypass` (with `source` ∈ {`marker`, `env`}) 적재.
 - routine 사용은 protocol violation — auditor 가 호출 빈도 모니터링하여 임계치 초과 시 사용자 알림.
 
 **책임 분리 원칙 (D13 + D21 의 결합 효과)**:
@@ -1079,7 +1081,7 @@ AgentSpec.system_prompt 변경은 decision-kind = `agent-spec-change` 로 분류
 12. **Dissensus mode 무관 escalate**: Decision `kind=dissensus` 가 적재되면, plan 의 autonomy mode (L3/L4/L5) 와 무관하게 사람 게이트로 즉시 escalate. L5 plan 도 dissensus 는 자동 적용 대상이 아니다. circuit breaker (Layer 3) 가 트리거된 경우도 동일 — mode 우회 불가.
 13. **Layer 1 결정 권한 금지**: orchestrator 가 시나리오 분해 / 구현 방식 선택 / disruption 해결안 채택 / Decision 본문 작성 중 하나라도 시도하면 거부. 이들은 Layer 2 specialist 간 합의 (M3) 에서만 발생해야 한다.
 14. **architecture / schema / naming-canonical L4 강제**: 이 3개 scope 의 Decision 적용 시 mode 가 L5 로 설정되어 있어도 L4 게이트 (timed auto-apply) 로 강제 강등. L5 즉시 적용 경로로 우회 불가.
-15. **Delegation gate (D21) 메커니컬 enforcement**: 메인 세션 (`hookInput.agent_id` 부재) 에서 `Edit` / `Write` / `NotebookEdit` 호출 시 PreToolUse hook 이 거부. mutating Bash (화이트리스트 미통과 + 부수효과 가능) 도 거부. Agent 도구로 spawn 된 sub-agent (`hookInput.agent_id` 존재) 는 통과. 미등록 `agent_type` 의 sub-agent execution 은 `rogue-specialist` 코드로 거부. circuit breaker 트리거 / `SDI_DELEGATION_BYPASS=1` 만이 메인 차단 우회 경로이며 둘 다 activity log 적재.
+15. **Delegation gate (D21) 메커니컬 enforcement**: 메인 세션 (`hookInput.agent_id` 부재) 에서 `Edit` / `Write` / `NotebookEdit` 호출 시 PreToolUse hook 이 거부. mutating Bash (화이트리스트 미통과 + 부수효과 가능) 도 거부. Agent 도구로 spawn 된 sub-agent (`hookInput.agent_id` 존재) 는 통과. 미등록 `agent_type` 의 sub-agent execution 은 `rogue-specialist` 코드로 거부. 메인 차단 우회 경로는 세 surface: circuit breaker 트리거, `touch ~/.cache/sdi/bypass-once` (실행 중 세션용 primary), `SDI_DELEGATION_BYPASS=1` env (startup-time only) — 세 경로 모두 activity log 적재.
 16. **Pattern provenance (D22, D23) NOT NULL**: 신규 work entity (plan/requirement/scenario/task/decision/round) 생성 시 `produced_via_pattern_id` 가 NOT NULL. 메인이 명시 ID 없이 생성 시도 시 daemon 이 자동으로 `kind='direct'` CollaborationPattern row 를 만들고 그 ID 부여 + AutonomyPolicy 자동 L3 cap + 활동 로그 `audit=direct-pattern-marker` 적재. 마이그레이션 시점 legacy row 만 NULL 허용.
 17. **Pattern shape gate (D26, D27b)**: CollaborationPattern.lifecycle `pending → active` 전이 시 kind 별 shape validation 통과 강제. workflow: `steps_json` len ≥ 2; graph: `reviewers_json` 의 (AgentSpec.name, AgentSpec.stance) tuple distinct ≥ 2; swarm: `fan_out_json` len ≥ 2; agents-as-tools: `peer_registration_json` len ≥ 1. 미통과 시 pending 에 머무름 — active 전이 거부. `direct` 만 shape 검증 면제 (자동 L3 cap 부담).
 18. **Graph consensus sybil 차단 (D26)**: Decision.kind='consensus' 적재 시 `proposers_json` 의 (AgentSpec.name, AgentSpec.stance) tuple distinct ≥ 2 강제. 동일 (name, stance) 가 2회 등재되면 거부. AgentSpec 의 stance ∈ {proposer, devil_advocate, schema_guardian, performance_reviewer, security_reviewer, neutral}. 같은 `impl-coder` 2 인스턴스 (둘 다 stance=proposer) 는 consensus 자격 0 — 진짜 다양성 없음.

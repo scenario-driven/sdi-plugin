@@ -465,7 +465,82 @@ test('D21: SDI_DELEGATION_BYPASS=1 unblocks main + audits the bypass', async () 
     assert.match(r.stderr, /SDI_DELEGATION_BYPASS=1/);
     const log = path.join(home, '.local/state/sdi/hook.log');
     const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    assert.ok(entries.some((e) => e.event === 'pre_tool_use_delegation_bypass'));
+    assert.ok(
+      entries.some(
+        (e) => e.event === 'pre_tool_use_delegation_bypass' && e.source === 'env',
+      ),
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// Real-environment simulation. Claude Code spawns PreToolUse before user
+// shell expands the inline `VAR=1 cmd` prefix, so SDI_DELEGATION_BYPASS never
+// reaches the hook. The marker file at ~/.cache/sdi/bypass-once exists for
+// this case — substrate both sides own, naturally one-shot via auto-delete.
+test('D21: bypass-once marker file unblocks main + is consumed (one-shot)', async () => {
+  const home = mkTempHome('sdi-d21-marker');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const marker = path.join(home, '.cache/sdi/bypass-once');
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, 'investigating D21 env propagation\n');
+    // Explicit empty env for SDI_DELEGATION_BYPASS — simulates Claude Code
+    // not propagating shell env to the hook spawn.
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+
+    const r1 = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
+    assert.equal(r1.status, 0, `stderr=${r1.stderr}`);
+    assert.doesNotMatch(r1.stdout, /D21 delegation gate/);
+    assert.match(r1.stderr, /D21 bypass via marker/);
+    assert.match(r1.stderr, /investigating D21 env propagation/);
+    // Marker auto-consumed — file must be gone.
+    assert.equal(fs.existsSync(marker), false, 'marker should be deleted after one hit');
+
+    const log = path.join(home, '.local/state/sdi/hook.log');
+    const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const bypassEntry = entries.find((e) => e.event === 'pre_tool_use_delegation_bypass');
+    assert.ok(bypassEntry, 'audit entry missing');
+    assert.equal(bypassEntry.source, 'marker');
+    assert.equal(bypassEntry.reason, 'investigating D21 env propagation');
+
+    // Second invocation — marker already consumed, so D21 must re-engage.
+    const r2 = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
+    assert.match(r2.stdout, /D21 delegation gate/, 'second call should be blocked again');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// D21 deny message must point users at both bypass surfaces — the marker
+// path (works without restarting Claude Code) and the env (works only when
+// exported before launch). Regression anchor for "users see only env hint
+// even though env never propagates."
+test('D21: deny message advertises marker-file override path', async () => {
+  const home = mkTempHome('sdi-d21-hint');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
+    );
+    assert.match(r.stdout, /D21 delegation gate/);
+    assert.match(r.stdout, /bypass-once/, 'deny message must mention marker path');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });

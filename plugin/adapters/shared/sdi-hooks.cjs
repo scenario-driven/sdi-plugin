@@ -56,6 +56,15 @@ function stateDir() {
 function hookLog() {
   return path.join(stateDir(), 'hook.log');
 }
+// Marker-file bypass surface for D21. Inline `VAR=1 cmd` env prefixes never
+// reach this hook — Claude Code spawns PreToolUse before any user shell
+// expands the prefix, so env is the wrong substrate. A user-writable file in
+// XDG cache is a substrate both sides own. Existence consumes one D21
+// main-session block; the hook deletes the file before honoring it so the
+// bypass is naturally one-shot and audit-symmetric with the env path.
+function bypassOnceFile() {
+  return path.join(xdgHome(), '.cache', 'sdi', 'bypass-once');
+}
 
 // Skill manifest — verified by the install gate fast-path. New skill entries
 // here MUST be added in the same commit as the corresponding
@@ -93,6 +102,42 @@ function appendHookLog(event, payload) {
   } catch {
     // Audit failure must not break the hook.
   }
+}
+
+// Returns the bypass source if a D21 main-session bypass is armed for this
+// hook invocation, else null. The marker file is consumed on hit (deleted
+// before honoring) so the bypass is one-shot. The env path is non-consuming
+// — useful when the user starts Claude Code from a shell that already
+// exported the var, but it does not catch the `VAR=1 cmd` inline pattern
+// (env never reaches the hook spawn).
+function consumeDelegationBypass() {
+  if (process.env[DELEGATION_BYPASS_ENV] === '1') return { source: 'env' };
+  const marker = bypassOnceFile();
+  let stat;
+  try {
+    stat = fs.statSync(marker);
+  } catch {
+    return null;
+  }
+  let reason = null;
+  if (stat.size > 0 && stat.size < 4096) {
+    try {
+      reason = fs.readFileSync(marker, 'utf8').trim() || null;
+    } catch {
+      // Unreadable marker still counts as armed — its presence is the
+      // signal; the body is an optional audit annotation.
+    }
+  }
+  try {
+    fs.unlinkSync(marker);
+  } catch {
+    // Persistent marker would silently turn one-shot into permanent.
+    // Surface that to stderr so the user notices.
+    process.stderr.write(
+      `[sdi] WARNING: failed to consume ${marker} — bypass may repeat.\n`,
+    );
+  }
+  return { source: 'marker', reason };
 }
 
 function verifySdiSkills(root) {
@@ -901,25 +946,36 @@ async function runPreToolUse(input) {
       }
     }
     if (blocked) {
-      if (process.env[DELEGATION_BYPASS_ENV] === '1') {
+      const bypass = consumeDelegationBypass();
+      if (bypass) {
+        const label =
+          bypass.source === 'env'
+            ? `${DELEGATION_BYPASS_ENV}=1`
+            : `marker ${bypassOnceFile()}`;
         process.stderr.write(
-          `[sdi] WARNING: ${DELEGATION_BYPASS_ENV}=1 — main session executing ${toolName}` +
+          `[sdi] WARNING: D21 bypass via ${label} — main session executing ${toolName}` +
             (bashCmd ? ` (cmd preview: "${bashCmd.slice(0, 80)}")` : '') +
+            (bypass.reason ? ` [reason: ${bypass.reason}]` : '') +
             `. Routine bypass is a D21 protocol violation; audit log records every use.\n`,
         );
         appendHookLog('pre_tool_use_delegation_bypass', {
           tool: toolName,
           bash_cmd: bashCmd ? bashCmd.slice(0, 200) : null,
+          source: bypass.source,
+          reason: bypass.reason || null,
         });
       } else {
+        const overrideHint =
+          `One-shot override (audited): \`touch ${bypassOnceFile()}\` ` +
+          `(or export ${DELEGATION_BYPASS_ENV}=1 before launching Claude Code).`;
         const reason = bashCmd != null
           ? `[sdi] D21 delegation gate: main session may not run mutating Bash. ` +
             `Delegate to a specialist sub-agent via the Agent tool. ` +
             `cmd preview: "${bashCmd.slice(0, 80)}". ` +
-            `One-shot override (audited): ${DELEGATION_BYPASS_ENV}=1.`
+            overrideHint
           : `[sdi] D21 delegation gate: main session may not call ${toolName}. ` +
             `Delegate to a specialist sub-agent via the Agent tool. ` +
-            `One-shot override (audited): ${DELEGATION_BYPASS_ENV}=1.`;
+            overrideHint;
         emitDeny(reason);
         appendHookLog('pre_tool_use_blocked', {
           tool: toolName,
@@ -1170,6 +1226,8 @@ module.exports = {
     verifySdiSkills,
     daemonBase,
     appendHookLog,
+    bypassOnceFile,
+    consumeDelegationBypass,
     SDI_SKILLS,
   },
 };
