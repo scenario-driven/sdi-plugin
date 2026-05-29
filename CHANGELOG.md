@@ -8,6 +8,46 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.2.0] - 2026-05-29
+
+### Added
+- `sdi bypass arm | disarm | status` — emergency hook-bypass marker is now a
+  first-class CLI verb. The previous on-disk surface (`touch
+  ~/.cache/sdi/bypass-once`) was self-deadlocking: the only way for the main
+  session to arm the marker was a mutating Bash call, which D21 already
+  blocked. `sdi` is on the D21 read-only Bash whitelist, so the new
+  subcommand is the substrate the main session can reach without delegation.
+  `arm` accepts `--reason "<text>"` (recorded in the marker body and the
+  hook's audit log) and `--ttl <seconds>` (default 60s — expired markers are
+  cleaned up but do NOT open the gate). `status` reports `armed | expired |
+  absent` with TTL remainder; `disarm` removes the marker idempotently. The
+  marker body shape is now `{reason, armed_at, expires_at, ttl_seconds}`;
+  legacy plain-text bodies from v0.1.4 stay readable for backward
+  compatibility.
+
+### Changed
+- One armed bypass marker now unlocks every mutating PreToolUse gate (D21
+  delegation, active-task, D29 claim overlap) in a single invocation.
+  Previously each gate had its own override surface — clearing one only to
+  hit the next was a fresh self-deadlock with extra steps. The marker is
+  still consumed exactly once per PreToolUse call regardless of how many
+  gates would have blocked, and each gate emits its own audit event
+  (`pre_tool_use_delegation_bypass`, `pre_tool_use_active_task_bypass`,
+  `pre_tool_use_claim_bypass`).
+- Hook deny messages across D21, active-task, and D29 now point at `sdi
+  bypass arm --reason "<short reason>"` as the recommended override surface.
+  `SDI_DELEGATION_BYPASS=1` and `SDI_BYPASS_HOOKS=1` remain as startup-time
+  env switches for shell-rc exports, but the deny messages no longer
+  advertise the `touch` substrate the main session can't reach.
+
+### Fixed
+- D21 emergency-bypass self-deadlock. The hook recommended `touch
+  ~/.cache/sdi/bypass-once` to arm the override, but that command is itself
+  mutating Bash — D21 blocked it from the main session, and the delegation
+  required to clear the gate was the same delegation the override was
+  supposed to bypass. The new `sdi bypass arm` verb breaks the loop: `sdi`
+  itself is unconditionally allowed by the D21 read-only Bash whitelist.
+
 ## [0.1.4] - 2026-05-29
 
 ### Fixed
@@ -97,6 +137,8 @@ Initial public release. Built `sdi` + `sdid` binaries (macOS + Linux ×
 x86_64 + aarch64) attached to the GitHub Release; the `dist` branch carries the
 plugin shell + binaries that Claude Code's marketplace pulls from.
 
+[0.2.0]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.2.0
+[0.1.4]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.4
 [0.1.3]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.3
 [0.1.2]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.2
 [0.1.1]: https://github.com/scenario-driven/sdi-plugin/releases/tag/v0.1.1
