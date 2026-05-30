@@ -53,6 +53,12 @@ async fn create(
         body: req.body,
         status: PlanStatus::Draft,
         version: 0,
+        // D23 — the plan shell is the root, with no work yet. Minting a
+        // `direct` sentinel at plan birth would mark every plan an
+        // anti-pattern before any work runs. Provenance is resolved lazily by
+        // the first solo-produced work entity (scenario/round/…); migration
+        // 009 back-fills this column for plans that already had solo work.
+        produced_via_pattern_id: None,
         approved_at: None,
         completed_at: None,
         created_at: now(),

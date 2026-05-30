@@ -7,6 +7,7 @@
 //! - `POST /scenarios/:id/claim`   — transition claim_status to `active`.
 //! - `POST /scenarios/:id/release` — transition claim_status to `released`.
 
+use crate::router::provenance;
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
 use axum::{
@@ -69,9 +70,17 @@ async fn create(
     State(state): State<AppState>,
     Json(b): Json<CreateScenarioBody>,
 ) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let plan_id = Id::from(b.plan_id);
+    // D23 — no pattern supplied means solo flow; resolve the plan's `direct`
+    // sentinel so provenance is never NULL.
+    let produced_via_pattern_id = Some(match b.produced_via_pattern_id {
+        Some(p) => p,
+        None => provenance::ensure_direct_pattern(&conn, &plan_id)?,
+    });
     let scenario = Scenario {
         id: Id::new(IdKind::Scenario),
-        plan_id: Id::from(b.plan_id),
+        plan_id,
         short_code: b.short_code,
         given: b.given,
         when_clause: b.when_clause,
@@ -88,11 +97,10 @@ async fn create(
         verified_by: b.verified_by,
         claimed_resources_json: b.claimed_resources_json.unwrap_or_else(|| "[]".into()),
         claim_status: ClaimStatus::None,
-        produced_via_pattern_id: b.produced_via_pattern_id,
+        produced_via_pattern_id,
         created_at: now(),
         updated_at: now(),
     };
-    let conn = state.conn()?;
     repo::insert(&conn, &scenario)?;
     let fresh = repo::get(&conn, &scenario.id)?;
     state.publish(EventEnvelope {

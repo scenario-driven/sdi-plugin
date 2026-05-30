@@ -9,6 +9,7 @@
 //!   `reversal_of` points at the original decision; the daemon's L5 unlock
 //!   gate is enforced here.
 
+use crate::router::provenance;
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
 use axum::{
@@ -96,9 +97,17 @@ async fn create(
     if let Some(plan) = b.reversal_plan.as_deref() {
         validate_reversal_plan_json(plan)?;
     }
+    let conn = state.conn()?;
+    let plan_id = Id::from(b.plan_id);
+    // D23 — a decision recorded outside any pattern (the solo / CLI case)
+    // resolves the plan's `direct` sentinel rather than carrying NULL.
+    let produced_via_pattern_id = Some(match b.produced_via_pattern_id {
+        Some(p) => p,
+        None => provenance::ensure_direct_pattern(&conn, &plan_id)?,
+    });
     let decision = Decision {
         id: Id::new(IdKind::Decision),
-        plan_id: Id::from(b.plan_id),
+        plan_id,
         short_code: b.short_code,
         title: b.title,
         body: b.body,
@@ -108,13 +117,12 @@ async fn create(
         proposal_id: b.proposal_id.map(Id::from),
         agent_name: b.agent_name,
         escalated_at,
-        produced_via_pattern_id: b.produced_via_pattern_id,
+        produced_via_pattern_id,
         reversal_plan: b.reversal_plan,
         blast_radius_score: b.blast_radius_score.unwrap_or(5),
         reversal_of: b.reversal_of.map(Id::from),
         created_at: now(),
     };
-    let conn = state.conn()?;
     repo::insert(&conn, &decision)?;
     let fresh = repo::get(&conn, &decision.id)?;
     let event_kind = match fresh.kind {
@@ -247,7 +255,10 @@ async fn rollback(
         proposal_id: None,
         agent_name: Some(b.agent_name.clone()),
         escalated_at: None,
-        produced_via_pattern_id: b.produced_via_pattern_id,
+        produced_via_pattern_id: Some(match b.produced_via_pattern_id {
+            Some(p) => p,
+            None => provenance::ensure_direct_pattern(&conn, &original.plan_id)?,
+        }),
         reversal_plan: Some(b.reversal_plan),
         blast_radius_score: score,
         reversal_of: Some(orig_id.clone()),

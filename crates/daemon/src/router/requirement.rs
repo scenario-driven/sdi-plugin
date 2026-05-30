@@ -1,6 +1,7 @@
 //! `/requirements` router. Body updates are SNAPSHOT-ONLY (D12) — they replace
 //! `body` in place; history lives in the Decision append-only log.
 
+use crate::router::provenance;
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
 use axum::{
@@ -43,17 +44,21 @@ async fn create(
     Json(b): Json<CreateReqBody>,
 ) -> ApiResult<Json<Value>> {
     validate_snapshot_body(&b.body)?;
+    let conn = state.conn()?;
+    let plan_id = Id::from(b.plan_id);
+    // D23 — solo authoring resolves the plan's `direct` sentinel.
+    let produced_via_pattern_id = Some(provenance::ensure_direct_pattern(&conn, &plan_id)?);
     let req = Requirement {
         id: Id::new(IdKind::Requirement),
-        plan_id: Id::from(b.plan_id),
+        plan_id,
         short_code: b.short_code,
         title: b.title,
         body: b.body,
         source: b.source,
+        produced_via_pattern_id,
         created_at: now(),
         updated_at: now(),
     };
-    let conn = state.conn()?;
     repo::insert(&conn, &req)?;
     let fresh = repo::get(&conn, &req.id)?;
     state.publish(EventEnvelope {

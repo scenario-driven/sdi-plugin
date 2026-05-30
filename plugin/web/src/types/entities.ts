@@ -82,6 +82,8 @@ export interface Plan {
   status: PlanStatus;
   approved_at?: string | null;
   completed_at?: string | null;
+  /** D23 — CollaborationPattern this plan was produced under (null until solo work back-fills it). */
+  produced_via_pattern_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -114,6 +116,8 @@ export interface Round {
   disruption_policy: DisruptionPolicy;
   activated_at?: string | null;
   completed_at?: string | null;
+  /** D23 — CollaborationPattern this round was produced under. */
+  produced_via_pattern_id?: string | null;
   created_at: string;
 }
 
@@ -149,6 +153,8 @@ export interface Task {
   parent_requirement_ids: string[];
   evidence?: TaskEvidence | null;
   evidence_at?: string | null;
+  /** D23 — CollaborationPattern this task was decomposed under. */
+  produced_via_pattern_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -158,6 +164,8 @@ export interface Requirement {
   plan_id: string;
   short_code: string;
   body: string;
+  /** D23 — CollaborationPattern this requirement was produced under. */
+  produced_via_pattern_id?: string | null;
   created_at: string;
   updated_at: string;
 }

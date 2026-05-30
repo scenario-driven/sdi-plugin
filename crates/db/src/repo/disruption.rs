@@ -197,6 +197,7 @@ mod tests {
             body: "".into(),
             status: PlanStatus::Active,
             version: 0,
+            produced_via_pattern_id: None,
             approved_at: Some(now()),
             completed_at: None,
             created_at: now(),

@@ -3,6 +3,7 @@
 //! `done` transition is the only one that requires evidence (PRD §6.6) and is
 //! double-gated: domain `Task::check_transition` + repo `complete_with_evidence`.
 
+use crate::router::provenance;
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
 use axum::{
@@ -44,20 +45,26 @@ async fn create(
     State(state): State<AppState>,
     Json(b): Json<CreateTaskBody>,
 ) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let round_id = Id::from(b.round_id);
+    // D23 — the task's plan is resolved through its round; a task decomposed
+    // outside any pattern resolves that plan's `direct` sentinel.
+    let plan_id = round_repo::get(&conn, &round_id)?.plan_id;
+    let produced_via_pattern_id = Some(provenance::ensure_direct_pattern(&conn, &plan_id)?);
     let task = Task {
         id: Id::new(IdKind::Task),
-        round_id: Id::from(b.round_id),
+        round_id,
         short_code: b.short_code,
         description: b.description,
         status: TaskStatus::Todo,
         parent_scenario_ids: b.parent_scenario_ids.into_iter().map(Id::from).collect(),
         parent_requirement_ids: b.parent_requirement_ids.into_iter().map(Id::from).collect(),
         evidence: None,
+        produced_via_pattern_id,
         evidence_at: None,
         created_at: now(),
         updated_at: now(),
     };
-    let conn = state.conn()?;
     repo::insert(&conn, &task)?;
     let fresh = repo::get(&conn, &task.id)?;
     state.publish(EventEnvelope {

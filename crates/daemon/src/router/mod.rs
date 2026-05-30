@@ -18,6 +18,7 @@ pub mod knowledge;
 pub mod pattern;
 pub mod plan;
 pub mod project;
+pub mod provenance;
 pub mod requirement;
 pub mod round;
 pub mod run;

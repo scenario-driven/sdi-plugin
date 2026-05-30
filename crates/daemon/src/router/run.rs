@@ -23,6 +23,8 @@ use sdi_core::error::DomainError;
 use sdi_core::ids::{now, Id, IdKind};
 use sdi_core::run::{RelationKind, Run, RunResult, TaskRelation};
 use sdi_core::task::{Task, TaskStatus};
+use crate::router::provenance;
+use sdi_db::repo::round as round_repo;
 use sdi_db::repo::run as repo;
 use sdi_db::repo::task as task_repo;
 use serde::Deserialize;
@@ -192,6 +194,17 @@ async fn decompose(
         .map(Id::from)
         .unwrap_or_else(|| parent.round_id.clone());
 
+    // D23 — decomposed children stay within the parent's collaboration
+    // context: inherit its pattern. A legacy parent with no provenance falls
+    // back to the plan's `direct` sentinel.
+    let child_provenance = match &parent.produced_via_pattern_id {
+        Some(p) => p.clone(),
+        None => {
+            let plan_id = round_repo::get(&conn, &round_id)?.plan_id;
+            provenance::ensure_direct_pattern(&conn, &plan_id)?
+        }
+    };
+
     let mut created: Vec<Task> = Vec::with_capacity(b.subtasks.len());
     for child in b.subtasks {
         let t = Task {
@@ -211,6 +224,7 @@ async fn decompose(
                 .map(Id::from)
                 .collect(),
             evidence: None,
+            produced_via_pattern_id: Some(child_provenance.clone()),
             evidence_at: None,
             created_at: now(),
             updated_at: now(),

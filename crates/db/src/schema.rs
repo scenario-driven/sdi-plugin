@@ -30,6 +30,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         MIGRATION_007_V05_PATTERN_ENFORCEMENT,
     ),
     (8, "project metadata", MIGRATION_008_PROJECT_METADATA),
+    (
+        9,
+        "D23 direct-provenance back-fill",
+        MIGRATION_009_DIRECT_PROVENANCE_BACKFILL,
+    ),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -41,6 +46,8 @@ const MIGRATION_006_V04_MULTI_AGENT: &str = include_str!("./migrations/006_v04_m
 const MIGRATION_007_V05_PATTERN_ENFORCEMENT: &str =
     include_str!("./migrations/007_v05_pattern_enforcement.sql");
 const MIGRATION_008_PROJECT_METADATA: &str = include_str!("./migrations/008_project_metadata.sql");
+const MIGRATION_009_DIRECT_PROVENANCE_BACKFILL: &str =
+    include_str!("./migrations/009_direct_provenance_backfill.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {

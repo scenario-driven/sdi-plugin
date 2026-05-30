@@ -7,6 +7,7 @@
 //! - POST `/rounds/:id/results` — upsert one scenario verdict
 //!   (passing|failing|impacted|retired)
 
+use crate::router::provenance;
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
 use axum::{
@@ -67,6 +68,8 @@ async fn create(
     let conn = state.conn()?;
     let plan_id = Id::from(b.plan_id);
     let n = repo::next_round_number(&conn, &plan_id)?;
+    // D23 — a round opened outside any pattern resolves the `direct` sentinel.
+    let produced_via_pattern_id = Some(provenance::ensure_direct_pattern(&conn, &plan_id)?);
     let round = Round {
         id: Id::new(IdKind::Round),
         plan_id,
@@ -76,6 +79,7 @@ async fn create(
         in_flight_policy,
         disruption_policy,
         status: RoundStatus::Planning,
+        produced_via_pattern_id,
         activated_at: None,
         completed_at: None,
         created_at: now(),
