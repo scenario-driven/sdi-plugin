@@ -48,10 +48,20 @@ export function TaskDetail({ taskId, onClose, refreshKey }: TaskDetailProps) {
           return list[0] ?? null;
         });
         if (!t) throw new Error('Task not found');
-        // Load round → plan → scenarios to surface parent scenario titles.
-        const allScenarios = await getJson<Scenario[]>(
-          `/scenarios?ids=${t.parent_scenario_ids.join(',')}`,
-        ).catch(() => [] as Scenario[]);
+        // Resolve each parent scenario by id. The daemon `/scenarios` list
+        // endpoint only accepts `plan_id`, so a per-id fetch against the
+        // canonical `/scenarios/:id` route is the contract that exists. A
+        // single missing scenario degrades to a placeholder row instead of
+        // blanking the whole panel.
+        const allScenarios = (
+          await Promise.all(
+            t.parent_scenario_ids.map((sid) =>
+              getJson<Scenario>(`/scenarios/${encodeURIComponent(sid)}`).catch(
+                () => null,
+              ),
+            ),
+          )
+        ).filter((s): s is Scenario => s !== null);
         if (cancelled) return;
         setTask(t);
         setScenarios(allScenarios);
@@ -167,9 +177,30 @@ export function TaskDetail({ taskId, onClose, refreshKey }: TaskDetailProps) {
             {task.parent_scenario_ids.map((sid) => {
               const s = scenarios.find((x) => x.id === sid);
               return (
-                <li key={sid} className="px-3 py-2 text-xs">
+                <li key={sid} className="px-3 py-2 text-xs space-y-1.5">
                   <span className="font-mono text-muted">{s?.short_code ?? sid}</span>
-                  {s && <span className="text-foreground ml-2">{s.when}</span>}
+                  {s ? (
+                    <dl className="space-y-1">
+                      {(
+                        [
+                          ['Given', s.given],
+                          ['When', s.when],
+                          ['Then', s.then],
+                        ] as const
+                      ).map(([label, value]) => (
+                        <div key={label} className="flex gap-2">
+                          <dt className="w-12 shrink-0 text-[10px] uppercase tracking-wide text-muted pt-px">
+                            {label}
+                          </dt>
+                          <dd className="flex-1 text-foreground whitespace-pre-wrap">
+                            {value}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : (
+                    <p className="text-muted italic">Scenario detail unavailable.</p>
+                  )}
                 </li>
               );
             })}

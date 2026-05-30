@@ -129,7 +129,28 @@ export function PatternTimeline({ planId, refreshKey, onSelect }: PatternTimelin
 
       {error && <p className="text-xs text-danger px-2">{error}</p>}
 
-      {filtered.length === 0 ? (
+      {patterns.length === 0 ? (
+        <div className="rounded-md border border-dashed border-border px-4 py-6 text-xs text-muted space-y-2">
+          <p className="text-foreground font-medium">
+            No collaboration patterns recorded for this plan yet.
+          </p>
+          <p>
+            A CollaborationPattern is logged whenever work runs under an
+            orchestration — run{' '}
+            <code className="font-mono text-foreground">/pattern</code> to
+            activate a <span className="font-mono">workflow</span>,{' '}
+            <span className="font-mono">graph</span>,{' '}
+            <span className="font-mono">swarm</span>, or{' '}
+            <span className="font-mono">agents-as-tools</span> pattern.
+          </p>
+          <p>
+            Work done solo is back-filled as a{' '}
+            <span className="font-mono text-danger">direct</span> anti-pattern
+            marker, so a fully populated timeline still reads honestly when no
+            multi-agent collaboration was used.
+          </p>
+        </div>
+      ) : filtered.length === 0 ? (
         <p className="text-xs italic text-muted px-2 py-6 text-center">
           No CollaborationPattern rows match the current filters.
         </p>
