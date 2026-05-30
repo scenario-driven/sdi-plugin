@@ -146,6 +146,10 @@ pub struct Round {
     pub in_flight_policy: InFlightPolicy,
     pub disruption_policy: DisruptionPolicy,
     pub status: RoundStatus,
+    /// D23 — pattern this round was produced under. NULL allowed for migrated
+    /// rows; daemon write paths backfill `direct` at creation.
+    #[serde(default)]
+    pub produced_via_pattern_id: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub activated_at: Option<Timestamp>,

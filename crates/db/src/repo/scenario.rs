@@ -271,6 +271,7 @@ mod tests {
             body: "".into(),
             status: PlanStatus::Draft,
             version: 0,
+            produced_via_pattern_id: None,
             approved_at: None,
             completed_at: None,
             created_at: now(),

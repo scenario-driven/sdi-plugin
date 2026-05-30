@@ -107,6 +107,10 @@ pub struct Task {
     pub parent_scenario_ids: Vec<Id>,
     pub parent_requirement_ids: Vec<Id>,
     pub evidence: Option<TaskEvidence>,
+    /// D23 — pattern this task was produced under. NULL allowed for migrated
+    /// rows; daemon write paths backfill `direct` at creation.
+    #[serde(default)]
+    pub produced_via_pattern_id: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub evidence_at: Option<Timestamp>,
@@ -161,6 +165,7 @@ mod tests {
             parent_scenario_ids: vec![],
             parent_requirement_ids: vec![],
             evidence: None,
+            produced_via_pattern_id: None,
             created_at: crate::ids::now(),
             updated_at: crate::ids::now(),
             evidence_at: None,

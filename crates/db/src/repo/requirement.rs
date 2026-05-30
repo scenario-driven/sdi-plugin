@@ -2,7 +2,7 @@
 //! overwrites in place; history is captured via the linked Decision log.
 
 use crate::map_sqlite_err;
-use crate::repo::{fmt_ts, s, ts};
+use crate::repo::{fmt_ts, s, s_opt, ts};
 use rusqlite::{params, Connection, Row};
 use sdi_core::error::{DomainError, DomainResult};
 use sdi_core::ids::{now, Id};
@@ -18,14 +18,16 @@ fn row_to_req(row: &Row<'_>) -> rusqlite::Result<Requirement> {
         source: s(row, 5)?,
         created_at: ts(row, 6)?,
         updated_at: ts(row, 7)?,
+        produced_via_pattern_id: s_opt(row, 8)?,
     })
 }
 
-const COLS: &str = "id, plan_id, short_code, title, body, source, created_at, updated_at";
+const COLS: &str =
+    "id, plan_id, short_code, title, body, source, created_at, updated_at, produced_via_pattern_id";
 
 pub fn insert(conn: &Connection, req: &Requirement) -> DomainResult<()> {
     conn.execute(
-        &format!("INSERT INTO requirements({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"),
+        &format!("INSERT INTO requirements({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
         params![
             req.id.as_str(),
             req.plan_id.as_str(),
@@ -35,6 +37,7 @@ pub fn insert(conn: &Connection, req: &Requirement) -> DomainResult<()> {
             req.source,
             fmt_ts(req.created_at),
             fmt_ts(req.updated_at),
+            req.produced_via_pattern_id,
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -141,6 +144,7 @@ mod tests {
             body: "".into(),
             status: PlanStatus::Draft,
             version: 0,
+            produced_via_pattern_id: None,
             approved_at: None,
             completed_at: None,
             created_at: now(),
@@ -161,6 +165,7 @@ mod tests {
             title: "A".into(),
             body: "v1".into(),
             source: "snapshot".into(),
+            produced_via_pattern_id: None,
             created_at: now(),
             updated_at: now(),
         };

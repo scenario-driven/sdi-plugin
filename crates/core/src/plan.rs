@@ -49,6 +49,10 @@ pub struct Plan {
     pub status: PlanStatus,
     /// Increments on each update — optimistic concurrency.
     pub version: i64,
+    /// D23 — pattern this plan was produced under. NULL allowed for migrated
+    /// rows and plans with no solo work; daemon write paths backfill `direct`.
+    #[serde(default)]
+    pub produced_via_pattern_id: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub approved_at: Option<Timestamp>,

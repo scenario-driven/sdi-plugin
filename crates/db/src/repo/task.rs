@@ -3,7 +3,7 @@
 //! the SQL boundary (in addition to domain validation in `Task::check_transition`).
 
 use crate::map_sqlite_err;
-use crate::repo::{fmt_ts, json, parsed, s, ts, ts_opt};
+use crate::repo::{fmt_ts, json, parsed, s, s_opt, ts, ts_opt};
 use rusqlite::{params, Connection, Row};
 use sdi_core::error::{DomainError, DomainResult};
 use sdi_core::ids::{now, Id};
@@ -29,10 +29,11 @@ fn row_to_task(row: &Row<'_>) -> rusqlite::Result<Task> {
         evidence_at: ts_opt(row, 8)?,
         created_at: ts(row, 9)?,
         updated_at: ts(row, 10)?,
+        produced_via_pattern_id: s_opt(row, 11)?,
     })
 }
 
-const COLS: &str = "id, round_id, short_code, description, status, parent_scenario_ids, parent_requirement_ids, evidence, evidence_at, created_at, updated_at";
+const COLS: &str = "id, round_id, short_code, description, status, parent_scenario_ids, parent_requirement_ids, evidence, evidence_at, created_at, updated_at, produced_via_pattern_id";
 
 pub fn insert(conn: &Connection, task: &Task) -> DomainResult<()> {
     let parent_scn = serde_json::to_string(&task.parent_scenario_ids)
@@ -47,7 +48,7 @@ pub fn insert(conn: &Connection, task: &Task) -> DomainResult<()> {
         None => None,
     };
     conn.execute(
-        &format!("INSERT INTO tasks({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
+        &format!("INSERT INTO tasks({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
         params![
             task.id.as_str(),
             task.round_id.as_str(),
@@ -60,6 +61,7 @@ pub fn insert(conn: &Connection, task: &Task) -> DomainResult<()> {
             task.evidence_at.map(fmt_ts),
             fmt_ts(task.created_at),
             fmt_ts(task.updated_at),
+            task.produced_via_pattern_id,
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -228,6 +230,7 @@ mod tests {
             body: "".into(),
             status: PlanStatus::Active,
             version: 0,
+            produced_via_pattern_id: None,
             approved_at: Some(now()),
             completed_at: None,
             created_at: now(),
@@ -263,6 +266,7 @@ mod tests {
             in_flight_policy: InFlightPolicy::Pause,
             disruption_policy: DisruptionPolicy::NeedsReview,
             status: RoundStatus::Active,
+            produced_via_pattern_id: None,
             activated_at: Some(now()),
             completed_at: None,
             created_at: now(),
@@ -282,6 +286,7 @@ mod tests {
             parent_scenario_ids: parent_scn,
             parent_requirement_ids: vec![],
             evidence: None,
+            produced_via_pattern_id: None,
             evidence_at: None,
             created_at: now(),
             updated_at: now(),

@@ -1,7 +1,7 @@
 //! Plan repository — CRUD + status transitions enforced via domain check.
 
 use crate::map_sqlite_err;
-use crate::repo::{fmt_ts, parsed, s, ts, ts_opt};
+use crate::repo::{fmt_ts, parsed, s, s_opt, ts, ts_opt};
 use rusqlite::{params, Connection, Row};
 use sdi_core::error::{DomainError, DomainResult};
 use sdi_core::ids::{now, Id};
@@ -20,15 +20,16 @@ fn row_to_plan(row: &Row<'_>) -> rusqlite::Result<Plan> {
         completed_at: ts_opt(row, 8)?,
         created_at: ts(row, 9)?,
         updated_at: ts(row, 10)?,
+        produced_via_pattern_id: s_opt(row, 11)?,
     })
 }
 
 const COLS: &str =
-    "id, project_id, short_code, title, body, status, version, approved_at, completed_at, created_at, updated_at";
+    "id, project_id, short_code, title, body, status, version, approved_at, completed_at, created_at, updated_at, produced_via_pattern_id";
 
 pub fn insert(conn: &Connection, plan: &Plan) -> DomainResult<()> {
     conn.execute(
-        &format!("INSERT INTO plans({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
+        &format!("INSERT INTO plans({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
         params![
             plan.id.as_str(),
             plan.project_id.as_str(),
@@ -41,6 +42,7 @@ pub fn insert(conn: &Connection, plan: &Plan) -> DomainResult<()> {
             plan.completed_at.map(fmt_ts),
             fmt_ts(plan.created_at),
             fmt_ts(plan.updated_at),
+            plan.produced_via_pattern_id,
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -190,6 +192,7 @@ mod tests {
             body: "body".into(),
             status: PlanStatus::Draft,
             version: 0,
+            produced_via_pattern_id: None,
             approved_at: None,
             completed_at: None,
             created_at: now(),

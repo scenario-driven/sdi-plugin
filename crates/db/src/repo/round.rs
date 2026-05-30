@@ -28,14 +28,15 @@ fn row_to_round(row: &Row<'_>) -> rusqlite::Result<Round> {
         completed_at: ts_opt(row, 9)?,
         created_at: ts(row, 10)?,
         updated_at: ts(row, 11)?,
+        produced_via_pattern_id: s_opt(row, 12)?,
     })
 }
 
-const COLS: &str = "id, plan_id, short_code, round_number, mode, in_flight_policy, disruption_policy, status, activated_at, completed_at, created_at, updated_at";
+const COLS: &str = "id, plan_id, short_code, round_number, mode, in_flight_policy, disruption_policy, status, activated_at, completed_at, created_at, updated_at, produced_via_pattern_id";
 
 pub fn insert(conn: &Connection, round: &Round) -> DomainResult<()> {
     conn.execute(
-        &format!("INSERT INTO rounds({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
+        &format!("INSERT INTO rounds({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"),
         params![
             round.id.as_str(),
             round.plan_id.as_str(),
@@ -49,6 +50,7 @@ pub fn insert(conn: &Connection, round: &Round) -> DomainResult<()> {
             round.completed_at.map(fmt_ts),
             fmt_ts(round.created_at),
             fmt_ts(round.updated_at),
+            round.produced_via_pattern_id,
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -329,6 +331,7 @@ mod tests {
             body: "".into(),
             status: PlanStatus::Active,
             version: 0,
+            produced_via_pattern_id: None,
             approved_at: Some(now()),
             completed_at: None,
             created_at: now(),
@@ -368,6 +371,7 @@ mod tests {
             in_flight_policy: InFlightPolicy::Pause,
             disruption_policy: DisruptionPolicy::NeedsReview,
             status,
+            produced_via_pattern_id: None,
             activated_at: if status == RoundStatus::Planning {
                 None
             } else {

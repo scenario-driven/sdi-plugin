@@ -16,6 +16,10 @@ pub struct Requirement {
     /// How this requirement entered the plan ("snapshot" by default; "decision-rewrite"
     /// when a Decision rewrote the body).
     pub source: String,
+    /// D23 — pattern this requirement was produced under. NULL allowed for
+    /// migrated rows; daemon write paths backfill `direct` at creation.
+    #[serde(default)]
+    pub produced_via_pattern_id: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
