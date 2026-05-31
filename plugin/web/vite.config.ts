@@ -81,6 +81,9 @@ export default defineConfig(({ command }) => {
         '/knowledge':         { target: daemonUrl, changeOrigin: true },
         '/decisions':         { target: daemonUrl, changeOrigin: true },
         '/disruption-reviews':{ target: daemonUrl, changeOrigin: true },
+        '/patterns':          { target: daemonUrl, changeOrigin: true },
+        '/autonomy_policies': { target: daemonUrl, changeOrigin: true },
+        '/agent_notes':       { target: daemonUrl, changeOrigin: true },
         // /events is intentionally NOT proxied (SSE chunks get buffered).
       },
     },
