@@ -8,6 +8,69 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.4.0] - 2026-06-10
+
+### Fixed
+- **Live dashboard updates restored.** The daemon's `/events` SSE stream
+  named every event (`event: <kind>`), but the dashboard consumes the
+  stream via `EventSource.onmessage` — which only receives UNNAMED
+  (default `message`-type) events. The result was a permanently silent
+  live channel: task status changes never reflected without a manual
+  reload. Events are now sent unnamed; the `kind` field inside the JSON
+  envelope remains the dispatch key (GH dogfooding find). **Wire-shape
+  note:** consumers that dispatched on the SSE `event:` line must fall
+  back to the envelope's `kind` — `sdi-desktop` is updated accordingly
+  and accepts both shapes.
+- **D21 delegation gate is quote-aware** (#3). The read-only Bash check
+  treated metacharacters inside quoted arguments as shell operators, so
+  natural-language GWT clauses (`--given "a user (admin)…"`) and even the
+  gate's own escape hatch (`sdi bypass arm --reason "(…)"`) were blocked.
+  Quoted spans are now masked before operator detection (single quotes
+  fully inert; `$`/backtick stay live inside double quotes), pure fd
+  duplication (`2>&1`) is allowed, and chains split on unquoted
+  `&&`/`||`/`;`/`|` pass only when EVERY segment is whitelisted —
+  `ls && grep` passes, `sdi … && rm -rf` does not.
+- **`short_code` uniqueness is per-plan, as documented** (#2). The schema
+  declared a global single-column `UNIQUE` on seven entities
+  (plans / requirements / decisions / scenarios / rounds / tasks /
+  collaboration_patterns), so a fresh plan could not mint `SC-1` once any
+  other plan owned it. Migration 010 rebuilds the tables with composite
+  uniqueness — `(project_id, short_code)` for plans, `(plan_id,
+  short_code)` for the rest — and tasks gain a denormalized `plan_id`
+  column (backfilled through rounds) to carry the constraint. The 409
+  now names the conflicting scope ("short_code already used within this
+  plan") instead of leaking raw SQLite constraint text.
+- **Daemon zombie / liveness misread** (#1). `is_running` trusted
+  `kill(pid, 0)`, which is also true for a `<defunct>` zombie, so a
+  crashed daemon under a long-lived `sdi mcp` parent read as alive and
+  blocked restart. Liveness is now a TCP connect probe against the
+  daemon's port, and autostart double-forks so `sdid` reparents to
+  init(1) and can never become a zombie.
+- **Active-patterns badge counts the current project only.** The topbar
+  badge fetched the unscoped `/patterns/active` and summed rows from
+  every project in the database (12 shown while the open project's
+  Patterns view was empty). The badge is now project-scoped and counts
+  real orchestration only — permanently-active `direct` solo-flow
+  markers are excluded from the number and signaled by the red dot
+  instead.
+
+### Added
+- `GET /patterns/active?project_id=<PROJ-…>` — optional project scoping
+  (through plans) for the active-pattern listing. The unscoped form is
+  unchanged for hook gates and CLI consumers.
+- Detail drawer is drag-resizable from its left edge (parity with the
+  Clawket dashboard); width persists across sessions
+  (`localStorage["sdi.drawer.width"]`, min 360px).
+
+### Migration
+- Automatic, two steps on first daemon start under v0.4.0. Migration 010
+  rebuilds the seven `short_code` tables (existing rows were globally
+  unique, hence already unique in the narrower scopes — no data risk;
+  FTS5 mirrors are rebuilt and verified by `PRAGMA foreign_key_check`).
+  Migration 011 re-runs the idempotent D23 direct-provenance backfill to
+  repair rows created by pre-v0.4 daemons after migration 009 had
+  already been consumed.
+
 ## [0.3.0] - 2026-05-29
 
 ### Added
