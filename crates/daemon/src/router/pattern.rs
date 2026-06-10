@@ -155,11 +155,23 @@ async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>) -> ApiR
     Ok(Json(json!({ "patterns": payload })))
 }
 
-// ── GET /patterns/active ───────────────────────────────────────────────────
+// ── GET /patterns/active[?project_id=…] ────────────────────────────────────
 
-async fn list_active(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+#[derive(Debug, Deserialize)]
+struct ListActiveQuery {
+    /// Scope to one project (through plans). The dashboard badge passes this
+    /// so its count agrees with the project's Patterns view; hook gates and
+    /// CLI status keep the unscoped daemon-wide form.
+    #[serde(default)]
+    project_id: Option<String>,
+}
+
+async fn list_active(
+    State(state): State<AppState>,
+    Query(q): Query<ListActiveQuery>,
+) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
-    let rows = repo::list_active(&conn)?;
+    let rows = repo::list_active(&conn, q.project_id.as_deref())?;
     let payload: Vec<Value> = rows.iter().map(pattern_payload).collect();
     Ok(Json(json!({ "patterns": payload })))
 }

@@ -180,19 +180,47 @@ pub fn list_by_plan(conn: &Connection, plan_id: &Id) -> DomainResult<Vec<Pattern
     Ok(out)
 }
 
-/// All patterns currently in `lifecycle = 'active'`. Used by the daemon's
-/// PreToolUse hook surface (`/patterns/active`) for D26 integrity gates.
-pub fn list_active(conn: &Connection) -> DomainResult<Vec<PatternRow>> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {COLS} FROM collaboration_patterns \
-             WHERE lifecycle = 'active' ORDER BY created_at"
-        ))
-        .map_err(map_sqlite_err)?;
-    let rows = stmt.query_map([], row_to_pattern).map_err(map_sqlite_err)?;
+/// All patterns currently in `lifecycle = 'active'`, optionally scoped to a
+/// project (through plans). Used by the daemon's PreToolUse hook surface
+/// (`/patterns/active`) for D26 integrity gates, and — project-scoped — by
+/// the dashboard topbar badge, which must agree with the project's Patterns
+/// view rather than count rows from every project in the database.
+pub fn list_active(conn: &Connection, project_id: Option<&str>) -> DomainResult<Vec<PatternRow>> {
     let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(map_sqlite_err)?);
+    match project_id {
+        Some(pid) => {
+            let cols_qualified = COLS
+                .split(", ")
+                .map(|c| format!("cp.{c}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {cols_qualified} FROM collaboration_patterns cp \
+                     JOIN plans p ON p.id = cp.plan_id \
+                     WHERE cp.lifecycle = 'active' AND p.project_id = ?1 \
+                     ORDER BY cp.created_at"
+                ))
+                .map_err(map_sqlite_err)?;
+            let rows = stmt
+                .query_map([pid], row_to_pattern)
+                .map_err(map_sqlite_err)?;
+            for r in rows {
+                out.push(r.map_err(map_sqlite_err)?);
+            }
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {COLS} FROM collaboration_patterns \
+                     WHERE lifecycle = 'active' ORDER BY created_at"
+                ))
+                .map_err(map_sqlite_err)?;
+            let rows = stmt.query_map([], row_to_pattern).map_err(map_sqlite_err)?;
+            for r in rows {
+                out.push(r.map_err(map_sqlite_err)?);
+            }
+        }
     }
     Ok(out)
 }
@@ -336,9 +364,60 @@ mod tests {
         insert(&conn, &a).unwrap();
         insert(&conn, &b).unwrap();
         update_lifecycle(&conn, &Id::from(a.id.clone()), "active", None).unwrap();
-        let active = list_active(&conn).unwrap();
+        let active = list_active(&conn, None).unwrap();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].id, a.id);
+    }
+
+    // The dashboard badge passes project_id; patterns from other projects'
+    // plans must not leak into the count (the "badge says 12, list shows 0"
+    // dogfooding defect).
+    #[test]
+    fn list_active_scopes_to_project() {
+        let (pool, plan_a) = fixture();
+        let conn = pool.get().unwrap();
+        let pa = mk(&plan_a, "CP-a", "workflow");
+        insert(&conn, &pa).unwrap();
+        update_lifecycle(&conn, &Id::from(pa.id.clone()), "active", None).unwrap();
+
+        // Second project with its own plan + active pattern.
+        let proj_b = Project {
+            id: Id::new(IdKind::Project),
+            key: "TSB".into(),
+            name: "n".into(),
+            slug: format!("s-{}", ulid::Ulid::new()),
+            cwds: vec![],
+            description: None,
+            enabled: true,
+            wiki_paths: vec!["docs".into()],
+            created_at: now(),
+            updated_at: now(),
+        };
+        proj_repo::insert(&conn, &proj_b).unwrap();
+        let plan_b = Plan {
+            id: Id::new(IdKind::Plan),
+            project_id: proj_b.id.clone(),
+            short_code: format!("TSB-{}", ulid::Ulid::new()),
+            title: "v".into(),
+            body: "".into(),
+            status: PlanStatus::Draft,
+            version: 0,
+            produced_via_pattern_id: None,
+            approved_at: None,
+            completed_at: None,
+            created_at: now(),
+            updated_at: now(),
+        };
+        plan_repo::insert(&conn, &plan_b).unwrap();
+        let pb = mk(&plan_b.id, "CP-b", "swarm");
+        insert(&conn, &pb).unwrap();
+        update_lifecycle(&conn, &Id::from(pb.id.clone()), "active", None).unwrap();
+
+        let unscoped = list_active(&conn, None).unwrap();
+        assert_eq!(unscoped.len(), 2);
+        let scoped = list_active(&conn, Some(proj_b.id.as_str())).unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].id, pb.id);
     }
 
     #[test]
