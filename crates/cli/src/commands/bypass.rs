@@ -79,8 +79,7 @@ fn arm(marker: &PathBuf, args: BypassArmArgs) -> Result<()> {
 fn disarm(marker: &PathBuf) -> Result<()> {
     let existed = marker.exists();
     if existed {
-        fs::remove_file(marker)
-            .with_context(|| format!("remove marker {}", marker.display()))?;
+        fs::remove_file(marker).with_context(|| format!("remove marker {}", marker.display()))?;
     }
     println!(
         "{}",
@@ -103,26 +102,27 @@ fn status(marker: &PathBuf) -> Result<()> {
         );
         return Ok(());
     }
-    let raw = fs::read_to_string(marker)
-        .with_context(|| format!("read marker {}", marker.display()))?;
+    let raw =
+        fs::read_to_string(marker).with_context(|| format!("read marker {}", marker.display()))?;
     let parsed: Option<Value> = serde_json::from_str(&raw).ok();
     let now = Utc::now();
     if let Some(v) = parsed {
         let expires_at = v.get("expires_at").and_then(|x| x.as_str());
         let reason = v.get("reason").cloned().unwrap_or(Value::Null);
         let armed_at = v.get("armed_at").cloned().unwrap_or(Value::Null);
-        let (state, ttl_remaining) = match expires_at.and_then(|s| DateTime::parse_from_rfc3339(s).ok()) {
-            Some(exp) => {
-                let exp_utc = exp.with_timezone(&Utc);
-                if exp_utc <= now {
-                    ("expired", 0i64)
-                } else {
-                    ("armed", (exp_utc - now).num_seconds())
+        let (state, ttl_remaining) =
+            match expires_at.and_then(|s| DateTime::parse_from_rfc3339(s).ok()) {
+                Some(exp) => {
+                    let exp_utc = exp.with_timezone(&Utc);
+                    if exp_utc <= now {
+                        ("expired", 0i64)
+                    } else {
+                        ("armed", (exp_utc - now).num_seconds())
+                    }
                 }
-            }
-            // Marker JSON without a parseable expires_at — treat as armed-forever.
-            None => ("armed", -1),
-        };
+                // Marker JSON without a parseable expires_at — treat as armed-forever.
+                None => ("armed", -1),
+            };
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({

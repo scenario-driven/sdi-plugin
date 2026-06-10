@@ -91,16 +91,16 @@ async fn update(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    let obj = body.as_object().ok_or_else(|| {
-        DomainError::Validation("request body must be a JSON object".into())
-    })?;
+    let obj = body
+        .as_object()
+        .ok_or_else(|| DomainError::Validation("request body must be a JSON object".into()))?;
 
     let mut fields = repo::UpdateFields::default();
 
     if let Some(v) = obj.get("name") {
-        let s = v.as_str().ok_or_else(|| {
-            DomainError::Validation("`name` must be a string".into())
-        })?;
+        let s = v
+            .as_str()
+            .ok_or_else(|| DomainError::Validation("`name` must be a string".into()))?;
         if s.trim().is_empty() {
             return Err(DomainError::Validation("`name` must not be empty".into()).into());
         }
@@ -113,10 +113,9 @@ async fn update(
         } else if let Some(s) = v.as_str() {
             fields.description = Some(Some(s.to_string()));
         } else {
-            return Err(DomainError::Validation(
-                "`description` must be string or null".into(),
-            )
-            .into());
+            return Err(
+                DomainError::Validation("`description` must be string or null".into()).into(),
+            );
         }
     }
     if let Some(v) = obj.get("enabled") {
@@ -125,10 +124,9 @@ async fn update(
         } else if let Some(i) = v.as_i64() {
             i != 0
         } else {
-            return Err(DomainError::Validation(
-                "`enabled` must be boolean or integer".into(),
-            )
-            .into());
+            return Err(
+                DomainError::Validation("`enabled` must be boolean or integer".into()).into(),
+            );
         };
         fields.enabled = Some(b);
     }
@@ -158,10 +156,7 @@ async fn update(
     Ok(Json(json!(fresh)))
 }
 
-async fn disable(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn disable(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let pid = Id::from(id);
     repo::set_enabled(&conn, &pid, false)?;
@@ -174,10 +169,7 @@ async fn disable(
     Ok(Json(json!(fresh)))
 }
 
-async fn enable(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
+async fn enable(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let pid = Id::from(id);
     repo::set_enabled(&conn, &pid, true)?;
@@ -223,7 +215,9 @@ async fn delete_one(
         entity_id: Some(pid.to_string()),
         payload: serde_json::to_value(&project).unwrap_or(Value::Null),
     });
-    Ok(Json(json!({ "ok": true, "deleted": pid.to_string(), "forced": q.force })))
+    Ok(Json(
+        json!({ "ok": true, "deleted": pid.to_string(), "forced": q.force }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]

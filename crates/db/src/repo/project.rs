@@ -30,8 +30,8 @@ const SELECT_COLUMNS: &str =
     "id, key, name, slug, created_at, updated_at, description, enabled, wiki_paths_json";
 
 pub fn insert(conn: &Connection, project: &Project) -> DomainResult<()> {
-    let wiki_paths_json = serde_json::to_string(&project.wiki_paths)
-        .unwrap_or_else(|_| "[\"docs\"]".to_string());
+    let wiki_paths_json =
+        serde_json::to_string(&project.wiki_paths).unwrap_or_else(|_| "[\"docs\"]".to_string());
     conn.execute(
         "INSERT INTO projects(id, key, name, slug, created_at, updated_at, \
          description, enabled, wiki_paths_json) \
@@ -227,10 +227,7 @@ pub fn update_fields(conn: &Connection, id: &Id, fields: &UpdateFields) -> Domai
     vals.push(SqlValue::Text(fmt_ts(now())));
     vals.push(SqlValue::Text(id.to_string()));
 
-    let sql = format!(
-        "UPDATE projects SET {} WHERE id = ?",
-        sets.join(", "),
-    );
+    let sql = format!("UPDATE projects SET {} WHERE id = ?", sets.join(", "),);
     let n = conn
         .execute(&sql, params_from_iter(vals.iter()))
         .map_err(map_sqlite_err)?;
@@ -286,10 +283,7 @@ pub fn delete_cascade(conn: &mut Connection, id: &Id) -> DomainResult<()> {
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(map_sqlite_err)?;
     let n = tx
-        .execute(
-            "DELETE FROM projects WHERE id = ?1",
-            params![id.as_str()],
-        )
+        .execute("DELETE FROM projects WHERE id = ?1", params![id.as_str()])
         .map_err(map_sqlite_err)?;
     if n == 0 {
         // Roll back so the caller can surface NotFound without leaving a

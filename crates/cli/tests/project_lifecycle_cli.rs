@@ -61,9 +61,7 @@ fn make_project(h: &Harness, prefix: &str) -> String {
     let suffix = ulid::Ulid::new().to_string();
     let key = format!("{prefix}{}", &suffix[..4]);
     let slug = format!("{}-{}", prefix.to_lowercase(), &suffix[..6].to_lowercase());
-    let p = h.run_ok(&[
-        "project", "create", &key, "Lifecycle Test", "--slug", &slug,
-    ]);
+    let p = h.run_ok(&["project", "create", &key, "Lifecycle Test", "--slug", &slug]);
     p["id"].as_str().unwrap().to_string()
 }
 
@@ -73,23 +71,11 @@ fn project_update_handles_description_and_wiki_paths_patch_style() {
     let id = make_project(&h, "UPD");
 
     // Set description.
-    let v = h.run_ok(&[
-        "project",
-        "update",
-        &id,
-        "--description",
-        "first body",
-    ]);
+    let v = h.run_ok(&["project", "update", &id, "--description", "first body"]);
     assert_eq!(v["description"], "first body");
 
     // Update with --name only; description preserved.
-    let v = h.run_ok(&[
-        "project",
-        "update",
-        &id,
-        "--name",
-        "Renamed",
-    ]);
+    let v = h.run_ok(&["project", "update", &id, "--name", "Renamed"]);
     assert_eq!(v["name"], "Renamed");
     assert_eq!(v["description"], "first body");
 
@@ -108,7 +94,10 @@ fn project_update_handles_description_and_wiki_paths_patch_style() {
 
     // Empty --description clears.
     let v = h.run_ok(&["project", "update", &id, "--description", ""]);
-    assert!(v.get("description").is_none(), "expected description cleared");
+    assert!(
+        v.get("description").is_none(),
+        "expected description cleared"
+    );
 
     // No flags at all is a user error (no patch).
     let (code, _stdout, stderr) = h.run(&["project", "update", &id]);

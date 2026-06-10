@@ -145,15 +145,13 @@ pub async fn start(paths: &Paths) -> Result<u16> {
         //   - fork()  > 0  → intermediate: _exit(0) right away; the real parent
         //                      reaps it via child.wait() below (near-instant).
         unsafe {
-            cmd.pre_exec(|| {
-                match libc_fork() {
-                    -1 => Err(std::io::Error::last_os_error()),
-                    0 => {
-                        libc_setsid();
-                        Ok(())
-                    }
-                    _ => libc_exit(0),
+            cmd.pre_exec(|| match libc_fork() {
+                -1 => Err(std::io::Error::last_os_error()),
+                0 => {
+                    libc_setsid();
+                    Ok(())
                 }
+                _ => libc_exit(0),
             });
         }
     }

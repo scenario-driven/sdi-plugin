@@ -62,9 +62,11 @@ pub fn ensure_direct_pattern(conn: &PooledConn, plan_id: &Id) -> DomainResult<St
     match pattern_repo::insert(conn, &row) {
         Ok(()) => Ok(row.id),
         // Lost an insert race on the UNIQUE short_code; the winner is readable.
-        Err(DomainError::Conflict(_)) => pattern_repo::get_by_short_code(conn, plan_id, &short_code)?
-            .map(|p| p.id)
-            .ok_or(DomainError::NotFound(short_code)),
+        Err(DomainError::Conflict(_)) => {
+            pattern_repo::get_by_short_code(conn, plan_id, &short_code)?
+                .map(|p| p.id)
+                .ok_or(DomainError::NotFound(short_code))
+        }
         Err(e) => Err(e),
     }
 }

@@ -59,10 +59,7 @@ fn humanize_unique_violation(msg: &str) -> String {
     let Some(rest) = msg.strip_prefix("UNIQUE constraint failed: ") else {
         return msg.to_string();
     };
-    let cols: Vec<(&str, &str)> = rest
-        .split(", ")
-        .filter_map(|c| c.split_once('.'))
-        .collect();
+    let cols: Vec<(&str, &str)> = rest.split(", ").filter_map(|c| c.split_once('.')).collect();
     let Some((table, _)) = cols.first() else {
         return msg.to_string();
     };

@@ -12,6 +12,7 @@
 //!   POST /tasks/:id/lease  + /lease/heartbeat + /lease/release
 //!   GET  /tasks/stats                   status histogram
 
+use crate::router::provenance;
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
 use axum::{
@@ -23,7 +24,6 @@ use sdi_core::error::DomainError;
 use sdi_core::ids::{now, Id, IdKind};
 use sdi_core::run::{RelationKind, Run, RunResult, TaskRelation};
 use sdi_core::task::{Task, TaskStatus};
-use crate::router::provenance;
 use sdi_db::repo::round as round_repo;
 use sdi_db::repo::run as repo;
 use sdi_db::repo::task as task_repo;

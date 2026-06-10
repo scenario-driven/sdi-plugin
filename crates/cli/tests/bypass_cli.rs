@@ -102,7 +102,14 @@ fn bypass_status_reports_absent_when_no_marker() {
 fn bypass_status_reports_armed_with_ttl_remainder() {
     let home = fresh_home();
     let (code, _stdout, _stderr) = run(
-        &["bypass", "arm", "--reason", "checking status", "--ttl", "300"],
+        &[
+            "bypass",
+            "arm",
+            "--reason",
+            "checking status",
+            "--ttl",
+            "300",
+        ],
         &home,
     );
     assert_eq!(code, 0);

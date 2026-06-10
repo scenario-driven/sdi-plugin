@@ -110,7 +110,10 @@ async fn project_update_patch_style_handles_each_field_independently() {
         .await
         .unwrap();
     let v: Value = r.json().await.unwrap();
-    assert!(v.get("description").is_none(), "description should be cleared");
+    assert!(
+        v.get("description").is_none(),
+        "description should be cleared"
+    );
 
     // PUT { wiki_paths: ["docs", "wiki", "/abs/path"] } replaces array.
     let r = c
