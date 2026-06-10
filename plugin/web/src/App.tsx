@@ -93,6 +93,17 @@ type SseAction =
   | { type: 'task:delete'; payload: { id: string } }
   | { type: 'structural' };
 
+const DRAWER_WIDTH_KEY = 'sdi.drawer.width';
+const DRAWER_DEFAULT_WIDTH = 520;
+const DRAWER_MIN_WIDTH = 360;
+
+function clampDrawerWidth(width: number): number {
+  // Leave at least 24rem of main content visible; never collapse below the
+  // narrowest readable detail layout.
+  const max = Math.max(DRAWER_MIN_WIDTH, window.innerWidth - 384);
+  return Math.max(DRAWER_MIN_WIDTH, Math.min(max, width));
+}
+
 function sseReducer(state: SseState, action: SseAction): SseState {
   switch (action.type) {
     case 'task:patch': {
@@ -131,6 +142,48 @@ export function App() {
   const [sseState, dispatchSse] = useReducer(sseReducer, SSE_INITIAL);
   const [daemonHealthy, setDaemonHealthy] = useState(true);
   const [activePatterns, setActivePatterns] = useState<CollaborationPattern[]>([]);
+
+  // Detail drawer width — drag-resizable from its left edge (parity with the
+  // Clawket dashboard). Persisted across sessions.
+  const [drawerWidth, setDrawerWidth] = useState(() => {
+    const saved = localStorage.getItem(DRAWER_WIDTH_KEY);
+    const parsed = saved ? parseInt(saved, 10) : NaN;
+    return Number.isFinite(parsed) ? parsed : DRAWER_DEFAULT_WIDTH;
+  });
+  const isResizingDrawer = useRef(false);
+
+  useEffect(() => {
+    const onPointerMove = (e: PointerEvent) => {
+      if (!isResizingDrawer.current) return;
+      setDrawerWidth(clampDrawerWidth(window.innerWidth - e.clientX));
+    };
+    const onPointerUp = () => {
+      if (!isResizingDrawer.current) return;
+      isResizingDrawer.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      setDrawerWidth((w) => {
+        try {
+          localStorage.setItem(DRAWER_WIDTH_KEY, String(w));
+        } catch {
+          /* private mode / quota — ignore */
+        }
+        return w;
+      });
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+  }, []);
+
+  const startDrawerResize = useCallback(() => {
+    isResizingDrawer.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
 
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   /** Project id whose settings drawer is open; null = closed. Lifted to
@@ -273,14 +326,18 @@ export function App() {
     };
   }, []);
 
-  // Active CollaborationPattern badge — re-fetches on every structural SSE.
-  // Daemon emits `pattern_created` / `pattern_lifecycle` / `pattern_aborted`
-  // which all collapse to `structural` in our reducer.
+  // Active CollaborationPattern badge — re-fetches on every structural SSE
+  // and on project switch. Scoped to the selected project so the count agrees
+  // with the project's Patterns view instead of summing every project in the
+  // database. Daemon emits `pattern_created` / `pattern_lifecycle` /
+  // `pattern_aborted` which all collapse to `structural` in our reducer.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const rows = await listActivePatterns();
+        const rows = selectedProjectId
+          ? await listActivePatterns(selectedProjectId)
+          : [];
         if (!cancelled) setActivePatterns(rows);
       } catch {
         // Endpoint may be absent during partial daemon rollouts — fall back
@@ -291,8 +348,16 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [sseState.structuralSeq]);
+  }, [sseState.structuralSeq, selectedProjectId]);
 
+  // `direct` rows are solo-flow markers (D23 anti-pattern badge), permanently
+  // lifecycle-active by design — counting them as "active patterns" would
+  // inflate the number by one per solo plan forever. The count carries real
+  // orchestration; the red dot carries solo-flow presence.
+  const activeOrchestrationCount = useMemo(
+    () => activePatterns.filter((p) => p.kind !== 'direct').length,
+    [activePatterns],
+  );
   const hasDirectAnti = useMemo(
     () => activePatterns.some((p) => p.kind === 'direct'),
     [activePatterns],
@@ -411,7 +476,7 @@ export function App() {
           onOpenPalette={() => setPaletteOpen(true)}
           daemonHealthy={daemonHealthy}
           onReconnect={() => window.location.reload()}
-          activePatternCount={activePatterns.length}
+          activePatternCount={activeOrchestrationCount}
           hasDirectAnti={hasDirectAnti}
           onOpenPatterns={() => setActiveView('patterns')}
         />
@@ -424,8 +489,24 @@ export function App() {
           >
             <div className="min-w-0 flex-1">{mainBody}</div>
             {drawerContent && (
-              <aside className="w-[520px] shrink-0 overflow-auto bg-surface animate-slide-in">
-                {drawerContent}
+              <aside
+                data-testid="detail-drawer"
+                className="relative shrink-0 bg-surface animate-slide-in flex"
+                style={{ width: `${drawerWidth}px` }}
+              >
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize detail panel"
+                  data-testid="drawer-resize-handle"
+                  onPointerDown={startDrawerResize}
+                  className={cn(
+                    'w-1 hover:w-1.5 shrink-0 cursor-col-resize',
+                    'bg-transparent hover:bg-primary/30 transition-colors',
+                    'touch-none',
+                  )}
+                />
+                <div className="min-w-0 flex-1 overflow-auto">{drawerContent}</div>
               </aside>
             )}
           </div>

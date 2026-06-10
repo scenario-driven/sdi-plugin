@@ -192,9 +192,16 @@ export function listPatterns(planId: string): Promise<CollaborationPattern[]> {
   );
 }
 
-/** List patterns whose lifecycle is `active` (used by the header badge). */
-export function listActivePatterns(): Promise<CollaborationPattern[]> {
-  return getJson<CollaborationPattern[]>('/patterns/active');
+/** List patterns whose lifecycle is `active` (used by the header badge).
+ *  Pass `projectId` to scope through plans — the badge must agree with the
+ *  current project's Patterns view, not count rows from every project. */
+export function listActivePatterns(
+  projectId?: string,
+): Promise<CollaborationPattern[]> {
+  const suffix = projectId
+    ? `?project_id=${encodeURIComponent(projectId)}`
+    : '';
+  return getJson<CollaborationPattern[]>(`/patterns/active${suffix}`);
 }
 
 export function getPattern(id: string): Promise<CollaborationPattern> {
