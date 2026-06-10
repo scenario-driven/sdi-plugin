@@ -41,9 +41,43 @@ pub fn map_sqlite_err(err: rusqlite::Error) -> DomainError {
         rusqlite::Error::SqliteFailure(ref code, ref msg)
             if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE =>
         {
-            DomainError::Conflict(msg.clone().unwrap_or_else(|| "unique constraint".into()))
+            DomainError::Conflict(
+                msg.as_deref()
+                    .map(humanize_unique_violation)
+                    .unwrap_or_else(|| "unique constraint".into()),
+            )
         }
         other => DomainError::Validation(format!("sqlite: {other}")),
+    }
+}
+
+/// Translate SQLite's raw UNIQUE failure text ("UNIQUE constraint failed:
+/// scenarios.plan_id, scenarios.short_code") into a message that names the
+/// uniqueness scope, so a 409 tells the caller *where* the value collides
+/// instead of leaking constraint internals.
+fn humanize_unique_violation(msg: &str) -> String {
+    let Some(rest) = msg.strip_prefix("UNIQUE constraint failed: ") else {
+        return msg.to_string();
+    };
+    let cols: Vec<(&str, &str)> = rest
+        .split(", ")
+        .filter_map(|c| c.split_once('.'))
+        .collect();
+    let Some((table, _)) = cols.first() else {
+        return msg.to_string();
+    };
+    let names: Vec<&str> = cols.iter().map(|c| c.1).collect();
+    match names.as_slice() {
+        [scope, "short_code"] => {
+            let noun = match *scope {
+                "project_id" => "project",
+                "plan_id" => "plan",
+                other => other,
+            };
+            format!("{table}: short_code already used within this {noun}")
+        }
+        [single] => format!("{table}: {single} already exists"),
+        _ => format!("{table}: duplicate value for unique ({})", names.join(", ")),
     }
 }
 

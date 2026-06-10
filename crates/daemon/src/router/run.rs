@@ -194,15 +194,14 @@ async fn decompose(
         .map(Id::from)
         .unwrap_or_else(|| parent.round_id.clone());
 
+    let plan_id = round_repo::get(&conn, &round_id)?.plan_id;
+
     // D23 — decomposed children stay within the parent's collaboration
     // context: inherit its pattern. A legacy parent with no provenance falls
     // back to the plan's `direct` sentinel.
     let child_provenance = match &parent.produced_via_pattern_id {
         Some(p) => p.clone(),
-        None => {
-            let plan_id = round_repo::get(&conn, &round_id)?.plan_id;
-            provenance::ensure_direct_pattern(&conn, &plan_id)?
-        }
+        None => provenance::ensure_direct_pattern(&conn, &plan_id)?,
     };
 
     let mut created: Vec<Task> = Vec::with_capacity(b.subtasks.len());
@@ -210,6 +209,7 @@ async fn decompose(
         let t = Task {
             id: Id::new(IdKind::Task),
             round_id: round_id.clone(),
+            plan_id: plan_id.clone(),
             short_code: child.short_code,
             description: child.description,
             status: TaskStatus::Todo,

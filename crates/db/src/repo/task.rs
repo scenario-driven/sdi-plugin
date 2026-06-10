@@ -10,30 +10,31 @@ use sdi_core::ids::{now, Id};
 use sdi_core::task::{Task, TaskEvidence, TaskStatus};
 
 fn row_to_task(row: &Row<'_>) -> rusqlite::Result<Task> {
-    let evidence_raw: Option<String> = row.get(7)?;
+    let evidence_raw: Option<String> = row.get(8)?;
     let evidence = match evidence_raw {
         Some(raw) => Some(serde_json::from_str::<TaskEvidence>(&raw).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e))
+            rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(e))
         })?),
         None => None,
     };
     Ok(Task {
         id: Id::from(s(row, 0)?),
         round_id: Id::from(s(row, 1)?),
-        short_code: s(row, 2)?,
-        description: s(row, 3)?,
-        status: parsed::<TaskStatus>(row, 4)?,
-        parent_scenario_ids: json::<Vec<Id>>(row, 5)?,
-        parent_requirement_ids: json::<Vec<Id>>(row, 6)?,
+        plan_id: Id::from(s(row, 2)?),
+        short_code: s(row, 3)?,
+        description: s(row, 4)?,
+        status: parsed::<TaskStatus>(row, 5)?,
+        parent_scenario_ids: json::<Vec<Id>>(row, 6)?,
+        parent_requirement_ids: json::<Vec<Id>>(row, 7)?,
         evidence,
-        evidence_at: ts_opt(row, 8)?,
-        created_at: ts(row, 9)?,
-        updated_at: ts(row, 10)?,
-        produced_via_pattern_id: s_opt(row, 11)?,
+        evidence_at: ts_opt(row, 9)?,
+        created_at: ts(row, 10)?,
+        updated_at: ts(row, 11)?,
+        produced_via_pattern_id: s_opt(row, 12)?,
     })
 }
 
-const COLS: &str = "id, round_id, short_code, description, status, parent_scenario_ids, parent_requirement_ids, evidence, evidence_at, created_at, updated_at, produced_via_pattern_id";
+const COLS: &str = "id, round_id, plan_id, short_code, description, status, parent_scenario_ids, parent_requirement_ids, evidence, evidence_at, created_at, updated_at, produced_via_pattern_id";
 
 pub fn insert(conn: &Connection, task: &Task) -> DomainResult<()> {
     let parent_scn = serde_json::to_string(&task.parent_scenario_ids)
@@ -48,10 +49,11 @@ pub fn insert(conn: &Connection, task: &Task) -> DomainResult<()> {
         None => None,
     };
     conn.execute(
-        &format!("INSERT INTO tasks({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
+        &format!("INSERT INTO tasks({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"),
         params![
             task.id.as_str(),
             task.round_id.as_str(),
+            task.plan_id.as_str(),
             task.short_code,
             task.description,
             task.status.to_string(),
@@ -198,6 +200,7 @@ mod tests {
     fn fixture() -> (
         r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
         Id, /* round */
+        Id, /* plan */
         Id, /* scenario */
     ) {
         let tmp = std::env::temp_dir().join(format!(
@@ -259,7 +262,7 @@ mod tests {
         scn_repo::insert(&conn, &scn).unwrap();
         let rnd = Round {
             id: Id::new(IdKind::Round),
-            plan_id: plan.id,
+            plan_id: plan.id.clone(),
             short_code: format!("R-{}", ulid::Ulid::new()),
             round_number: 1,
             mode: RoundMode::StrictRegression,
@@ -273,13 +276,14 @@ mod tests {
             updated_at: now(),
         };
         round_repo::insert(&conn, &rnd).unwrap();
-        (pool, rnd.id, scn.id)
+        (pool, rnd.id, plan.id, scn.id)
     }
 
-    fn mk_task(round_id: Id, parent_scn: Vec<Id>) -> Task {
+    fn mk_task(round_id: Id, plan_id: Id, parent_scn: Vec<Id>) -> Task {
         Task {
             id: Id::new(IdKind::Task),
             round_id,
+            plan_id,
             short_code: format!("TASK-{}", ulid::Ulid::new()),
             description: "wire CLI".into(),
             status: TaskStatus::Todo,
@@ -295,9 +299,9 @@ mod tests {
 
     #[test]
     fn roundtrip_insert_get_list() {
-        let (pool, round_id, scn_id) = fixture();
+        let (pool, round_id, plan_id, scn_id) = fixture();
         let conn = pool.get().unwrap();
-        let t = mk_task(round_id.clone(), vec![scn_id.clone()]);
+        let t = mk_task(round_id.clone(), plan_id, vec![scn_id.clone()]);
         insert(&conn, &t).unwrap();
         let got = get(&conn, &t.id).unwrap();
         assert_eq!(got.id, t.id);
@@ -308,9 +312,9 @@ mod tests {
 
     #[test]
     fn complete_with_evidence_writes_and_flips_status() {
-        let (pool, round_id, scn_id) = fixture();
+        let (pool, round_id, plan_id, scn_id) = fixture();
         let conn = pool.get().unwrap();
-        let mut t = mk_task(round_id, vec![scn_id.clone()]);
+        let mut t = mk_task(round_id, plan_id, vec![scn_id.clone()]);
         t.status = TaskStatus::InProgress;
         insert(&conn, &t).unwrap();
         let ev = TaskEvidence {
@@ -332,9 +336,9 @@ mod tests {
 
     #[test]
     fn complete_without_evidence_rejected() {
-        let (pool, round_id, _scn_id) = fixture();
+        let (pool, round_id, plan_id, _scn_id) = fixture();
         let conn = pool.get().unwrap();
-        let mut t = mk_task(round_id, vec![]);
+        let mut t = mk_task(round_id, plan_id, vec![]);
         t.status = TaskStatus::InProgress;
         insert(&conn, &t).unwrap();
         let empty = TaskEvidence::default();

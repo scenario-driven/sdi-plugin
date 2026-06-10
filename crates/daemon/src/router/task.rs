@@ -54,6 +54,7 @@ async fn create(
     let task = Task {
         id: Id::new(IdKind::Task),
         round_id,
+        plan_id,
         short_code: b.short_code,
         description: b.description,
         status: TaskStatus::Todo,

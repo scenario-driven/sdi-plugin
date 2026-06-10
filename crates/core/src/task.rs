@@ -101,6 +101,11 @@ impl TaskEvidence {
 pub struct Task {
     pub id: TaskId,
     pub round_id: Id,
+    /// Denormalized from `rounds.plan_id` at insert (a task never changes
+    /// round). Carries the per-plan `(plan_id, short_code)` UNIQUE that backs
+    /// the human ticket contract — SQLite cannot enforce it through the
+    /// round join.
+    pub plan_id: Id,
     pub short_code: String,
     pub description: String,
     pub status: TaskStatus,
@@ -159,6 +164,7 @@ mod tests {
         Task {
             id: Id::from("TASK-X"),
             round_id: Id::from("ROUND-X"),
+            plan_id: Id::from("PLAN-X"),
             short_code: "SDI-1".into(),
             description: "x".into(),
             status: TaskStatus::InProgress,
