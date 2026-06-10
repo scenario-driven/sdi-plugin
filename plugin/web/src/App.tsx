@@ -98,9 +98,9 @@ const DRAWER_DEFAULT_WIDTH = 520;
 const DRAWER_MIN_WIDTH = 360;
 
 function clampDrawerWidth(width: number): number {
-  // Leave at least 24rem of main content visible; never collapse below the
-  // narrowest readable detail layout.
-  const max = Math.max(DRAWER_MIN_WIDTH, window.innerWidth - 384);
+  // Overlay drawer: up to 90vw (Clawket parity), never below the narrowest
+  // readable detail layout.
+  const max = Math.max(DRAWER_MIN_WIDTH, window.innerWidth * 0.9);
   return Math.max(DRAWER_MIN_WIDTH, Math.min(max, width));
 }
 
@@ -481,17 +481,24 @@ export function App() {
           onOpenPatterns={() => setActiveView('patterns')}
         />
         <AppShell.Main>
-          <div
-            className={cn(
-              'flex h-full',
-              drawerContent ? 'divide-x divide-border' : '',
-            )}
-          >
-            <div className="min-w-0 flex-1">{mainBody}</div>
-            {drawerContent && (
+          <div className="h-full">{mainBody}</div>
+          {/* Detail drawer — an OVERLAY above the main content (parity with
+              the Clawket dashboard), never an inline panel that squeezes the
+              board. Backdrop click closes; the left edge drag-resizes. */}
+          {drawerContent && (
+            <>
+              <div
+                data-testid="drawer-backdrop"
+                className="fixed inset-0 z-40 bg-overlay transition-opacity"
+                onClick={() => setSelectedItem(null)}
+              />
               <aside
                 data-testid="detail-drawer"
-                className="relative shrink-0 bg-surface animate-slide-in flex"
+                className={cn(
+                  'fixed top-0 right-0 z-50 h-full max-w-[90vw]',
+                  'bg-surface shadow-2xl border-l border-border',
+                  'animate-slide-in flex',
+                )}
                 style={{ width: `${drawerWidth}px` }}
               >
                 <div
@@ -508,8 +515,8 @@ export function App() {
                 />
                 <div className="min-w-0 flex-1 overflow-auto">{drawerContent}</div>
               </aside>
-            )}
-          </div>
+            </>
+          )}
         </AppShell.Main>
       </AppShell.Content>
       {projectCreateOpen && (
