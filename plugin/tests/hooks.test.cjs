@@ -355,6 +355,80 @@ test('D21: PreToolUse allows main read-only Bash (git status) through delegation
   }
 });
 
+// isReadOnlyBash is quote-aware: metacharacters inside quoted arguments are
+// string content, not shell operators. The sdi CLI takes natural-language
+// arguments (GWT clauses, `--reason` text) by design, so without this the
+// gate blocks its own escape hatch (`sdi bypass arm --reason "(…)"`) and
+// ordinary scenario authoring — the structural defect behind GH issue #3.
+test('D21: isReadOnlyBash — quote-aware scan + chain handling', () => {
+  const { isReadOnlyBash } = require(SHARED)._internals;
+
+  // sdi CLI with metacharacters inside quotes (the original failure mode).
+  assert.equal(isReadOnlyBash('sdi scenario create --given "a user (admin) exists" --when "x" --then "y"'), true);
+  assert.equal(isReadOnlyBash("sdi bypass arm --reason '(claim overlap) manual fix'"), true);
+  assert.equal(isReadOnlyBash('sdi bypass arm --reason "fix D21 gate (hooks)"'), true);
+
+  // fd duplication is not a file redirect.
+  assert.equal(isReadOnlyBash('sdi daemon status 2>&1'), true);
+
+  // Read-only chains: every segment whitelisted → allowed.
+  assert.equal(isReadOnlyBash('ls plugin && grep -rn isReadOnlyBash plugin'), true);
+  assert.equal(isReadOnlyBash('grep -c foo file.txt | wc -l'), true);
+  assert.equal(isReadOnlyBash('git status; git log'), true);
+  assert.equal(isReadOnlyBash('sdi plan list && sdi task list'), true);
+
+  // Mixed chains: any non-whitelisted segment poisons the whole command.
+  assert.equal(isReadOnlyBash('sdi plan list && rm -rf /tmp/x'), false);
+  assert.equal(isReadOnlyBash('ls | xargs rm'), false);
+  assert.equal(isReadOnlyBash('git status; cargo build'), false);
+
+  // Substitution / redirection / subshell outside quotes still disqualify.
+  assert.equal(isReadOnlyBash('echo $(rm -rf /)'), false);
+  assert.equal(isReadOnlyBash('sdi bypass arm --reason "uses $(date)"'), false); // $ live in double quotes
+  assert.equal(isReadOnlyBash("sdi bypass arm --reason '$(date) is inert here'"), true); // inert in single quotes
+  assert.equal(isReadOnlyBash('echo `whoami`'), false);
+  assert.equal(isReadOnlyBash('cat foo > bar'), false);
+  assert.equal(isReadOnlyBash('grep x < input'), false);
+  assert.equal(isReadOnlyBash('(ls)'), false);
+
+  // Background execution and unbalanced quotes disqualify.
+  assert.equal(isReadOnlyBash('ls &'), false);
+  assert.equal(isReadOnlyBash('sdi scenario create --given "unbalanced'), false);
+
+  // Pre-existing verb rules unchanged.
+  assert.equal(isReadOnlyBash('git status'), true);
+  assert.equal(isReadOnlyBash('git push'), false);
+  assert.equal(isReadOnlyBash('cargo check'), true);
+  assert.equal(isReadOnlyBash('cargo build'), false);
+  assert.equal(isReadOnlyBash('find . -name "*.rs"'), true);
+  assert.equal(isReadOnlyBash('find . -name "*.rs" -delete'), false);
+  assert.equal(isReadOnlyBash('find . -name "-delete"'), false); // find acts on args regardless of quoting
+  assert.equal(isReadOnlyBash('rm -rf /'), false);
+});
+
+test('D21: PreToolUse allows sdi CLI with quoted metachars through delegation gate', async () => {
+  const home = mkTempHome('sdi-d21-quoted');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Bash',
+        tool_input: { command: 'sdi bypass arm --reason "fix D21 gate (hooks)"' },
+      }),
+    );
+    assert.equal(r.status, 0);
+    assert.doesNotMatch(r.stdout, /D21 delegation gate/, 'quoted metachars must not read as operators');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('D21: PreToolUse rejects unregistered sub-agent (rogue-specialist)', async () => {
   const home = mkTempHome('sdi-d21-rogue');
   const { server, port } = await startMockSdiDaemon();

@@ -601,18 +601,67 @@ function isExecutionTool(toolName) {
   return /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(toolName);
 }
 
-// Read-only Bash whitelist. Conservative on purpose: shell metacharacters
-// (`;`, `&`, `|`, `<`, `>`, `` ` ``, `$`, `(`, `)`) disqualify the command —
-// compound or substituting commands must go through a specialist. The verb
-// (first token) must match an allow-list, and verb-specific subcommand
-// restrictions apply (e.g. `cargo check` allowed, `cargo build` not — builds
-// produce artifacts and should be delegated to test-runner).
-function isReadOnlyBash(cmd) {
-  if (!cmd || typeof cmd !== 'string') return false;
-  const trimmed = cmd.trim();
+// Read-only Bash whitelist. Conservative on purpose, but quote-aware: the
+// sdi CLI takes natural-language arguments (GWT clauses, `--reason` text) by
+// design, so metacharacters inside quoted strings must NOT read as shell
+// operators — otherwise the gate blocks its own escape hatch (`sdi bypass
+// arm --reason "(…)"`) and ordinary scenario authoring. The rules:
+//   1. Quoted spans are masked first. Single-quoted content is fully inert;
+//      double-quoted content stays live for `$` and backtick because the
+//      shell still expands those inside double quotes.
+//   2. Substitution / redirection / subshell metacharacters (`$`, backtick,
+//      `<`, `>`, `(`, `)`) outside quotes disqualify the whole command. The
+//      one exception is pure fd duplication (`2>&1`, `>&2`) — no file is
+//      touched, and agents append it to read-only commands routinely.
+//   3. Chains split on unquoted `&&` / `||` / `;` / `|`. The command is
+//      read-only iff EVERY segment's verb passes the whitelist — `ls &&
+//      grep …` passes, `sdi … && rm -rf` does not. A lone `&` (background)
+//      disqualifies.
+//   4. Unbalanced quoting disqualifies — we cannot reason about the command.
+
+// Mask quoted spans in-place (same length, so indices stay aligned with the
+// original string). Returns null on unbalanced quotes.
+function maskQuotedSpans(cmd) {
+  const out = cmd.split('');
+  let state = 'plain'; // 'plain' | 'single' | 'double'
+  let i = 0;
+  while (i < cmd.length) {
+    const c = cmd[i];
+    if (state === 'plain') {
+      if (c === '\\' && i + 1 < cmd.length) {
+        out[i] = '_';
+        out[i + 1] = '_';
+        i += 2;
+        continue;
+      }
+      if (c === "'") state = 'single';
+      else if (c === '"') state = 'double';
+    } else if (state === 'single') {
+      if (c === "'") state = 'plain';
+      else out[i] = '_';
+    } else {
+      // double-quoted: `$` and backtick keep their meta meaning, `\` escapes.
+      if (c === '\\' && i + 1 < cmd.length) {
+        out[i] = '_';
+        out[i + 1] = '_';
+        i += 2;
+        continue;
+      }
+      if (c === '"') state = 'plain';
+      else if (c !== '$' && c !== '`') out[i] = '_';
+    }
+    i += 1;
+  }
+  return state === 'plain' ? out.join('') : null;
+}
+
+// Per-segment verb whitelist. `segment` is the original (unmasked) text of
+// one chain segment — flag scans (e.g. find's -delete/-exec) must see the
+// real argument text, since find acts on its args regardless of how the
+// shell quoted them.
+function segmentIsReadOnly(segment) {
+  const trimmed = segment.trim();
   if (!trimmed) return false;
-  // Disallow any shell metacharacter that can chain, substitute, or redirect.
-  if (/[;&|<>`$()]/.test(trimmed)) return false;
   const tokens = trimmed.split(/\s+/);
   const verb = tokens[0];
   if (verb === 'git') {
@@ -642,11 +691,38 @@ function isReadOnlyBash(cmd) {
   // (e.g. `sdi project delete`) belongs in the daemon's confirmation prompt,
   // not in this verb whitelist. Without this exemption the main session
   // cannot bootstrap any workflow (the very first `sdi plan create` would
-  // be blocked), which is the bootstrap deadlock the v0.5 cleanup is fixing.
+  // be blocked), which is the bootstrap deadlock the v0.5 cleanup fixed.
+  // This also guarantees the contract behind BYPASS_ARM_HINT: a single
+  // `sdi bypass arm --reason '…'` command always clears this gate.
   if (verb === 'sdi' || verb === 'sdid') return true;
   return /^(ls|cat|head|tail|grep|rg|wc|file|which|pwd|echo|stat|env|printenv|date|uname|hostname|whoami|tree)$/.test(
     verb,
   );
+}
+
+function isReadOnlyBash(cmd) {
+  if (!cmd || typeof cmd !== 'string') return false;
+  const trimmed = cmd.trim();
+  if (!trimmed) return false;
+  const masked = maskQuotedSpans(trimmed);
+  if (masked === null) return false;
+  // Neutralise pure fd duplication (`2>&1`, `>&2`) before the operator scan —
+  // same-length replacement keeps indices aligned with the original.
+  const neutral = masked.replace(/\d*>&\d+/g, (m) => '_'.repeat(m.length));
+  // Substitution, redirection, and subshells are never read-only.
+  if (/[`$<>()]/.test(neutral)) return false;
+  // Split on chain operators; every segment must independently pass.
+  const segments = [];
+  let start = 0;
+  const opRe = /&&|\|\||;|\||&/g;
+  let m;
+  while ((m = opRe.exec(neutral)) !== null) {
+    if (m[0] === '&') return false; // background execution — not read-only
+    segments.push(trimmed.slice(start, m.index));
+    start = m.index + m[0].length;
+  }
+  segments.push(trimmed.slice(start));
+  return segments.every(segmentIsReadOnly);
 }
 
 // Claude Code dispatches plugin-namespaced agent types as "<plugin>:<bare>"
@@ -950,7 +1026,9 @@ async function runUserPromptSubmit(input) {
 // unlocks every mutating gate (D21 delegation, active-task, D29 claim
 // overlap) on the next invocation.
 const BYPASS_ARM_HINT =
-  'One-shot override (audited): `sdi bypass arm --reason "<short reason>"`. ' +
+  "One-shot override (audited): `sdi bypass arm --reason '<short reason>'`. " +
+  'Quote the reason (single quotes keep $, backticks, and parens inert); ' +
+  'run it as a single command — chained segments must each be read-only. ' +
   'Marker auto-expires in 60s (configurable via `--ttl`). ' +
   '`sdi bypass status` to inspect, `sdi bypass disarm` to clear.';
 
@@ -1349,6 +1427,7 @@ module.exports = {
   runSubagentStop: () => dispatchAsync(runSubagentStop),
   // Internals exposed for tests
   _internals: {
+    isReadOnlyBash,
     resolveSdiBin,
     resolveSdidBin,
     resolveWebDist,
