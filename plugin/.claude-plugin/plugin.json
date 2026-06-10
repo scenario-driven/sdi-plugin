@@ -1,0 +1,33 @@
+{
+  "name": "sdi",
+  "version": "0.4.1",
+  "description": "Scenario-Driven Implementation engine for Claude Code. Natural-language GWT scenarios as first-class citizens; LLM implements + verifies + auto-regresses.",
+  "author": {
+    "name": "SDI contributors"
+  },
+  "homepage": "https://github.com/scenario-driven/sdi-plugin",
+  "repository": "https://github.com/scenario-driven/sdi-plugin",
+  "license": "MIT",
+  "skillsList": [
+    {
+      "name": "sdi-overview",
+      "path": "./skills/sdi-overview/SKILL.md",
+      "description": "SDI orientation — entities, lifecycle, GWT discipline, regression model, evidence rules, MCP tool map, failure-code recovery"
+    },
+    {
+      "name": "sdi-scenario",
+      "path": "./skills/sdi-scenario/SKILL.md",
+      "description": "Natural-language → Given/When/Then converter for SDI scenarios; daemon enforces non-empty clauses"
+    },
+    {
+      "name": "sdi-round",
+      "path": "./skills/sdi-round/SKILL.md",
+      "description": "Create and activate SDI rounds; strict-regression default, in-flight task policy, disruption review, task auto-decomposition"
+    },
+    {
+      "name": "sdi-evidence",
+      "path": "./skills/sdi-evidence/SKILL.md",
+      "description": "Record structured TaskEvidence (code / test / ci / external / transcript) at task done"
+    }
+  ]
+}
