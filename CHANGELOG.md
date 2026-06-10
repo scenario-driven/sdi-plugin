@@ -8,6 +8,25 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.4.1] - 2026-06-10
+
+### Fixed
+- **Migration 011 crashed on databases holding runtime-minted `direct`
+  sentinels.** 011 guarded its sentinel INSERT by 009's deterministic id
+  scheme (`CP-DIRECT-<plan_id>`), but `ensure_direct_pattern` mints
+  runtime sentinels as `CP-<ulid>` — so a plan that already had a runtime
+  sentinel passed the guard and the INSERT collided with the
+  `(plan_id, short_code)` UNIQUE that migration 010 had just introduced,
+  aborting daemon startup (the migration rolled back cleanly; no data was
+  affected). 011 now resolves the solo-flow marker by its semantic key —
+  `(plan_id, kind = 'direct')` — regardless of id scheme, reuses an
+  existing runtime sentinel instead of duplicating it, and links
+  NULL-provenance rows to whichever sentinel the plan carries.
+  **v0.4.0 is marked pre-release**: any database that ever ran a
+  workspace daemon alongside the 0.3.0 plugin can hit the crash. Upgrade
+  straight to 0.4.1; databases where 0.4.0's migration succeeded are
+  unaffected (the outcomes converge).
+
 ## [0.4.0] - 2026-06-10
 
 ### Fixed

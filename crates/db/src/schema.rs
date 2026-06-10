@@ -337,6 +337,11 @@ mod tests {
         }
 
         // Two plans; the global UNIQUE means SC-1 can exist in only one.
+        // PLAN-A additionally carries a RUNTIME-minted direct sentinel
+        // (`CP-<ulid>` id scheme from ensure_direct_pattern, NOT 009/011's
+        // deterministic `CP-DIRECT-<plan_id>`) alongside a NULL-provenance
+        // scenario — the dogfooding shape that made the first cut of 011
+        // collide with 010's (plan_id, short_code) UNIQUE.
         let ts = "2026-01-01T00:00:00.000Z";
         conn.execute_batch(&format!(
             "INSERT INTO projects(id, key, name, slug, created_at, updated_at)
@@ -349,12 +354,42 @@ mod tests {
              INSERT INTO rounds(id, plan_id, short_code, round_number, status, created_at, updated_at)
                  VALUES ('ROUND-A1', 'PLAN-A', 'R-1', 1, 'active', '{ts}', '{ts}');
              INSERT INTO tasks(id, round_id, short_code, description, created_at, updated_at)
-                 VALUES ('TASK-A1', 'ROUND-A1', 'T-1', 'wire cli', '{ts}', '{ts}');"
+                 VALUES ('TASK-A1', 'ROUND-A1', 'T-1', 'wire cli', '{ts}', '{ts}');
+             INSERT INTO collaboration_patterns(id, short_code, plan_id, kind, applies_to, scope_id, depth, lifecycle, created_at, updated_at)
+                 VALUES ('CP-01RUNTIME', 'DIRECT-P-1', 'PLAN-A', 'direct', 'plan', 'PLAN-A', 0, 'active', '{ts}', '{ts}');"
         ))
         .unwrap();
 
-        // Apply 010 through the real runner.
+        // Apply 010 + 011 through the real runner.
         ensure_schema(&conn).unwrap();
+
+        // 011 reuses the runtime sentinel instead of minting a duplicate
+        // (which would violate the fresh (plan_id, short_code) UNIQUE) and
+        // links the NULL-provenance rows to it.
+        let direct_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM collaboration_patterns WHERE plan_id = 'PLAN-A' AND kind = 'direct'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(direct_count, 1, "011 must not duplicate a runtime sentinel");
+        let scn_prov: Option<String> = conn
+            .query_row(
+                "SELECT produced_via_pattern_id FROM scenarios WHERE id = 'SCN-A1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(scn_prov.as_deref(), Some("CP-01RUNTIME"));
+        let task_prov: Option<String> = conn
+            .query_row(
+                "SELECT produced_via_pattern_id FROM tasks WHERE id = 'TASK-A1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(task_prov.as_deref(), Some("CP-01RUNTIME"));
 
         // Rows survived; tasks.plan_id backfilled through the round join.
         let task_plan: String = conn

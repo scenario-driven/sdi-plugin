@@ -1286,7 +1286,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "sdi-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1309,7 +1309,7 @@ dependencies = [
 
 [[package]]
 name = "sdi-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "chrono",
  "serde",
@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "sdi-daemon"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1347,7 +1347,7 @@ dependencies = [
 
 [[package]]
 name = "sdi-db"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "chrono",
  "dirs",
@@ -1365,7 +1365,7 @@ dependencies = [
 
 [[package]]
 name = "sdi-mcp"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-trait",
