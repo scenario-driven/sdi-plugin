@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sdi": {
+      "command": "sdi",
+      "args": ["mcp"]
+    }
+  }
+}
