@@ -8,6 +8,16 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.4.2] - 2026-06-10
+
+### Changed
+- The detail drawer is now an **overlay** above the main content (Clawket
+  parity) instead of an inline panel that squeezed the board: fixed to
+  the right edge with a dimmed backdrop, click-outside closes, slide-in
+  animation, and the drag-resize handle from 0.4.0 carries over (width
+  still persists; max widens to 90vw now that no side-by-side layout
+  constrains it).
+
 ## [0.4.1] - 2026-06-10
 
 ### Fixed
