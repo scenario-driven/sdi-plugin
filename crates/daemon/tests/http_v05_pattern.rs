@@ -685,12 +685,17 @@ async fn sse_emits_all_v05_event_kinds() {
             .unwrap();
     });
 
+    // Events are UNNAMED (default `message` type): the kind travels inside
+    // the JSON envelope, which is what the dashboard's `onmessage` consumer
+    // dispatches on. A named event (`event: <kind>`) is delivered only to
+    // addEventListener('<kind>') listeners and silently starves onmessage —
+    // the live-update regression this asserts against.
     let needed: &[&str] = &[
-        "event: pattern_created",
-        "event: pattern_lifecycle",
-        "event: claim_status_changed",
-        "event: rollback_initiated",
-        "event: rollback_completed",
+        "\"kind\":\"pattern_created\"",
+        "\"kind\":\"pattern_lifecycle\"",
+        "\"kind\":\"claim_status_changed\"",
+        "\"kind\":\"rollback_initiated\"",
+        "\"kind\":\"rollback_completed\"",
     ];
     let mut buffer = String::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);

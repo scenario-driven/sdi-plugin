@@ -1,6 +1,13 @@
 //! SSE endpoint. `GET /events` streams every `EventEnvelope` the broadcaster
 //! emits, plus an initial `{"kind":"hello"}` so reconnecting clients know
 //! the channel is alive.
+//!
+//! Events are sent UNNAMED (default `message` type) on purpose: the web
+//! client consumes the stream via `EventSource.onmessage` and dispatches on
+//! the `kind` field inside the JSON envelope. A named event (`event: <kind>`)
+//! is delivered only to matching `addEventListener('<kind>')` listeners —
+//! naming events here silently starves `onmessage` and kills every live
+//! update in the dashboard.
 
 use crate::state::{AppState, EventEnvelope};
 use axum::{
@@ -19,7 +26,7 @@ pub async fn sse_handler(
     let rx = state.events.subscribe();
     let hello = stream::once(async {
         Ok::<_, Infallible>(
-            Event::default().event("hello").data(
+            Event::default().data(
                 serde_json::to_string(&EventEnvelope {
                     kind: "hello".into(),
                     entity_id: None,
@@ -31,9 +38,7 @@ pub async fn sse_handler(
     });
     let live = BroadcastStream::new(rx).filter_map(|res| match res {
         Ok(env) => Some(Ok::<_, Infallible>(
-            Event::default()
-                .event(env.kind.as_str())
-                .data(serde_json::to_string(&env).unwrap_or_else(|_| "{}".into())),
+            Event::default().data(serde_json::to_string(&env).unwrap_or_else(|_| "{}".into())),
         )),
         Err(_lagged) => None,
     });
