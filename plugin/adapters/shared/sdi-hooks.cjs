@@ -662,8 +662,66 @@ function maskQuotedSpans(cmd) {
 function segmentIsReadOnly(segment) {
   const trimmed = segment.trim();
   if (!trimmed) return false;
-  const tokens = trimmed.split(/\s+/);
+  const allTokens = trimmed.split(/\s+/);
+
+  // Strip leading inline env assignments (`VAR=val … cmd`) and judge the REAL
+  // verb — `FOO=bar sdi plan list` is fine, but `FOO=bar rm -rf /` is NOT, so
+  // an assignment prefix must not whitelist whatever follows it.
+  let i0 = 0;
+  while (i0 < allTokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(allTokens[i0])) i0 += 1;
+  const tokens = allTokens.slice(i0);
+  if (tokens.length === 0) return true; // pure assignment segment, no command
   const verb = tokens[0];
+
+  // Innocuous shell-state prefixes — change cwd or env, execute no payload and
+  // touch no file. The #4 PATH-setup idiom (`cd repo; export PATH=…; sdi …`)
+  // splits into these segments plus the payload verb, each judged on its own.
+  if (verb === 'cd' || verb === 'pushd' || verb === 'popd') return true;
+  if (verb === 'export' || verb === 'set' || verb === 'unset') {
+    return tokens.slice(1).every((t) => /^[A-Za-z_][A-Za-z0-9_]*(=.*)?$/.test(t));
+  }
+
+  // SDI management CLI. Recognise the bare token AND an absolute/relative path
+  // to the bundled binary (#4: delegated agents invoke `<plugin-cache>/bin/sdi`,
+  // not bare `sdi`, because the bundle is not on a fresh shell's PATH).
+  const base = verb.includes('/') ? verb.slice(verb.lastIndexOf('/') + 1) : verb;
+  if (base === 'sdi' || base === 'sdid') {
+    const sub = tokens[1] || '';
+    const action = tokens[2] || '';
+    // Task LIFECYCLE mutation is execution work (D3 — tasks are runtime
+    // artifacts the LLM decomposes, not orchestration). The main session may
+    // only READ tasks; create/start/complete/decompose/lease/… delegate to a
+    // specialist (scenario-decomposer, impl-coder, …).
+    if (sub === 'task') {
+      return /^(list|view|stats|ancestors|descendants|subtree|relations|lease-info|preflight|--help|-h)$/.test(
+        action,
+      );
+    }
+    // Everything else is orchestration the main session owns (D2): plan /
+    // scenario / round / decide / req authoring (the spec, per D5/D8), plus
+    // reads, daemon control, and the `bypass` escape hatch. Destructive ops
+    // (`sdi project delete`) are gated by the daemon's own confirmation
+    // prompt, not this verb whitelist.
+    return true;
+  }
+
+  // Read-only GitHub CLI (#4c / D3). Context-gathering reads only; any
+  // mutation (`gh issue create`, `gh pr merge`, `gh api -X POST`) delegates.
+  if (verb === 'gh') {
+    const sub = tokens[1] || '';
+    const action = tokens[2] || '';
+    if (sub === 'auth') return /^(status|token)$/.test(action);
+    if (sub === 'api') {
+      // Default method is GET; an explicit mutating -X/--method disqualifies.
+      return !/(^|\s)(-X|--method)[\s=]+(POST|PUT|PATCH|DELETE)\b/i.test(trimmed);
+    }
+    if (sub === 'browse') return true;
+    if (/^(repo|issue|pr|run|release|search|workflow|label|gist|cache|status|org)$/.test(sub)) {
+      return /^(list|view|status|diff|checks|download|ls|--help|-h)$/.test(action);
+    }
+    return false;
+  }
+
   if (verb === 'git') {
     return /^(status|log|diff|show|branch|remote|config|rev-parse|describe|ls-files|blame|tag)$/.test(
       tokens[1] || '',
@@ -683,21 +741,42 @@ function segmentIsReadOnly(segment) {
   if (verb === 'node') {
     return /^(--version|-v)$/.test(tokens[1] || '');
   }
-  // SDI's own management CLI (sdi / sdid) is exempt from D21 unconditionally.
-  // D21's purpose is to force coding/file-mutation work onto specialist
-  // sub-agents; SDI CLI invocations are workflow management against SDI's own
-  // SQLite (scenarios, plans, rounds, daemon control) — orthogonal to the
-  // delegation gate. Subcommand-level safety for destructive operations
-  // (e.g. `sdi project delete`) belongs in the daemon's confirmation prompt,
-  // not in this verb whitelist. Without this exemption the main session
-  // cannot bootstrap any workflow (the very first `sdi plan create` would
-  // be blocked), which is the bootstrap deadlock the v0.5 cleanup fixed.
-  // This also guarantees the contract behind BYPASS_ARM_HINT: a single
-  // `sdi bypass arm --reason '…'` command always clears this gate.
-  if (verb === 'sdi' || verb === 'sdid') return true;
-  return /^(ls|cat|head|tail|grep|rg|wc|file|which|pwd|echo|stat|env|printenv|date|uname|hostname|whoami|tree)$/.test(
+  return /^(ls|cat|head|tail|grep|rg|wc|file|which|pwd|echo|stat|env|printenv|date|uname|hostname|whoami|tree|jq|sort|uniq|cut|comm|column|basename|dirname|realpath|readlink|true|test)$/.test(
     verb,
   );
+}
+
+// Quote-aware detector for command/process substitution (`$(…)`, backtick,
+// `<(…)`, `>(…)`). These execute a nested command and are dangerous even
+// inside double quotes. A bare `$VAR` / `${VAR}` is NOT substitution and is
+// not flagged. Single-quoted spans are fully inert.
+function hasCommandSubstitution(cmd) {
+  let state = 'plain'; // 'plain' | 'single' | 'double'
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    const n = cmd[i + 1];
+    if (state === 'single') {
+      if (c === "'") state = 'plain';
+      continue;
+    }
+    if (c === '\\') {
+      i += 1; // skip the escaped char (in plain and double states)
+      continue;
+    }
+    if (state === 'double') {
+      if (c === '"') state = 'plain';
+      else if (c === '`') return true;
+      else if (c === '$' && n === '(') return true;
+      continue;
+    }
+    // plain
+    if (c === "'") state = 'single';
+    else if (c === '"') state = 'double';
+    else if (c === '`') return true;
+    else if (c === '$' && n === '(') return true;
+    else if ((c === '<' || c === '>') && n === '(') return true;
+  }
+  return false;
 }
 
 function isReadOnlyBash(cmd) {
@@ -705,12 +784,26 @@ function isReadOnlyBash(cmd) {
   const trimmed = cmd.trim();
   if (!trimmed) return false;
   const masked = maskQuotedSpans(trimmed);
-  if (masked === null) return false;
-  // Neutralise pure fd duplication (`2>&1`, `>&2`) before the operator scan —
-  // same-length replacement keeps indices aligned with the original.
-  const neutral = masked.replace(/\d*>&\d+/g, (m) => '_'.repeat(m.length));
-  // Substitution, redirection, and subshells are never read-only.
-  if (/[`$<>()]/.test(neutral)) return false;
+  if (masked === null) return false; // unbalanced quotes
+  // Command/process substitution is dangerous even INSIDE double quotes (the
+  // shell expands `$(…)` and backticks there), and maskQuotedSpans masks the
+  // `(` of `$(` inside double quotes — so detect substitution on a separate
+  // quote-aware walk. A BARE `$VAR` / `${VAR}` expansion is NOT flagged (no
+  // execution), which lets the `export PATH="$P/bin:$PATH"` idiom survive (#4).
+  if (hasCommandSubstitution(trimmed)) return false;
+  // Same-length replacements keep indices aligned with the original.
+  let neutral = masked;
+  // Discarding redirects (`>/dev/null`, `2>/dev/null`, `&>/dev/null`,
+  // `>>/dev/null`) touch no real file — agents append them to read-only
+  // commands routinely (#10).
+  neutral = neutral.replace(/(\d*|&)>>?\s*\/dev\/null/g, (m) => '_'.repeat(m.length));
+  // Pure fd duplication (`2>&1`, `>&2`).
+  neutral = neutral.replace(/(\d*|&)>&\d+/g, (m) => '_'.repeat(m.length));
+  // Unquoted backticks / parens that survived masking are subshell grouping or
+  // substitution (quoted ones were masked away).
+  if (/[`()]/.test(neutral)) return false;
+  // Any remaining real redirect (to a file) reads/writes the filesystem.
+  if (/[<>]/.test(neutral)) return false;
   // Split on chain operators; every segment must independently pass.
   const segments = [];
   let start = 0;
@@ -736,27 +829,70 @@ function normalizeAgentType(value) {
   return i >= 0 ? value.slice(i + 1) : value;
 }
 
-const _agentRegistryCache = new Map();
-function loadAgentSpecRegistry(root) {
-  if (_agentRegistryCache.has(root)) return _agentRegistryCache.get(root);
-  const result = new Set();
-  const dir = path.join(root, 'agents');
+// Agent registry — read from THREE roots so a user-defined specialist is
+// recognised without copying it into the plugin tree (#4/#11):
+//   1. <cwd>/.claude/agents      — project-local (team-shared, version-ctl)
+//   2. ~/.claude/agents          — user-level (all projects)
+//   3. <pluginRoot>/agents       — SDI built-in specialists
+// These are exactly Claude Code's own subagent discovery roots (per the
+// official docs) minus the session/managed scopes the hook cannot see, so a
+// `name` Claude Code can spawn is a `name` this registry recognises.
+//
+// Cache is invalidated by directory mtime: adding/removing an agent file is
+// picked up without restarting the long-lived hook process (the previous
+// permanent cache never noticed new registrations).
+function agentRegistryRoots(cwd) {
+  const roots = [];
+  if (cwd) roots.push(path.join(cwd, '.claude', 'agents'));
+  roots.push(path.join(os.homedir(), '.claude', 'agents'));
+  roots.push(path.join(pluginRoot(), 'agents'));
+  return roots;
+}
+
+const _agentDirCache = new Map(); // dir → { mtimeMs, names: Set }
+function loadAgentNamesFromDir(dir) {
+  let mtimeMs = 0;
   try {
-    if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
-      for (const entry of fs.readdirSync(dir)) {
-        if (!entry.endsWith('.md')) continue;
-        try {
-          const raw = fs.readFileSync(path.join(dir, entry), 'utf8');
-          const fm = raw.match(/^---[\r\n]+([\s\S]*?)^---/m);
-          if (!fm) continue;
-          const nameMatch = fm[1].match(/^name:\s*(\S+)\s*$/m);
-          if (nameMatch) result.add(nameMatch[1]);
-        } catch {}
-      }
+    const st = fs.statSync(dir);
+    if (!st.isDirectory()) return new Set();
+    mtimeMs = st.mtimeMs;
+  } catch {
+    return new Set();
+  }
+  const cached = _agentDirCache.get(dir);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.names;
+  const names = new Set();
+  try {
+    for (const entry of fs.readdirSync(dir)) {
+      if (!entry.endsWith('.md')) continue;
+      try {
+        const raw = fs.readFileSync(path.join(dir, entry), 'utf8');
+        const fm = raw.match(/^---[\r\n]+([\s\S]*?)^---/m);
+        if (!fm) continue;
+        const nameMatch = fm[1].match(/^name:\s*(\S+)\s*$/m);
+        if (nameMatch) names.add(nameMatch[1]);
+      } catch {}
     }
   } catch {}
-  _agentRegistryCache.set(root, result);
-  return result;
+  _agentDirCache.set(dir, { mtimeMs, names });
+  return names;
+}
+
+// Is `bareType` registered in any of the three discovery roots?
+function isRegisteredAgent(bareType, cwd) {
+  for (const dir of agentRegistryRoots(cwd)) {
+    if (loadAgentNamesFromDir(dir).has(bareType)) return true;
+  }
+  return false;
+}
+
+// Union of all registered agent names across the three roots (for hints).
+function allRegisteredAgents(cwd) {
+  const all = new Set();
+  for (const dir of agentRegistryRoots(cwd)) {
+    for (const n of loadAgentNamesFromDir(dir)) all.add(n);
+  }
+  return all;
 }
 
 function emitDeny(reason) {
@@ -1079,7 +1215,7 @@ function emitBypassWarning(gate, toolName, bypass, extra) {
 async function runPreToolUse(input) {
   if (process.env[BYPASS_ENV] === '1') return;
   const toolName = (input && input.tool_name) || '';
-  const watched = /^(Edit|Write|MultiEdit|Bash|NotebookEdit|Agent|Task|TeamCreate|SendMessage)$/.test(toolName);
+  const watched = /^(Edit|Write|MultiEdit|Bash|Monitor|NotebookEdit|Agent|Task|TeamCreate|SendMessage)$/.test(toolName);
   if (!watched) return;
 
   // Project scope gate. SDI hooks only enforce gates inside cwds that resolve
@@ -1116,10 +1252,14 @@ async function runPreToolUse(input) {
   const agentId = (input && input.agent_id) || null;
   const agentType = (input && input.agent_type) || null;
   const isMain = !agentId;
-  if (isMain && (isExecutionTool(toolName) || toolName === 'Bash')) {
+  // Monitor runs an arbitrary shell command just like Bash, so it gets the
+  // same read-only check — otherwise it is a silent hole in the gate (#11: the
+  // paradox where the gate blocked honest work but left Monitor wide open).
+  const isShellTool = toolName === 'Bash' || toolName === 'Monitor';
+  if (isMain && (isExecutionTool(toolName) || isShellTool)) {
     let bashCmd = null;
     let blocked = true;
-    if (toolName === 'Bash') {
+    if (isShellTool) {
       bashCmd = String((input && input.tool_input && input.tool_input.command) || '');
       if (isReadOnlyBash(bashCmd)) {
         blocked = false;
@@ -1147,7 +1287,7 @@ async function runPreToolUse(input) {
         });
       } else {
         const reason = bashCmd != null
-          ? `[sdi] D21 delegation gate: main session may not run mutating Bash. ` +
+          ? `[sdi] D21 delegation gate: main session may not run a mutating ${toolName} command. ` +
             `Delegate to a specialist sub-agent via the Agent tool. ` +
             `cmd preview: "${bashCmd.slice(0, 80)}". ` +
             BYPASS_ARM_HINT
@@ -1164,23 +1304,30 @@ async function runPreToolUse(input) {
       }
     }
   }
-  // D21 — rogue specialist guard. Sub-agents must come from a registered spec.
+  // D21 — specialist registration is ADVISORY, not a hard block (#11). An
+  // unregistered agent_type (e.g. Claude Code's built-in `general-purpose`) is
+  // permitted to act at L3: it can read AND do execution work, but D26
+  // consensus autonomy (L4/L5) is structurally unreachable because that unlock
+  // requires a registered (AgentSpec.name, stance) tuple it lacks. The
+  // previous hard-deny was a deadlock — it blocked read-only Bash, the bypass
+  // marker, and Agent re-delegation, leaving an unregistered sub-agent with no
+  // escape hatch at all. Registration is read from three roots (project, user,
+  // plugin) so a user-defined specialist counts without living in the plugin.
   if (!isMain && agentType) {
-    const registry = loadAgentSpecRegistry(pluginRoot());
     const bareType = normalizeAgentType(agentType);
-    if (registry.size > 0 && !registry.has(bareType)) {
-      emitDeny(
-        `[sdi] D21 rogue-specialist: agent_type "${agentType}" is not registered in ` +
-          `plugin/agents/. Register an AgentSpec entry or use one of: ` +
-          `${Array.from(registry).sort().join(', ')}.`,
-      );
-      appendHookLog('pre_tool_use_blocked', {
+    if (!isRegisteredAgent(bareType, cwd)) {
+      appendHookLog('pre_tool_use_unregistered_agent', {
         tool: toolName,
-        reason: 'rogue-specialist',
+        reason: 'l3-autonomy-cap',
         agent_id: agentId,
         agent_type: agentType,
       });
-      return;
+      process.stderr.write(
+        `[sdi] note: agent_type "${agentType}" is unregistered — acting at L3 ` +
+          `(autonomy capped; register in .claude/agents or ~/.claude/agents to ` +
+          `unlock D26 consensus autonomy).\n`,
+      );
+      // No return — the agent proceeds through the normal gates below.
     }
   }
 
@@ -1211,8 +1358,8 @@ async function runPreToolUse(input) {
       });
     } else {
       emitDeny(
-        `[sdi] no active task — set one before mutating files. ` +
-          `Run \`sdi task list\` and \`sdi task update <TASK-ID> --status in_progress\`. ` +
+        `[sdi] no active task — pick one up before mutating files. ` +
+          `Run \`sdi task list\` then \`sdi task start <TASK-ID>\` (todo → in_progress). ` +
           BYPASS_ARM_HINT,
       );
       appendHookLog('pre_tool_use_blocked', { tool: toolName, reason: 'no-active-task' });

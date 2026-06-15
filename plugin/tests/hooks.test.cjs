@@ -321,6 +321,44 @@ test('D21: PreToolUse blocks main mutating Bash (rm)', async () => {
   }
 });
 
+// #11: Monitor runs an arbitrary shell command, so it is gated exactly like
+// Bash — a mutating Monitor command is denied (it used to be a silent hole).
+test('D21: PreToolUse gates main Monitor like Bash (#11 paradox)', async () => {
+  const home = mkTempHome('sdi-d21-monitor');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+    const mut = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Monitor',
+        tool_input: { command: 'while true; do rm -rf /tmp/x; done' },
+      }),
+    );
+    assert.equal(mut.status, 0, `stderr=${mut.stderr}`);
+    assert.match(mut.stdout, /permissionDecision.*deny/);
+    assert.match(mut.stdout, /D21 delegation gate/);
+    // A read-only Monitor (polling) passes the same gate.
+    const ro = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Monitor',
+        tool_input: { command: 'gh run list 2>/dev/null' },
+      }),
+    );
+    assert.equal(ro.status, 0, `stderr=${ro.stderr}`);
+    assert.doesNotMatch(ro.stdout, /D21 delegation gate/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('D21: PreToolUse allows main read-only Bash (git status) through delegation gate', async () => {
   const home = mkTempHome('sdi-d21-ro-bash');
   const { server, port } = await startMockSdiDaemon();
@@ -406,6 +444,53 @@ test('D21: isReadOnlyBash — quote-aware scan + chain handling', () => {
   assert.equal(isReadOnlyBash('rm -rf /'), false);
 });
 
+// #10 + #4: /dev/null redirects, the cd/export PATH idiom, sdi subcommand
+// split (plan/scenario/round/decide = main; task mutation = delegate),
+// absolute-path sdi, and read-only gh.
+test('D21: isReadOnlyBash — /dev/null, PATH idiom, sdi split, gh (#4/#10)', () => {
+  const { isReadOnlyBash } = require(SHARED)._internals;
+
+  // #10 — discarding redirects touch no file.
+  assert.equal(isReadOnlyBash('sdi plan list ID 2>/dev/null'), true);
+  assert.equal(isReadOnlyBash('sdi plan list ID 2>/dev/null || sdi plan list'), true);
+  assert.equal(isReadOnlyBash('cat foo.json >/dev/null 2>&1'), true);
+  assert.equal(isReadOnlyBash('ls dirA dirB'), true); // multi-arg
+  assert.equal(isReadOnlyBash('cat x.json; ls y/'), true);
+
+  // #4 — cd / export / VAR= prefixes + the PATH-setup idiom (bare $VAR is fine).
+  assert.equal(isReadOnlyBash('cd /repo'), true);
+  assert.equal(isReadOnlyBash('export PATH="$P/bin:$PATH"'), true);
+  assert.equal(isReadOnlyBash('cd /repo; export PATH="$P/bin:$PATH"; sdi plan create P SC-1'), true);
+  assert.equal(isReadOnlyBash('FOO=bar sdi plan list'), true); // env prefix stripped, real verb judged
+  assert.equal(isReadOnlyBash('FOO=bar rm -rf /'), false); // prefix must not whitelist the payload
+  assert.equal(isReadOnlyBash('FOO=bar'), true); // bare assignment segment
+
+  // #4 — sdi subcommand split: orchestration authoring allowed for main,
+  // task lifecycle mutation delegated.
+  assert.equal(isReadOnlyBash('sdi plan create P "title"'), true);
+  assert.equal(isReadOnlyBash('sdi scenario create P SC-1 --given g --when w --then t'), true);
+  assert.equal(isReadOnlyBash('sdi round activate ROUND-1'), true);
+  assert.equal(isReadOnlyBash('sdi decide create P --title t'), true);
+  assert.equal(isReadOnlyBash('sdi task list ROUND-1'), true); // read-only task
+  assert.equal(isReadOnlyBash('sdi task create ROUND-1 T-1 desc'), false); // task mutation → delegate
+  assert.equal(isReadOnlyBash('sdi task complete TASK-1 --evidence x'), false);
+  assert.equal(isReadOnlyBash('sdi bypass arm --reason "x"'), true);
+
+  // #4 — absolute/relative path to the bundled binary.
+  assert.equal(isReadOnlyBash('/home/u/.claude/plugins/cache/sdi/bin/sdi plan active P'), true);
+  assert.equal(isReadOnlyBash('/home/u/.claude/plugins/cache/sdi/bin/sdi task create R T d'), false);
+
+  // #4c — read-only gh; mutations delegate.
+  assert.equal(isReadOnlyBash('gh repo list scenario-driven --limit 10'), true);
+  assert.equal(isReadOnlyBash('gh issue view 12'), true);
+  assert.equal(isReadOnlyBash('gh pr checks 5'), true);
+  assert.equal(isReadOnlyBash('gh auth status'), true);
+  assert.equal(isReadOnlyBash('gh api repos/o/r/issues'), true); // default GET
+  assert.equal(isReadOnlyBash('gh api repos/o/r/issues -X POST'), false);
+  assert.equal(isReadOnlyBash('gh issue create --title x'), false);
+  assert.equal(isReadOnlyBash('gh pr merge 5'), false);
+});
+
 test('D21: PreToolUse allows sdi CLI with quoted metachars through delegation gate', async () => {
   const home = mkTempHome('sdi-d21-quoted');
   const { server, port } = await startMockSdiDaemon();
@@ -429,8 +514,13 @@ test('D21: PreToolUse allows sdi CLI with quoted metachars through delegation ga
   }
 });
 
-test('D21: PreToolUse rejects unregistered sub-agent (rogue-specialist)', async () => {
-  const home = mkTempHome('sdi-d21-rogue');
+// #11: an unregistered agent_type is NO LONGER hard-blocked. It acts at L3 —
+// read-only + execution work allowed (consensus autonomy stays structurally
+// out of reach because it needs a registered (name, stance) tuple). The
+// previous deny was a deadlock with no escape hatch; the new behaviour emits a
+// one-line L3 advisory and proceeds.
+test('D21: PreToolUse lets unregistered sub-agent act at L3 (advisory, not deny)', async () => {
+  const home = mkTempHome('sdi-d21-l3');
   const { server, port } = await startMockSdiDaemon();
   try {
     pinDaemonPort(home, port);
@@ -446,13 +536,16 @@ test('D21: PreToolUse rejects unregistered sub-agent (rogue-specialist)', async 
       }),
     );
     assert.equal(r.status, 0, `stderr=${r.stderr}`);
-    assert.match(r.stdout, /permissionDecision.*deny/);
-    assert.match(r.stdout, /rogue-specialist/);
+    // Not blocked: with an active task and a sub-agent id, Edit proceeds.
+    assert.doesNotMatch(r.stdout, /permissionDecision.*deny/);
+    assert.doesNotMatch(r.stdout, /rogue-specialist/);
+    // L3 advisory surfaces on stderr + audit log.
+    assert.match(r.stderr, /unregistered.*L3/i);
     const log = path.join(home, '.local/state/sdi/hook.log');
     const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.ok(
       entries.some(
-        (e) => e.event === 'pre_tool_use_blocked' && e.reason === 'rogue-specialist',
+        (e) => e.event === 'pre_tool_use_unregistered_agent' && e.reason === 'l3-autonomy-cap',
       ),
     );
   } finally {
