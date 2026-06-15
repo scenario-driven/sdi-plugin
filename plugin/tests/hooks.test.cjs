@@ -87,6 +87,7 @@ function startMockSdiDaemon(opts) {
     cwd: PROJECT_CWD,
   };
   const plan = o.plan === undefined ? null : o.plan; // null = no active plan
+  const inFlight = o.inFlight || []; // in_progress tasks for the active plan (#9)
   const policy = o.policy || { mode: 'L5' };
   const scenarios = o.scenarios || [];
   const patterns = o.patterns || [];
@@ -106,6 +107,9 @@ function startMockSdiDaemon(opts) {
     if (u.pathname === '/projects/by-cwd') return send(200, { project });
     if (u.pathname === `/projects/${project.id}/plans/active`) {
       return send(200, plan ? { plan } : {});
+    }
+    if (plan && u.pathname === `/plans/${plan.id}/tasks/in-flight`) {
+      return send(200, { tasks: inFlight });
     }
     if (u.pathname === '/autonomy_policies/resolve') return send(200, { policy });
     if (u.pathname === '/scenarios/active-claims') {
@@ -548,6 +552,67 @@ test('D21: PreToolUse lets unregistered sub-agent act at L3 (advisory, not deny)
         (e) => e.event === 'pre_tool_use_unregistered_agent' && e.reason === 'l3-autonomy-cap',
       ),
     );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// #9: the active-task gate is satisfied by DAEMON STATE (an in_progress task
+// in the active plan), not the unsatisfiable SDI_ACTIVE_TASK env. A specialist
+// that ran `sdi task start` can now Edit without setting any env.
+test('D21: active-task gate passes on daemon in_progress task, no env (#9)', async () => {
+  const home = mkTempHome('sdi-active-daemon');
+  const { server, port } = await startMockSdiDaemon({
+    plan: { id: 'PLAN-x', title: 'p', status: 'active' },
+    inFlight: [{ id: 'TASK-x', status: 'in_progress' }],
+  });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_ACTIVE_TASK: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Edit',
+        agent_id: '00000000-0000-0000-0000-0000000000aa',
+        agent_type: 'impl-coder',
+      }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /no active task/);
+    assert.doesNotMatch(r.stdout, /permissionDecision.*deny/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// Conversely, an active plan with NO in_progress task still denies (the gate
+// is real — it just reads daemon state instead of env).
+test('D21: active-task gate still denies when no in_progress task exists (#9)', async () => {
+  const home = mkTempHome('sdi-active-none');
+  const { server, port } = await startMockSdiDaemon({
+    plan: { id: 'PLAN-x', title: 'p', status: 'active' },
+    inFlight: [],
+  });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_ACTIVE_TASK: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Write',
+        agent_id: '00000000-0000-0000-0000-0000000000ab',
+        agent_type: 'impl-coder',
+      }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.match(r.stdout, /no active task/);
+    assert.match(r.stdout, /sdi task start/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });

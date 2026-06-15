@@ -583,9 +583,24 @@ async function getTask(taskId) {
 }
 
 function readActiveTaskHint() {
-  // The active task hint is set by Claude Code via env (analogous to Clawket).
-  // SDI_ACTIVE_TASK can also be set explicitly.
+  // Explicit fast-path pin (set before Claude Code launches). Optional — the
+  // active-task gate falls back to live daemon state when this is unset (#9).
   return process.env.SDI_ACTIVE_TASK || process.env.CLAUDE_ACTIVE_TASK || null;
+}
+
+// #9 — Is there active task context for `project`, judged from DAEMON STATE?
+// True iff the project's active plan has at least one in_progress task (the
+// daemon's `/tasks/in-flight` endpoint returns exactly the in_progress set).
+// `sdi task start <id>` moves a task todo → in_progress, so an agent satisfies
+// this from inside the session — unlike the old `SDI_ACTIVE_TASK` env, which
+// could only be set before launch. Daemon unreachable → caller treats as
+// false but the surrounding gate degrades gracefully (bypass / explicit env).
+async function hasActiveTaskContext(project) {
+  if (!project) return false;
+  const plan = await activePlanForProject(project.id);
+  if (!plan) return false;
+  const tasks = await inFlightTasks(plan.id);
+  return Array.isArray(tasks) && tasks.length > 0;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1346,24 +1361,35 @@ async function runPreToolUse(input) {
   // session) and have their own enforcement through D21 + D26 + D29. Without
   // this narrowing, a fresh project deadlocks: making the first task requires
   // a task to already be in_progress.
+  //
+  // #9 — "active task" is judged from DAEMON STATE (an in_progress task in the
+  // active plan), not the `SDI_ACTIVE_TASK` env. That env can only be set
+  // BEFORE Claude Code launches, so a sub-agent could never satisfy it from
+  // inside a session — the gate was unsatisfiable and pushed every specialist
+  // onto the bypass marker (or Bash heredocs). The env still works as an
+  // explicit fast-path pin; absent it, we ask the daemon.
   const activeTaskId = readActiveTaskHint();
-  if (!activeTaskId && isExecutionTool(toolName)) {
-    const bypass = tryBypass();
-    if (bypass) {
-      emitBypassWarning('active-task', toolName, bypass, null);
-      appendHookLog('pre_tool_use_active_task_bypass', {
-        tool: toolName,
-        source: bypass.source,
-        reason: bypass.reason || null,
-      });
-    } else {
-      emitDeny(
-        `[sdi] no active task — pick one up before mutating files. ` +
-          `Run \`sdi task list\` then \`sdi task start <TASK-ID>\` (todo → in_progress). ` +
-          BYPASS_ARM_HINT,
-      );
-      appendHookLog('pre_tool_use_blocked', { tool: toolName, reason: 'no-active-task' });
-      return;
+  if (isExecutionTool(toolName)) {
+    const hasContext = activeTaskId ? true : await hasActiveTaskContext(project).catch(() => false);
+    if (!hasContext) {
+      const bypass = tryBypass();
+      if (bypass) {
+        emitBypassWarning('active-task', toolName, bypass, null);
+        appendHookLog('pre_tool_use_active_task_bypass', {
+          tool: toolName,
+          source: bypass.source,
+          reason: bypass.reason || null,
+        });
+      } else {
+        emitDeny(
+          `[sdi] no active task — pick one up before mutating files. ` +
+            `Run \`sdi task list\` then \`sdi task start <TASK-ID>\` (todo → in_progress); ` +
+            `the daemon then reports it as active work. ` +
+            BYPASS_ARM_HINT,
+        );
+        appendHookLog('pre_tool_use_blocked', { tool: toolName, reason: 'no-active-task' });
+        return;
+      }
     }
   }
 

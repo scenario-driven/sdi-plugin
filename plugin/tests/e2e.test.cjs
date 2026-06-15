@@ -221,6 +221,24 @@ test(
       const activation = runSdiOk(home, ['round', 'activate', r1Id]);
       assert.equal(activation.round.status, 'active');
 
+      // #9: with an active plan but NO in_progress task yet, the active-task
+      // gate denies (daemon state = no active work) — proving the gate is real
+      // before we satisfy it below by starting a task.
+      const preNoTask = runShim(
+        'pre-tool-use.cjs',
+        shimEnv(home, {}),
+        JSON.stringify({
+          cwd: projectCwd,
+          tool_name: 'Edit',
+          tool_input: { file_path: path.join(projectCwd, 'src/lib.rs') },
+          agent_id: '00000000-0000-0000-0000-0000000000aa',
+          agent_type: 'impl-coder',
+        }),
+      );
+      assert.equal(preNoTask.status, 0, `pre-no-task stderr=${preNoTask.stderr}`);
+      assert.match(preNoTask.stdout, /permissionDecision.*deny/);
+      assert.match(preNoTask.stdout, /no active task/);
+
       const taskCode = `T-${suffix}`;
       const task = runSdiOk(home, [
         'task', 'create', r1Id, taskCode,
@@ -283,12 +301,11 @@ test(
       );
       assert.equal(subStop.status, 0, `subagent-stop stderr=${subStop.stderr}`);
 
-      // Sanity: PreToolUse without an active task pinned still denies, even
-      // though the daemon and project exist. This proves the gate's source
-      // of truth is the env hint, not daemon state — the documented contract.
-      // D21: also use a registered sub-agent so the delegation gate passes
-      // first, isolating the active-task gate behaviour here.
-      const preNoTask = runShim(
+      // #9: the active-task gate's source of truth is DAEMON STATE, not the
+      // SDI_ACTIVE_TASK env (which could only be set before Claude Code
+      // launched, so a sub-agent could never satisfy it). With the task still
+      // in_progress, Edit passes even with NO env pinned.
+      const preNoEnv = runShim(
         'pre-tool-use.cjs',
         shimEnv(home, {}),
         JSON.stringify({
@@ -298,9 +315,15 @@ test(
           ...subAgentEnv,
         }),
       );
-      assert.equal(preNoTask.status, 0);
-      assert.match(preNoTask.stdout, /permissionDecision.*deny/);
-      assert.match(preNoTask.stdout, /no active task/);
+      assert.equal(preNoEnv.status, 0, `pre-no-env stderr=${preNoEnv.stderr}`);
+      assert.doesNotMatch(
+        preNoEnv.stdout,
+        /permissionDecision.*deny/,
+        'an in_progress task in the active plan satisfies the gate without env (#9)',
+      );
+      // (The deny path — active plan but no in_progress task — is covered by the
+      // unit tests in hooks.test.cjs; here the task stays in_progress so the
+      // round can be completed below via §6.6 evidence.)
 
       // 4) Daemon SSoT must agree with what the CLI told us. The handler
       //    wraps the row under `{ "project": ... }` (see router/project.rs
