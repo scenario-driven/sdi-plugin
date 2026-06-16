@@ -97,27 +97,56 @@ default.
    step. The daemon then emits the list of scenarios needing fresh
    verification (new scenarios + carried-failing ones).
 
-   The LLM **auto-decomposes** that list into tasks — tasks are runtime
-   artifacts, not human-authored upfront. The arguments are positional
-   (`<ROUND-ID> <SHORT-CODE> <DESCRIPTION>`); each task links its parent
-   scenario with a repeatable `--scenario <SCN-ID>`:
+3. **Decide the collaboration pattern (D13) — before decomposing**
+   The needs-verification set is the work about to fan out. *How* it fans out
+   is a first-class decision (D13: multi-agent orchestration is the body, not a
+   by-product), and it has to be made **before** the first `sdi task create` —
+   otherwise the daemon back-fills a `direct` sentinel (D23) and the whole round
+   is silently capped at L3.
+
+   Spawn the **pattern-orchestrator** specialist on the needs-verification set.
+   It picks a kind from the work shape and materialises the pattern:
+
+   | Work shape | Kind | Autonomy unlocked (D25) |
+   |---|---|---|
+   | Sequential hand-offs (draft → critique → verify) | `workflow` | L5 |
+   | Decision needing ≥2 distinct (name, stance) reviewers | `graph` | L5 |
+   | N specialists running the tasks in parallel | `swarm` | L4 |
+   | Caller agent needs a specific callee specialist as a tool | `agents-as-tools` | L4 |
+   | Genuinely solo — one specialist, no peer review | `direct` (explicit) | L3 |
+
+   `pattern-critic` then validates the manifest (D26 shape gate: `workflow`
+   steps ≥ 2, `graph` distinct tuples ≥ 2, `swarm` fan-out ≥ 2, …) and the
+   pattern transitions `pending → active`. `direct` is a *written* choice here,
+   not the default — never let the round fall into `direct` by omission.
+
+4. **Decompose under the chosen pattern**
+   The LLM **auto-decomposes** the needs-verification set into tasks — tasks are
+   runtime artifacts, not human-authored upfront. Bind each task to the active
+   pattern from step 3 with `--produced-via-pattern`. The arguments are
+   positional (`<ROUND-ID> <SHORT-CODE> <DESCRIPTION>`); each task links its
+   parent scenario with a repeatable `--scenario <SCN-ID>`:
    ```bash
    sdi task create <ROUND-ID> <SHORT-CODE> "<one-line description>" \
-     --scenario <SCN-ID>
+     --scenario <SCN-ID> \
+     --produced-via-pattern <PAT-ID>
    ```
-   There is no `--title` or `--tier` flag: the description IS the title, and a
-   task carries no priority column (priority is the LLM's decomposition order,
-   not persisted state per D3). Encode any priority hint in the scenario's
-   `tags` instead. Do not pre-author tasks before activation; do not author
-   tasks that don't trace back to a scenario in the round's needs-verification
-   set.
+   The daemon rejects a `--produced-via-pattern` that isn't `active` or belongs
+   to another plan/round, so a stale or unshaped reference surfaces instead of
+   silently degrading to `direct`. Omit the flag **only** for a deliberately
+   `direct` round. There is no `--title` or `--tier` flag: the description IS
+   the title, and a task carries no priority column (priority is the LLM's
+   decomposition order, not persisted state per D3). Encode any priority hint in
+   the scenario's `tags` instead. Do not pre-author tasks before activation; do
+   not author tasks that don't trace back to a scenario in the round's
+   needs-verification set.
 
-3. **Verify**
+5. **Verify**
    Implement, then record evidence on each task's `done` transition — the
    daemon rejects `done` without evidence (`EVIDENCE_REQUIRED`). See the
    `sdi-evidence` skill.
 
-4. **Complete**
+6. **Complete**
    ```bash
    sdi round complete <ROUND-ID>
    ```

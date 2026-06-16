@@ -94,6 +94,23 @@ sdi pattern transition <PAT-ID> --to converged --reason "consensus reached"
 sdi pattern abort <PAT-ID> --reason "scope dropped"
 ```
 
+## Bind work to a pattern (the point of all this)
+
+A pattern only matters once a work entity is produced **under** it. The primary
+binding seam is round decompose — pass the **active** pattern id when creating
+tasks:
+
+```bash
+sdi task create <ROUND-ID> <SHORT-CODE> "<desc>" \
+  --scenario <SCN-ID> --produced-via-pattern <PAT-ID>
+```
+
+Omitting the flag back-fills the plan's `direct` sentinel (D23) and inherits the
+L3 cap — which is why the `sdi-round` skill makes the pattern decision *before*
+the first `sdi task create`, and the PreToolUse decompose advisory nudges when a
+round is about to fan out under `direct`. The daemon rejects a binding that is
+not `active`, belongs to another plan, or (round-scoped) targets another round.
+
 ## Inspect
 
 ```bash

@@ -720,3 +720,209 @@ async fn sse_emits_all_v05_event_kinds() {
     }
     driver.await.unwrap();
 }
+
+// ─── 6. Task pattern binding (D23 decompose-time) ──────────────────────────
+//
+// Regression for the "everything is `direct`" gap: a task could only ever
+// resolve the plan's `direct` sentinel because POST /tasks had no way to carry
+// a chosen pattern. With `produced_via_pattern_id`, the orchestrator's
+// validated pattern binds; bad/unscoped/non-active references are rejected so
+// they cannot silently inherit the L3 cap.
+
+async fn approve_and_activate_round(base: &str, plan_id: &str, suffix: &str) -> String {
+    let c = cli();
+    c.post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("SCN-{}", &suffix[..6]),
+            "given": "g", "when": "w", "then": "t", "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    c.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+    let r: serde_json::Value = c
+        .post(format!("{}/rounds", base))
+        .json(
+            &serde_json::json!({"plan_id": plan_id, "short_code": format!("R1-{}", &suffix[..6])}),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r_id = r["id"].as_str().unwrap().to_string();
+    c.post(format!("{}/rounds/{}/activate", base, r_id))
+        .send()
+        .await
+        .unwrap();
+    r_id
+}
+
+async fn mk_active_swarm(base: &str, plan_id: &str, scope_id: &str, suffix: &str) -> String {
+    let c = cli();
+    let created: serde_json::Value = c
+        .post(format!("{}/patterns", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("CP-SW-{}", &suffix[..6]),
+            "kind": "swarm",
+            "applies_to": "round",
+            "scope_id": scope_id,
+            "fan_out": ["impl-coder", "impl-coder", "test-runner"]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap().to_string();
+    c.patch(format!("{}/patterns/{}/lifecycle", base, id))
+        .json(&serde_json::json!({"to": "active"}))
+        .send()
+        .await
+        .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn task_binds_explicit_active_pattern() {
+    let (base, _h) = spawn_server().await;
+    let c = cli();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = bootstrap(&base, &suffix).await;
+    let round_id = approve_and_activate_round(&base, &plan_id, &suffix).await;
+    let pat_id = mk_active_swarm(&base, &plan_id, &round_id, &suffix).await;
+
+    let task: serde_json::Value = c
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": round_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "parallel fan-out work",
+            "produced_via_pattern_id": pat_id
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // Bound to the chosen swarm — NOT the direct sentinel.
+    assert_eq!(task["produced_via_pattern_id"], pat_id);
+}
+
+#[tokio::test]
+async fn task_without_pattern_falls_back_to_direct() {
+    let (base, _h) = spawn_server().await;
+    let c = cli();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = bootstrap(&base, &suffix).await;
+    let round_id = approve_and_activate_round(&base, &plan_id, &suffix).await;
+
+    let task: serde_json::Value = c
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": round_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "solo work"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let bound = task["produced_via_pattern_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // The resolved pattern is the plan's direct sentinel.
+    let pat: serde_json::Value = c
+        .get(format!("{}/patterns/{}", base, bound))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pat["kind"], "direct");
+}
+
+#[tokio::test]
+async fn task_rejects_unresolvable_pattern() {
+    let (base, _h) = spawn_server().await;
+    let c = cli();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = bootstrap(&base, &suffix).await;
+    let round_id = approve_and_activate_round(&base, &plan_id, &suffix).await;
+
+    let resp = c
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": round_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "bad ref",
+            "produced_via_pattern_id": "PAT-does-not-exist"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        400,
+        "unresolvable pattern ref must be rejected"
+    );
+}
+
+#[tokio::test]
+async fn task_rejects_pending_pattern() {
+    let (base, _h) = spawn_server().await;
+    let c = cli();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = bootstrap(&base, &suffix).await;
+    let round_id = approve_and_activate_round(&base, &plan_id, &suffix).await;
+
+    // Created but NOT transitioned to active → still `pending`.
+    let created: serde_json::Value = c
+        .post(format!("{}/patterns", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("CP-PEND-{}", &suffix[..6]),
+            "kind": "swarm",
+            "applies_to": "round",
+            "scope_id": round_id,
+            "fan_out": ["impl-coder", "impl-coder"]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pat_id = created["id"].as_str().unwrap().to_string();
+
+    let resp = c
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": round_id,
+            "short_code": format!("T-{}", &suffix[..6]),
+            "description": "binds unshaped pending",
+            "produced_via_pattern_id": pat_id
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        400,
+        "pending (unshaped) pattern must be rejected"
+    );
+}

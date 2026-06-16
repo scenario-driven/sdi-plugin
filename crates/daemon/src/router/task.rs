@@ -41,6 +41,12 @@ struct CreateTaskBody {
     parent_scenario_ids: Vec<String>,
     #[serde(default)]
     parent_requirement_ids: Vec<String>,
+    /// Optional D23 binding. When the pattern-orchestrator has chosen a real
+    /// collaboration shape for this decompose, the task is created under it.
+    /// Omitted (the solo-flow case) → daemon resolves the plan's `direct`
+    /// sentinel. A ULID or a plan-scoped pattern `short_code`.
+    #[serde(default)]
+    produced_via_pattern_id: Option<String>,
 }
 
 async fn create(
@@ -49,10 +55,16 @@ async fn create(
 ) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let round_id = Id::from(b.round_id);
-    // D23 — the task's plan is resolved through its round; a task decomposed
-    // outside any pattern resolves that plan's `direct` sentinel.
+    // D23 — the task's plan is resolved through its round. With an explicit
+    // pattern the binding is validated (active + scope); without one, a task
+    // decomposed outside any pattern resolves that plan's `direct` sentinel.
     let plan_id = round_repo::get(&conn, &round_id)?.plan_id;
-    let produced_via_pattern_id = Some(provenance::ensure_direct_pattern(&conn, &plan_id)?);
+    let produced_via_pattern_id = Some(match b.produced_via_pattern_id.as_deref() {
+        Some(r) if !r.trim().is_empty() => {
+            provenance::resolve_bound_pattern(&conn, &plan_id, Some(&round_id), r.trim())?
+        }
+        _ => provenance::ensure_direct_pattern(&conn, &plan_id)?,
+    });
     let task = Task {
         id: Id::new(IdKind::Task),
         round_id,

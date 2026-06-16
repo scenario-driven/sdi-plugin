@@ -816,6 +816,12 @@ pub struct TaskCreateArgs {
     /// Parent requirement ids (repeatable, optional).
     #[arg(long = "req")]
     pub requirements: Vec<String>,
+    /// Bind this task to a chosen CollaborationPattern (D23) — a pattern ULID
+    /// or plan-scoped short_code from the pattern-orchestrator. Must be
+    /// `active`. Omit for solo work (daemon resolves the plan's `direct`
+    /// sentinel and the L3 cap that comes with it).
+    #[arg(long = "produced-via-pattern", alias = "pattern")]
+    pub produced_via_pattern: Option<String>,
 }
 
 #[derive(Debug, Args)]

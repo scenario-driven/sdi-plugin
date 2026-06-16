@@ -514,6 +514,51 @@ test('D21: isReadOnlyBash — /dev/null, PATH idiom, sdi split, gh (#4/#10)', ()
   assert.equal(isReadOnlyBash('gh pr merge 5'), false);
 });
 
+test('D13: parseRoundDecomposeIntent — round activate / task create seams', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { _internals } = require(SHARED);
+  const parse = _internals.parseRoundDecomposeIntent;
+
+  // round activate → kind=activate, positional round id.
+  assert.deepEqual(parse('sdi round activate ROUND-123'), {
+    kind: 'activate',
+    roundId: 'ROUND-123',
+    hasPatternFlag: false,
+  });
+
+  // task create → kind=create, round id is positional arg 1 (before the
+  // quoted description and the --scenario flag).
+  assert.deepEqual(
+    parse('sdi task create ROUND-9 T-1 "wire the thing" --scenario SCN-1'),
+    { kind: 'create', roundId: 'ROUND-9', hasPatternFlag: false },
+  );
+
+  // A create already carrying the binding flag is detected (advisory suppresses).
+  assert.equal(
+    parse('sdi task create R-1 T-2 "x" --produced-via-pattern PAT-7').hasPatternFlag,
+    true,
+  );
+  assert.equal(parse('sdi task create R-1 T-2 "x" --pattern PAT-7').hasPatternFlag, true);
+
+  // Absolute-path bundled binary (delegated sub-agents invoke this form).
+  assert.deepEqual(parse('/plugins/sdi/bin/sdi round activate RR'), {
+    kind: 'activate',
+    roundId: 'RR',
+    hasPatternFlag: false,
+  });
+
+  // Survives a `cd … && export … &&` prefix chain (#4 idiom).
+  assert.equal(
+    parse('cd /repo && export PATH=$P && sdi task create R5 T9 "go"').roundId,
+    'R5',
+  );
+
+  // Unrelated sdi reads / other verbs do not match.
+  assert.equal(parse('sdi task list --round R-1'), null);
+  assert.equal(parse('sdi round list'), null);
+  assert.equal(parse('git status'), null);
+});
+
 test('D21: PreToolUse allows sdi CLI with quoted metachars through delegation gate', async () => {
   const home = mkTempHome('sdi-d21-quoted');
   const { server, port } = await startMockSdiDaemon();

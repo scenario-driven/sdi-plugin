@@ -73,6 +73,29 @@ sdi pattern create \
 sdi pattern transition <PAT-ID> --to active --reason "shape audit passed"
 ```
 
+7. Hand the **active** pattern id back to whoever materialises the work
+   entities so the binding actually lands. The primary seam is round
+   decompose — tasks bind the pattern at create time:
+
+```bash
+sdi task create <ROUND-ID> <SHORT-CODE> "<desc>" \
+  --scenario <SCN-ID> --produced-via-pattern <PAT-ID>
+```
+
+   The daemon rejects a `--produced-via-pattern` that is not `active`, belongs
+   to another plan, or (for a round-scoped pattern) targets another round — so
+   a stale id fails loudly instead of degrading to `direct`.
+
+## Trigger seam (where you get spawned)
+
+The structural moment is **round decompose**: after `sdi round activate`, the
+needs-verification set is the work about to fan out, and a `direct` sentinel is
+back-filled the instant the first `sdi task create` runs without a binding. The
+`sdi-round` skill (step 3) and the PreToolUse decompose advisory both point the
+main session here — so you are spawned on the needs-verification set *before*
+any task is created, pick the kind from the work shape, and return the active
+pattern id for step 7's binding.
+
 ## Invariants
 
 - Every new work entity creation must carry `produced_via_pattern_id` or

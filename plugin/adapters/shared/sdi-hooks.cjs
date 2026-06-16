@@ -986,6 +986,96 @@ async function patternShapeAdvisory(toolName, toolInput) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// D13 — Decompose-time pattern decision advisory
+//
+// Root cause of "every pattern is `direct`": nothing brings the LLM to the
+// pattern decision before a round fans out into tasks. `patternShapeAdvisory`
+// above only fired on Agent/Task dispatches whose prompt ALREADY carried a
+// multi-agent intent token — a chicken-and-egg that meant ordinary decompose
+// never tripped it. This advisory triggers on the STRUCTURAL seam instead:
+//
+//   - `sdi round activate <R>` — the main session owns this, and main is the
+//     actor that can spawn the pattern-orchestrator specialist. Nudge here so
+//     the choice happens before any sub-agent decomposes.
+//   - `sdi task create <R> …` — the actual fan-out (run by a decomposer
+//     sub-agent, since D21 blocks main from task-create). Last line of defence,
+//     fired only on the FIRST task of the round to avoid per-task noise.
+//
+// Non-blocking (stderr only). Silent when a non-`direct` active pattern already
+// governs the round's plan, when the create already carries
+// `--produced-via-pattern`, or when the daemon can't resolve the round.
+
+function parseRoundDecomposeIntent(cmd) {
+  // Match `[path/]sdi <round|task> <activate|create> <rest…>` up to the next
+  // shell separator. The round id is positional arg 1 for both forms
+  // (`round activate <ROUND>` / `task create <ROUND> <CODE> <DESC>`), so it
+  // precedes the quoted description and any flags.
+  const m = cmd.match(
+    /(?:^|[\s;&|(])(?:\S*\/)?sdi\s+(round|task)\s+(activate|create)\b([^\n;&|]*)/,
+  );
+  if (!m) return null;
+  const [, sub, action, restRaw] = m;
+  if (!((sub === 'round' && action === 'activate') || (sub === 'task' && action === 'create'))) {
+    return null;
+  }
+  const rest = restRaw || '';
+  let roundId = null;
+  for (const t of rest.trim().split(/\s+/).filter(Boolean)) {
+    if (t.startsWith('-')) break; // positionals come before flags
+    roundId = t;
+    break;
+  }
+  const hasPatternFlag = /(?:^|\s)--(?:produced-via-pattern|pattern)\b/.test(rest);
+  return { kind: action, roundId, hasPatternFlag };
+}
+
+async function decomposePatternAdvisory(toolName, toolInput) {
+  if (!/^(Bash|Monitor)$/.test(toolName)) return;
+  const cmd = String((toolInput && toolInput.command) || '');
+  if (!cmd) return;
+  const act = parseRoundDecomposeIntent(cmd);
+  if (!act || !act.roundId) return;
+  if (act.kind === 'create' && act.hasPatternFlag) return; // a pattern was chosen
+
+  const round = await getJson(`/rounds/${encodeURIComponent(act.roundId)}`).catch(() => null);
+  const planId =
+    (round && (round.plan_id || (round.round && round.round.plan_id))) || null;
+  if (!planId) return; // unresolvable round → stay quiet
+
+  if (act.kind === 'create') {
+    // Only nudge at the START of decompose (first task of the round).
+    const tasks = await getJson(
+      `/tasks?round_id=${encodeURIComponent(act.roundId)}`,
+    ).catch(() => null);
+    const existing = tasks && Array.isArray(tasks.tasks) ? tasks.tasks : [];
+    if (existing.length > 0) return;
+  }
+
+  const active = await getJson('/patterns/active').catch(() => null);
+  const rows = active && Array.isArray(active.patterns) ? active.patterns : [];
+  const governed = rows.some(
+    (p) => p && p.kind && p.kind !== 'direct' && p.plan_id === planId,
+  );
+  if (governed) return; // a real collaboration pattern already governs this plan
+
+  process.stderr.write(
+    '[sdi] D13 pattern decision: this round is about to decompose into tasks under a ' +
+      '`direct` (solo) pattern — the L3-capped anti-pattern. Before fanning out, spawn the ' +
+      'pattern-orchestrator specialist to choose a real collaboration pattern ' +
+      '(workflow / swarm / graph / agents-as-tools), let pattern-critic validate it, then create ' +
+      'tasks with `sdi task create … --produced-via-pattern <PAT-ID>`. If the work is genuinely ' +
+      'solo, materialise an explicit `direct` pattern so the L3 choice is on the record. ' +
+      '(non-blocking)\n',
+  );
+  appendHookLog('pre_tool_use_decompose_pattern_advisory', {
+    tool: toolName,
+    kind: act.kind,
+    round_id: act.roundId,
+    hint: 'no-real-pattern-governs-plan',
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // D29 — Resource claim gate (PRD §5 Layer 2.8)
 //
 // Edit/Write/NotebookEdit calls compute target_path then query the daemon's
@@ -1425,6 +1515,7 @@ async function runPreToolUse(input) {
   const v05Disabled = process.env[V05_DISABLE_ENV] === '1';
   if (!v05Disabled) {
     await patternShapeAdvisory(toolName, (input && input.tool_input) || {}).catch(() => {});
+    await decomposePatternAdvisory(toolName, (input && input.tool_input) || {}).catch(() => {});
   }
 
   // Active-task gate. Only direct file-mutation tools require an active task —
@@ -1673,6 +1764,8 @@ module.exports = {
   // Internals exposed for tests
   _internals: {
     isReadOnlyBash,
+    parseRoundDecomposeIntent,
+    decomposePatternAdvisory,
     buildSessionSummary,
     resolveSdiBin,
     resolveSdidBin,

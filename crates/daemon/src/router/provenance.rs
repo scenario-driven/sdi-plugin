@@ -70,3 +70,73 @@ pub fn ensure_direct_pattern(conn: &PooledConn, plan_id: &Id) -> DomainResult<St
         Err(e) => Err(e),
     }
 }
+
+/// Resolve and validate an explicitly-supplied CollaborationPattern reference
+/// for a new work entity bound to `plan_id` (and, where relevant, `round_id`).
+///
+/// This is the counterpart to [`ensure_direct_pattern`]: when a create path
+/// DOES carry a chosen pattern (the pattern-orchestrator picked a
+/// workflow/graph/swarm/agents-as-tools for this decompose), the binding has
+/// to be validated rather than silently trusted.
+///
+/// `pat_ref` is either a pattern ULID or a plan-scoped `short_code`. Rules:
+/// - it must resolve to a pattern in **this** plan;
+/// - it must be `active` — D27 only lets work be produced under patterns that
+///   already passed the `pending → active` shape gate (a `pending` pattern has
+///   not been validated, so binding to it would smuggle an unshaped graph);
+/// - scope sanity: a `plan`-scoped pattern must target this plan and a
+///   `round`-scoped pattern must target this round. Finer scopes
+///   (task/scenario/decision/requirement) are accepted as the orchestrator's
+///   deliberate choice for this decompose.
+///
+/// An invalid explicit reference returns a `Validation` error so the caller
+/// sees the mistake instead of silently inheriting `direct`'s L3 cap.
+pub fn resolve_bound_pattern(
+    conn: &PooledConn,
+    plan_id: &Id,
+    round_id: Option<&Id>,
+    pat_ref: &str,
+) -> DomainResult<String> {
+    let resolved = match pattern_repo::get(conn, &Id::from(pat_ref.to_string()))? {
+        Some(row) => Some(row),
+        None => pattern_repo::get_by_short_code(conn, plan_id, pat_ref)?,
+    };
+    let row = resolved.ok_or_else(|| {
+        DomainError::Validation(format!(
+            "produced_via_pattern_id {pat_ref:?} does not resolve to a CollaborationPattern in this plan"
+        ))
+    })?;
+
+    if row.plan_id != plan_id.to_string() {
+        return Err(DomainError::Validation(format!(
+            "pattern {} belongs to a different plan",
+            row.short_code
+        )));
+    }
+    if row.lifecycle != "active" {
+        return Err(DomainError::Validation(format!(
+            "pattern {} is `{}` — only `active` patterns (past the D27 shape gate) may produce work",
+            row.short_code, row.lifecycle
+        )));
+    }
+    match row.applies_to.as_str() {
+        "plan" if row.scope_id != plan_id.to_string() => {
+            return Err(DomainError::Validation(format!(
+                "plan-scoped pattern {} targets a different plan",
+                row.short_code
+            )));
+        }
+        "round" => {
+            if let Some(rid) = round_id {
+                if row.scope_id != rid.to_string() {
+                    return Err(DomainError::Validation(format!(
+                        "round-scoped pattern {} targets a different round",
+                        row.short_code
+                    )));
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(row.id)
+}

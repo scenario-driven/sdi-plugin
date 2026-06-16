@@ -45,13 +45,18 @@ pub async fn run(cli: &Client, cmd: TaskCmd, quiet: bool) -> Result<()> {
 }
 
 async fn create(cli: &Client, args: TaskCreateArgs, quiet: bool) -> Result<()> {
-    let body = json!({
+    let mut body = json!({
         "round_id": args.round_id,
         "short_code": args.short_code,
         "description": args.description,
         "parent_scenario_ids": args.scenarios,
         "parent_requirement_ids": args.requirements,
     });
+    if let Some(p) = args.produced_via_pattern.as_deref().map(str::trim) {
+        if !p.is_empty() {
+            body["produced_via_pattern_id"] = Value::String(p.to_string());
+        }
+    }
     let v: Value = cli.post_json("/tasks", &body).await?;
     emit(&v, quiet)
 }

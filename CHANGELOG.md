@@ -8,6 +8,37 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.6.0] - 2026-06-16
+
+### Added
+- **Decompose-time collaboration-pattern decision (D13 made reachable).**
+  Until now every CollaborationPattern in practice was `direct` — the solo-flow
+  anti-pattern — even though SDI's identity (D13) is that multi-agent
+  orchestration is the *body*. The cause was two missing wires, not a data bug:
+  1. **`sdi task create … --produced-via-pattern <PAT-ID>`** — `POST /tasks`
+     gained an optional `produced_via_pattern_id`, so a task can finally be
+     created **under** a chosen pattern. The daemon validates the reference
+     resolves in the task's plan, is `active` (past the D27 shape gate), and is
+     scope-compatible (plan-scoped → this plan; round-scoped → this round);
+     otherwise it is rejected rather than silently degrading to `direct`.
+     Omitting the flag keeps the `direct` back-fill (the honest solo marker).
+  2. **Structural decompose advisory** — the prior D26 advisory only fired on
+     `Agent`/`Task` dispatches that already contained a multi-agent intent token
+     (`swarm`, `parallel`, …), a chicken-and-egg that ordinary decompose never
+     tripped. A new advisory fires on the *structural* seam instead — `sdi round
+     activate <R>` (main session) and the first `sdi task create <R> …` of a
+     round (decomposer sub-agent) — and nudges the LLM to run the
+     pattern-orchestrator when no non-`direct` active pattern governs the round's
+     plan. Non-blocking; silent once a real pattern exists or the create already
+     carries the binding flag.
+
+  The `sdi-round` skill now makes the pattern decision an explicit step **before**
+  decompose, and the pattern-orchestrator / `/pattern` docs describe the binding
+  hand-off. The orchestrator, pattern-critic, patterns table, and autonomy
+  unlock (workflow/graph=L5, swarm/agents-as-tools=L4) were already complete —
+  this release connects them to the everyday round loop so the multi-agent body
+  is actually used instead of structurally bypassed.
+
 ## [0.5.3] - 2026-06-16
 
 ### Fixed
