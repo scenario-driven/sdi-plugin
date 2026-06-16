@@ -2,7 +2,7 @@
 // the daemon is the source of truth, the dashboard adds no extra fields.
 
 export type PlanStatus = 'draft' | 'active' | 'completed';
-export type ScenarioStatus = 'proposed' | 'confirmed';
+export type ScenarioStatus = 'draft' | 'confirmed';
 export type ScenarioResult = 'passing' | 'failing' | 'impacted' | 'retired';
 export type RoundStatus = 'planning' | 'active' | 'completed';
 export type RoundMode = 'strict-regression' | 'forward-only';
@@ -102,6 +102,9 @@ export interface Scenario {
   claim_status?: ClaimStatus;
   /** D23 — CollaborationPattern that produced this scenario (NOT NULL post-migration). */
   produced_via_pattern_id?: string | null;
+  /** #8 — retirement marker. Non-null ⇒ retired: excluded from verification /
+   *  regression / approve count, history preserved. Reversible (un-retire). */
+  retired_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -194,6 +197,9 @@ export interface Decision {
   reversal_of?: string | null;
   /** D23 — CollaborationPattern that produced this decision. */
   produced_via_pattern_id?: string | null;
+  /** #16 — provisional revisit trigger. Non-null ⇒ the decision is provisional:
+   *  still accepted/in-effect but flagged to be revisited when this holds. */
+  supersede_when?: string | null;
   created_at: string;
 }
 

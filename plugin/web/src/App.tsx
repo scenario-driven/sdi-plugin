@@ -13,6 +13,7 @@ import { AppShell } from './components/shell/AppShell';
 import { Topbar, type ViewId } from './components/shell/Topbar';
 import Sidebar, { type SelectedItem } from './components/Sidebar';
 import { SummaryView } from './views/SummaryView';
+import { NextView } from './views/NextView';
 import { BoardView } from './views/BoardView';
 import { BacklogView } from './views/BacklogView';
 import { TimelineView } from './views/TimelineView';
@@ -33,6 +34,7 @@ import { cn } from './lib/cn';
 
 const VIEWS = new Set<ViewId>([
   'summary',
+  'next',
   'board',
   'backlog',
   'timeline',
@@ -437,6 +439,8 @@ export function App() {
     switch (activeView) {
       case 'summary':
         return <SummaryView projectId={selectedProjectId} refreshKey={sseState.structuralSeq} />;
+      case 'next':
+        return <NextView projectId={selectedProjectId} refreshKey={sseState.structuralSeq} />;
       case 'board':
         return <BoardView projectId={selectedProjectId} refreshKey={sseState.structuralSeq} taskPatches={sseState.taskPatches} onSelectTask={(id) => setSelectedItem({ type: 'task', id })} />;
       case 'backlog':

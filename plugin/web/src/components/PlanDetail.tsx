@@ -176,7 +176,7 @@ export function PlanDetail({ planId, onClose, refreshKey, onSelectDecision }: Pl
                   <Badge size="sm" variant={s.status === 'confirmed' ? 'success' : 'default'}>
                     {s.status}
                   </Badge>
-                  {s.status === 'proposed' && (
+                  {s.status === 'draft' && (
                     <button
                       type="button"
                       onClick={() => confirmScenario(s.id)}

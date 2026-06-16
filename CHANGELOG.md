@@ -8,6 +8,26 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.5.1] - 2026-06-16
+
+### Added (dashboard)
+- The dashboard now reflects the v0.5.0 daemon data it was missing:
+  - **Retired scenarios** (#8) carry a `retired` badge, are dimmed, show the
+    exclusion note, and have **Retire / Restore** actions in ScenarioDetail.
+  - **Provisional decisions** (#16) carry a `provisional` badge and their
+    "revisit when …" condition in DecisionTimeline and DecisionDetail.
+  - A new **Next** view surfaces `sdi next` (the computed next step +
+    provisional decisions to revisit) and the in-progress task's
+    `sdi task brief` (linked GWT, verification baseline, evidence format,
+    prohibitions).
+
+### Fixed (dashboard)
+- The `ScenarioStatus` TS type was `'proposed' | 'confirmed'`, but the daemon
+  serializes `'draft' | 'confirmed'` — so the "Confirm scenario" button never
+  appeared and scenario status glyphs/counts keyed off a value that never
+  arrived. Corrected to `'draft'` across ScenarioDetail, PlanDetail, PlanTree,
+  and SummaryView.
+
 ## [0.5.0] - 2026-06-16
 
 Resolves the 13 dogfooding issues #4–#16. Decision rationale (with primary

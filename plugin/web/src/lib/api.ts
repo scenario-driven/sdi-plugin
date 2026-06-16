@@ -18,8 +18,12 @@ import type {
   CollaborationPattern,
   Decision,
   PatternLifecycle,
+  Plan,
   Project,
+  Round,
+  Scenario,
   ScenarioClaim,
+  Task,
 } from '../types/entities';
 
 export interface DaemonErrorBody {
@@ -251,4 +255,51 @@ export function getActiveClaims(
   if (query.path) qs.set('path', query.path);
   const suffix = qs.toString() ? `?${qs}` : '';
   return getJson<ScenarioClaim[]>(`/scenarios/active-claims${suffix}`);
+}
+
+// ─── Scenario retirement (#8) ────────────────────────────────────────────────
+
+/** Retire a scenario (reversible). Excludes it from verification / regression /
+ *  approve count; history is preserved and the draft/confirmed status is kept. */
+export function retireScenario(id: string): Promise<Scenario> {
+  return postJson<Scenario>(`/scenarios/${encodeURIComponent(id)}/retire`);
+}
+
+/** Restore a retired scenario to its preserved status. */
+export function unretireScenario(id: string): Promise<Scenario> {
+  return postJson<Scenario>(`/scenarios/${encodeURIComponent(id)}/unretire`);
+}
+
+// ─── Autonomous-run surfaces (#15) ───────────────────────────────────────────
+
+export interface NextStep {
+  project: Project;
+  active_plan: Plan | null;
+  command: string;
+  reason: string;
+  provisional_decisions: Decision[];
+}
+
+/** The single mechanical next step for a project's active plan, computed by the
+ *  daemon (`sdi next`), plus any provisional decisions to revisit. */
+export function getNextStep(projectId: string): Promise<NextStep> {
+  return getJson<NextStep>(`/projects/${encodeURIComponent(projectId)}/next`);
+}
+
+export interface TaskBrief {
+  task: Task;
+  round: Round;
+  baseline: string | null;
+  scenarios: Scenario[];
+  evidence_format: string;
+  report_schema: Record<string, string>;
+  prohibitions: string[];
+  complete_with: string;
+}
+
+/** A delegation brief for one task (`sdi task brief`): linked scenarios' GWT
+ *  inline + round baseline + the SDI-universal evidence/report/prohibition
+ *  template. */
+export function getTaskBrief(taskId: string): Promise<TaskBrief> {
+  return getJson<TaskBrief>(`/tasks/${encodeURIComponent(taskId)}/brief`);
 }

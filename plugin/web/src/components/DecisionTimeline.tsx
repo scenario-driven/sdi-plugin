@@ -131,6 +131,9 @@ function DecisionLine({ d, onSelect }: { d: Decision; onSelect: (id: string) => 
     >
       <div className="flex items-center gap-2 flex-wrap">
         <Badge size="sm" variant={KIND_VARIANT[d.kind]}>{d.kind}</Badge>
+        {d.supersede_when && (
+          <Badge size="sm" variant="warning">provisional</Badge>
+        )}
         <span className="text-[10px] font-mono text-muted">{d.short_code}</span>
         {d.agent_name && (
           <span className="text-[10px] text-muted">
@@ -142,6 +145,11 @@ function DecisionLine({ d, onSelect }: { d: Decision; onSelect: (id: string) => 
         </span>
       </div>
       <div className="text-xs font-medium text-foreground">{d.title}</div>
+      {d.supersede_when && (
+        <div className="text-[10px] text-warning mt-0.5">
+          revisit when: {d.supersede_when}
+        </div>
+      )}
     </button>
   );
 }

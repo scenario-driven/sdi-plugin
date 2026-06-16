@@ -76,8 +76,17 @@ export function DecisionDetail({ decisionId, onClose, refreshKey }: DecisionDeta
           {decision.escalated_at && (
             <Badge size="sm" variant="danger">escalated</Badge>
           )}
+          {decision.supersede_when && (
+            <Badge size="sm" variant="warning">provisional</Badge>
+          )}
         </div>
         <h2 className="text-headline-md text-foreground">{decision.title}</h2>
+        {decision.supersede_when && (
+          <p className="text-[11px] text-warning">
+            Provisional — revisit when:{' '}
+            <span className="text-foreground">{decision.supersede_when}</span>
+          </p>
+        )}
         {decision.agent_name && (
           <p className="text-[11px] text-muted">
             by <span className="font-mono">{decision.agent_name}</span>

@@ -82,7 +82,7 @@ export function SummaryView({ projectId, refreshKey }: SummaryViewProps) {
         <Card
           label="Scenarios"
           value={String(snap.scenarios.length)}
-          subtitle={`${scenarioCounts.get('confirmed') ?? 0} confirmed / ${scenarioCounts.get('proposed') ?? 0} proposed`}
+          subtitle={`${scenarioCounts.get('confirmed') ?? 0} confirmed / ${scenarioCounts.get('draft') ?? 0} draft`}
           accent="secondary"
         />
       </section>

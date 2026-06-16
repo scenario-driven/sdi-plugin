@@ -49,12 +49,12 @@ const taskStatusIcon: Record<Task['status'], { icon: string; color: string }> = 
 };
 
 const SCENARIO_STATUS_GLYPH: Record<Scenario['status'], string> = {
-  proposed: '◇',
+  draft: '◇',
   confirmed: '◆',
 };
 
 const SCENARIO_STATUS_COLOR: Record<Scenario['status'], string> = {
-  proposed: 'text-muted',
+  draft: 'text-muted',
   confirmed: 'text-success',
 };
 
