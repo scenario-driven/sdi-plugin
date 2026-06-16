@@ -8,6 +8,20 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.6.1] - 2026-06-16
+
+### Fixed
+- **MCP server now actually connects.** `.mcp.json` launched the server with a
+  bare `command: "sdi"`, but Claude Code's MCP launcher does **not** put the
+  plugin's bundled `bin/` on the server subprocess `$PATH` (only the hook
+  adapters resolve `sdi` specially). So every session failed with
+  `Connection failed: Executable not found in $PATH: "sdi"` and the `sdi` MCP
+  tools (`search_knowledge`, `search_scenarios`, plan snapshot, …) were never
+  available — broken since the server was first shipped. The command is now the
+  absolute, version-pinned `${CLAUDE_PLUGIN_ROOT}/bin/sdi`, the same rule the
+  hooks already follow. The lint test that pinned the broken bare command was
+  inverted to enforce the `${CLAUDE_PLUGIN_ROOT}` prefix.
+
 ## [0.6.0] - 2026-06-16
 
 ### Added

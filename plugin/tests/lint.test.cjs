@@ -186,10 +186,20 @@ test('lint: SDI_SKILLS array, plugin.json#skillsList, and skills/ dirs are in lo
 // ────────────────────────────────────────────────────────────────────────────
 // MCP wiring
 
-test('lint: .mcp.json invokes the `sdi` binary with the `mcp` subcommand', () => {
+test('lint: .mcp.json invokes the bundled `sdi` binary with the `mcp` subcommand', () => {
   const cfg = readJson(MCP_JSON);
   assert.ok(cfg.mcpServers && cfg.mcpServers.sdi, '.mcp.json must register `sdi` server');
-  assert.equal(cfg.mcpServers.sdi.command, 'sdi');
+  const cmd = cfg.mcpServers.sdi.command || '';
+  // Claude Code's MCP launcher does NOT inject the plugin bin onto the server
+  // subprocess PATH (unlike the hook adapters, which resolve `sdi` specially),
+  // so a bare `command: "sdi"` fails with `Executable not found in $PATH`. The
+  // command MUST be an absolute, version-pinned path via ${CLAUDE_PLUGIN_ROOT}
+  // — the same rule the hooks already follow (see the hooks.json test above).
+  assert.match(
+    cmd,
+    /^\$\{CLAUDE_PLUGIN_ROOT\}\/bin\/sdi$/,
+    `MCP command must be \${CLAUDE_PLUGIN_ROOT}/bin/sdi, got: ${cmd}`,
+  );
   assert.deepEqual(cfg.mcpServers.sdi.args, ['mcp']);
 });
 
