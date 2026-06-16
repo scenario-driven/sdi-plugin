@@ -108,6 +108,25 @@ function startMockSdiDaemon(opts) {
     if (u.pathname === `/projects/${project.id}/plans/active`) {
       return send(200, plan ? { plan } : {});
     }
+    if (u.pathname === `/projects/${project.id}/handoff`) {
+      return send(200, {
+        active_plan: plan,
+        scenarios: o.handoffScenarios || [],
+        in_flight_tasks: inFlight,
+        backlog_tasks: o.backlog || [],
+        recent_decisions: o.decisions || [],
+        recent_activity: o.activity || [],
+      });
+    }
+    if (u.pathname === `/projects/${project.id}/next`) {
+      return send(200, {
+        project,
+        active_plan: plan,
+        command: o.nextCommand || 'sdi round complete <ROUND>',
+        reason: o.nextReason || 'all verified',
+        provisional_decisions: o.provisional || [],
+      });
+    }
     if (plan && u.pathname === `/plans/${plan.id}/tasks/in-flight`) {
       return send(200, { tasks: inFlight });
     }
@@ -1415,6 +1434,53 @@ test('SessionStart runs ensureInstalled against workspace binaries and spawns th
         process.kill(pid, 'SIGTERM');
       } catch {}
     }
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// SessionStart work summary (Clawket-style banner): plan + scenario counts +
+// tasks + decisions + the daemon-computed next step (#15) + recent activity.
+test('SessionStart: buildSessionSummary renders a rich work banner', async () => {
+  const home = mkTempHome('sdi-sess-summary');
+  const { server, port } = await startMockSdiDaemon({
+    plan: { id: 'PLAN-x', short_code: 'P-1', title: 'demo plan', status: 'active' },
+    handoffScenarios: [
+      { id: 'S1', status: 'confirmed' },
+      { id: 'S2', status: 'confirmed' },
+      { id: 'S3', status: 'draft' },
+      { id: 'S4', status: 'confirmed', retired_at: '2026-06-16T00:00:00Z' },
+    ],
+    inFlight: [{ short_code: 'T-1', description: 'wire the thing', status: 'in_progress' }],
+    decisions: [{ short_code: 'DEC-1', supersede_when: 'team disagrees' }],
+    activity: [{ kind: 'task.updated', summary: 'started T-1' }],
+    nextCommand: 'sdi task brief TASK-1',
+    nextReason: 'a task is in progress',
+    provisional: [{ short_code: 'DEC-1', supersede_when: 'team disagrees' }],
+  });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, {});
+    process.env.SDI_HOME = home; // daemonBase reads the pinned port under SDI_HOME
+    const mod = require(SHARED);
+    const banner = await mod._internals.buildSessionSummary({
+      id: 'PROJ-test',
+      name: 'Demo',
+      key: 'TEST',
+    });
+    assert.match(banner, /# SDI · Demo \(TEST\)/);
+    assert.match(banner, /plan: P-1 · demo plan/);
+    assert.match(banner, /scenarios: 2 confirmed · 1 draft · 1 retired/);
+    assert.match(banner, /tasks: 1 in-flight · 0 backlog/);
+    assert.match(banner, /▸ T-1 wire the thing/);
+    assert.match(banner, /decisions: 1 · 1 provisional/);
+    assert.match(banner, /↳ next: sdi task brief TASK-1/);
+    assert.match(banner, /a task is in progress/);
+    assert.match(banner, /revisit DEC-1 when: team disagrees/);
+    assert.match(banner, /recent:/);
+    assert.ok(env); // keep env referenced
+  } finally {
+    delete process.env.SDI_HOME;
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

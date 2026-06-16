@@ -1095,6 +1095,76 @@ async function claimOverlapGate(toolName, toolInput, agentId) {
 // completes normally; throwing crashes the shim's wrap and exits 0 (allow).
 
 // SessionStart: drive ensureInstalled, then inject minimal dashboard context.
+// Clawket-style work summary for the SessionStart banner. One handoff fetch
+// (active plan + scenarios + tasks + decisions + activity) plus one `next`
+// fetch (the daemon-computed next step, #15) — both read-only and local, so
+// the round-trips are cheap. Degrades gracefully: any field the daemon can't
+// supply is simply omitted rather than failing the banner.
+async function buildSessionSummary(project) {
+  let b = `# SDI · ${project.name} (${project.key})\n`;
+  const handoff = await getJson(`/projects/${encodeURIComponent(project.id)}/handoff`).catch(
+    () => null,
+  );
+  const plan = handoff && handoff.active_plan;
+  if (!plan) {
+    b += `\nNo active plan. Author scenarios, then approve a plan:\n`;
+    b += `  sdi plan create ${project.id} <SHORT> "<title>"\n`;
+    b += `  sdi scenario create <PLAN-ID> <SHORT> --given "…" --when "…" --then "…" --confirmed\n`;
+    b += `  sdi plan approve <PLAN-ID>\n`;
+    return b;
+  }
+
+  b += `plan: ${plan.short_code} · ${plan.title}\n`;
+
+  // Scenario counts (confirmed / draft / retired) from the full list.
+  const scenarios = Array.isArray(handoff.scenarios) ? handoff.scenarios : [];
+  const live = scenarios.filter((s) => !s.retired_at);
+  const confirmed = live.filter((s) => s.status === 'confirmed').length;
+  const draft = live.filter((s) => s.status === 'draft').length;
+  const retired = scenarios.length - live.length;
+  let scnLine = `scenarios: ${confirmed} confirmed · ${draft} draft`;
+  if (retired > 0) scnLine += ` · ${retired} retired`;
+  b += scnLine + '\n';
+
+  // Tasks: counts + in-progress detail.
+  const inFlight = Array.isArray(handoff.in_flight_tasks) ? handoff.in_flight_tasks : [];
+  const backlog = Array.isArray(handoff.backlog_tasks) ? handoff.backlog_tasks : [];
+  b += `tasks: ${inFlight.length} in-flight · ${backlog.length} backlog\n`;
+  for (const t of inFlight.slice(0, 3)) {
+    const desc = String(t.description || '').slice(0, 60);
+    b += `  ▸ ${t.short_code} ${desc}\n`;
+  }
+
+  // Decisions: total + provisional (#16) flag.
+  const decisions = Array.isArray(handoff.recent_decisions) ? handoff.recent_decisions : [];
+  if (decisions.length > 0) {
+    const provisional = decisions.filter((d) => d.supersede_when).length;
+    b += `decisions: ${decisions.length}` + (provisional > 0 ? ` · ${provisional} provisional ⚠\n` : '\n');
+  }
+
+  // The daemon-computed next step (#15) — the headline of the banner.
+  const next = await getJson(`/projects/${encodeURIComponent(project.id)}/next`).catch(() => null);
+  if (next && next.command) {
+    b += `↳ next: ${String(next.command).split('\n')[0]}\n`;
+    if (next.reason) b += `        ${next.reason}\n`;
+    const prov = Array.isArray(next.provisional_decisions) ? next.provisional_decisions : [];
+    for (const d of prov.slice(0, 3)) {
+      if (d.supersede_when) b += `        ⚠ revisit ${d.short_code} when: ${d.supersede_when}\n`;
+    }
+  }
+
+  // Recent activity (most recent first), up to 3.
+  const activity = Array.isArray(handoff.recent_activity) ? handoff.recent_activity : [];
+  if (activity.length > 0) {
+    b += `recent:\n`;
+    for (const a of activity.slice(0, 3)) {
+      const summary = String(a.summary || a.kind || '').slice(0, 70);
+      if (summary) b += `  · ${summary}\n`;
+    }
+  }
+  return b;
+}
+
 async function runSessionStart(input) {
   const root = pluginRoot();
   const installed = await ensureInstalled(root);
@@ -1106,31 +1176,13 @@ async function runSessionStart(input) {
   }
   const cwd = (input && input.cwd) || process.cwd();
   const project = await projectByCwd(cwd);
-  let banner = `# SDI session\n`;
-  banner += `cwd: ${cwd}\n`;
+  let banner;
   if (!project) {
+    banner = `# SDI session\ncwd: ${cwd}\n`;
     banner += `\nNo SDI project registered for this cwd.\n`;
-    banner += `Register: \`sdi project create --key <KEY> --name "<name>" --cwd ${cwd}\`\n`;
+    banner += `Register: \`sdi project create <KEY> <name> --cwd ${cwd}\`\n`;
   } else {
-    banner += `project: ${project.name} (${project.key})\n`;
-    const plan = await activePlanForProject(project.id);
-    if (!plan) {
-      banner += `No active plan. Create + approve one before starting work:\n`;
-      banner += `  sdi plan create --project ${project.id} --title "<title>"\n`;
-      banner += `  sdi scenario add --plan <PLAN-ID> --given "..." --when "..." --then "..."\n`;
-      banner += `  sdi plan approve <PLAN-ID>\n`;
-    } else {
-      banner += `active plan: ${plan.title} (${plan.id})\n`;
-      const tasks = await inFlightTasks(plan.id);
-      if (tasks.length === 0) {
-        banner += `In-flight tasks: 0\n`;
-      } else {
-        banner += `In-flight tasks (${tasks.length}):\n`;
-        for (const t of tasks.slice(0, 5)) {
-          banner += `  - ${t.id} ${t.title}\n`;
-        }
-      }
-    }
+    banner = await buildSessionSummary(project);
   }
   // Dashboard SPA advisory — single line, opt-out via SDI_WEB_DISABLE=1.
   // Daemon-owned SPA at <port>/. Status mirrors the daemon's own resolver.
@@ -1621,6 +1673,7 @@ module.exports = {
   // Internals exposed for tests
   _internals: {
     isReadOnlyBash,
+    buildSessionSummary,
     resolveSdiBin,
     resolveSdidBin,
     resolveWebDist,

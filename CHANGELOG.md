@@ -8,6 +8,23 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.5.2] - 2026-06-16
+
+### Changed
+- The **SessionStart banner** is now a Clawket-style work summary: the active
+  plan, scenario counts (confirmed / draft / retired), in-flight + backlog task
+  counts with in-progress detail, decisions (with a provisional flag), recent
+  activity, and — the headline — the daemon-computed **next step** (`sdi next`,
+  #15) with its reason and any provisional decisions to revisit. Built from one
+  `/handoff` + one `/next` fetch; degrades gracefully when the daemon can't
+  supply a field.
+
+### Fixed
+- The old SessionStart banner printed `undefined` for in-flight tasks (it read
+  a non-existent `title` field instead of `description`) and suggested commands
+  that don't exist (`sdi scenario add`, `sdi plan create --project --title`).
+  Corrected to the real positional signatures.
+
 ## [0.5.1] - 2026-06-16
 
 ### Added (dashboard)
