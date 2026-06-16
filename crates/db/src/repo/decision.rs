@@ -28,13 +28,14 @@ fn row_to_decision(row: &Row<'_>) -> rusqlite::Result<Decision> {
         blast_radius_score: row.get::<_, i64>(13)? as i32,
         reversal_of: s_opt(row, 14)?.map(Id::from),
         created_at: ts(row, 15)?,
+        supersede_when: s_opt(row, 16)?,
     })
 }
 
 const COLS: &str = "id, plan_id, short_code, title, body, status, supersedes_id, \
                     kind, proposal_id, agent_name, escalated_at, \
                     produced_via_pattern_id, reversal_plan, blast_radius_score, \
-                    reversal_of, created_at";
+                    reversal_of, created_at, supersede_when";
 
 pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
     // D28 — blast_radius_score in 0..=10.
@@ -77,7 +78,7 @@ pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
     conn.execute(
         &format!(
             "INSERT INTO decisions({COLS}) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)"
         ),
         params![
             decision.id.as_str(),
@@ -105,6 +106,7 @@ pub fn insert(conn: &Connection, decision: &Decision) -> DomainResult<()> {
                 .as_ref()
                 .map(|i| i.as_str().to_string()),
             fmt_ts(decision.created_at),
+            decision.supersede_when,
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -160,6 +162,27 @@ pub fn list_by_plan(conn: &Connection, plan_id: &Id) -> DomainResult<Vec<Decisio
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {COLS} FROM decisions WHERE plan_id = ?1 ORDER BY created_at"
+        ))
+        .map_err(map_sqlite_err)?;
+    let rows = stmt
+        .query_map([plan_id.as_str()], row_to_decision)
+        .map_err(map_sqlite_err)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(map_sqlite_err)?);
+    }
+    Ok(out)
+}
+
+/// #16 — provisional decisions on a plan: accepted-and-in-effect rows carrying
+/// a `supersede_when` revisit trigger and not yet superseded. Surfaced by
+/// `sdi next` so an autonomous run is reminded of choices it deferred.
+pub fn list_provisional(conn: &Connection, plan_id: &Id) -> DomainResult<Vec<Decision>> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {COLS} FROM decisions \
+             WHERE plan_id = ?1 AND supersede_when IS NOT NULL AND status != 'superseded' \
+             ORDER BY created_at"
         ))
         .map_err(map_sqlite_err)?;
     let rows = stmt
@@ -267,6 +290,7 @@ mod tests {
             blast_radius_score: 5,
             reversal_of: None,
             created_at: now(),
+            supersede_when: None,
         }
     }
 

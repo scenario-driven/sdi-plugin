@@ -22,12 +22,15 @@ pub async fn run(cli: &Client, cmd: DecisionCmd, quiet: bool) -> Result<()> {
 }
 
 async fn create(cli: &Client, args: DecisionCreateArgs, quiet: bool) -> Result<()> {
-    let body = json!({
+    let mut body = json!({
         "plan_id": args.plan_id,
         "short_code": args.short_code,
         "title": args.title,
         "body": args.body,
     });
+    if let Some(when) = args.supersede_when {
+        body["supersede_when"] = json!(when);
+    }
     let v: Value = cli.post_json("/decisions", &body).await?;
     emit(&v, quiet)
 }

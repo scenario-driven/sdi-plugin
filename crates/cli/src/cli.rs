@@ -95,6 +95,9 @@ pub enum Cmd {
     Dashboard(DashboardArgs),
     /// Project handoff bundle (hand a session over to another agent).
     Handoff(HandoffArgs),
+    /// The single next mechanical step for the active plan (+ provisional
+    /// decisions to revisit). The daemon computes it from state (#15).
+    Next(HandoffArgs),
     /// Activity timeline for a project.
     Timeline(TimelineArgs),
     /// Project-scoped board view (in-flight + backlog).
@@ -601,6 +604,16 @@ pub enum RoundCmd {
         /// Round id.
         id: String,
     },
+    /// Get or set the round's verification baseline (#15). With `--set`, store
+    /// the JSON blob; without it, print the current baseline. Surfaced in
+    /// `sdi task brief` so a regression shows as a count delta.
+    Baseline {
+        /// Round id.
+        id: String,
+        /// JSON baseline to store (e.g. '{"green_tests":412}'). Omit to read.
+        #[arg(long)]
+        set: Option<String>,
+    },
     /// Record a per-scenario verdict.
     Result(RoundResultArgs),
     /// List all results for a round.
@@ -661,6 +674,13 @@ pub enum TaskCmd {
     },
     /// Show a task by id.
     View {
+        /// Task id.
+        id: String,
+    },
+    /// Delegation brief: linked scenarios' GWT + round baseline + evidence
+    /// format + report schema + prohibitions, so the executing agent adds only
+    /// the design decisions (#15).
+    Brief {
         /// Task id.
         id: String,
     },
@@ -844,6 +864,12 @@ pub struct DecisionCreateArgs {
     /// Body markdown.
     #[arg(long, default_value = "")]
     pub body: String,
+    /// #16 — record this as a PROVISIONAL decision with a revisit trigger:
+    /// the condition under which it should be re-examined ("revisit when X").
+    /// The decision is still accepted and in effect (a reversible call made to
+    /// keep an autonomous run moving); `sdi next` surfaces it for revisit.
+    #[arg(long)]
+    pub supersede_when: Option<String>,
 }
 
 #[derive(Debug, Args)]

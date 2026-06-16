@@ -1135,14 +1135,14 @@ async fn task_stats_is_project_scoped() {
 // ── #12 / #13 — evidence integrity at task complete ────────────────────────
 
 /// Plan → confirmed scenario → active round → in_progress task whose only
-/// parent is that scenario. Returns (plan_id, scn_id, scn_short, round_id,
-/// task_id).
+/// parent is that scenario. Returns (project_id, plan_id, scn_id, scn_short,
+/// round_id, task_id).
 async fn setup_in_progress_task(
     base: &str,
     suffix: &str,
-) -> (String, String, String, String, String) {
+) -> (String, String, String, String, String, String) {
     let cli = c();
-    let (_pid, plan_id) = mk_plan(base, suffix).await;
+    let (project_id, plan_id) = mk_plan(base, suffix).await;
     let scn_short = format!("SCN-{}", &suffix[..6]);
     let scn: serde_json::Value = cli
         .post(format!("{}/scenarios", base))
@@ -1195,7 +1195,7 @@ async fn setup_in_progress_task(
         .send()
         .await
         .unwrap();
-    (plan_id, scn_id, scn_short, r1_id, task_id)
+    (project_id, plan_id, scn_id, scn_short, r1_id, task_id)
 }
 
 /// #12 — a ghost scenario_id in evidence is rejected, and the task stays
@@ -1204,7 +1204,7 @@ async fn setup_in_progress_task(
 async fn task_complete_rejects_ghost_scenario_id_12() {
     let (base, _h) = spawn_server().await;
     let suffix = ulid::Ulid::new().to_string();
-    let (_plan, _scn, _short, _r1, task_id) = setup_in_progress_task(&base, &suffix).await;
+    let (_proj, _plan, _scn, _short, _r1, task_id) = setup_in_progress_task(&base, &suffix).await;
     let cli = c();
 
     let r = cli
@@ -1241,7 +1241,7 @@ async fn task_complete_rejects_ghost_scenario_id_12() {
 async fn task_complete_rejects_non_parent_scenario_12() {
     let (base, _h) = spawn_server().await;
     let suffix = ulid::Ulid::new().to_string();
-    let (plan_id, _scn, _short, _r1, task_id) = setup_in_progress_task(&base, &suffix).await;
+    let (_proj, plan_id, _scn, _short, _r1, task_id) = setup_in_progress_task(&base, &suffix).await;
     let cli = c();
     // A second scenario in the same plan, NOT linked to the task.
     let other: serde_json::Value = cli
@@ -1278,7 +1278,8 @@ async fn task_complete_rejects_non_parent_scenario_12() {
 async fn task_complete_resolves_short_code_13() {
     let (base, _h) = spawn_server().await;
     let suffix = ulid::Ulid::new().to_string();
-    let (_plan, scn_id, scn_short, r1_id, task_id) = setup_in_progress_task(&base, &suffix).await;
+    let (_proj, _plan, scn_id, scn_short, r1_id, task_id) =
+        setup_in_progress_task(&base, &suffix).await;
     let cli = c();
 
     let r = cli
@@ -1482,4 +1483,134 @@ async fn scenario_retire_excludes_and_unretire_restores_8() {
     let body: serde_json::Value = r.json().await.unwrap();
     assert!(body["retired_at"].is_null(), "retired_at cleared");
     assert_eq!(body["status"], "confirmed", "status restored");
+}
+
+/// #15 + #16 — `sdi next` points at the in-progress task's brief and surfaces a
+/// provisional decision; `sdi task brief` inlines GWT + evidence format; the
+/// round baseline round-trips.
+#[tokio::test]
+async fn next_brief_baseline_and_provisional_15_16() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (project_id, plan_id, scn_id, _short, r1_id, task_id) =
+        setup_in_progress_task(&base, &suffix).await;
+
+    // #16 — a provisional (accepted + supersede_when) decision.
+    cli.post(format!("{}/decisions", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id,
+            "short_code": format!("DEC-{}", &suffix[..6]),
+            "title": "file as SoT",
+            "body": "tentative",
+            "supersede_when": "the team disagrees in review"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // #15 — next step. An in_progress task exists, so it points at the brief,
+    // and the provisional decision rides along.
+    let nxt: serde_json::Value = cli
+        .get(format!("{}/projects/{}/next", base, project_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        nxt["command"].as_str().unwrap().contains("sdi task brief"),
+        "next should point at the in-progress task's brief, got: {}",
+        nxt["command"]
+    );
+    let prov = nxt["provisional_decisions"].as_array().unwrap();
+    assert_eq!(prov.len(), 1, "the provisional decision is surfaced (#16)");
+    assert_eq!(prov[0]["supersede_when"], "the team disagrees in review");
+
+    // #15 — task brief inlines the linked scenario's GWT + evidence format.
+    let brief: serde_json::Value = cli
+        .get(format!("{}/tasks/{}/brief", base, task_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scns = brief["scenarios"].as_array().unwrap();
+    assert_eq!(scns.len(), 1);
+    assert_eq!(scns[0]["id"], scn_id);
+    assert!(scns[0]["given"].is_string() && scns[0]["then"].is_string());
+    assert!(brief["evidence_format"]
+        .as_str()
+        .unwrap()
+        .contains("passing"));
+    assert!(brief["prohibitions"].as_array().unwrap().len() >= 2);
+
+    // #15 — round baseline round-trips and shows up in the brief.
+    cli.post(format!("{}/rounds/{}/baseline", base, r1_id))
+        .json(&serde_json::json!({ "baseline_json": {"green_tests": 412} }))
+        .send()
+        .await
+        .unwrap();
+    let got: serde_json::Value = cli
+        .get(format!("{}/rounds/{}/baseline", base, r1_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(got["baseline"]["green_tests"], 412);
+    let brief2: serde_json::Value = cli
+        .get(format!("{}/tasks/{}/brief", base, task_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(brief2["baseline"], "{\"green_tests\":412}");
+}
+
+/// #15 — on a fresh plan with no confirmed scenarios, `next` steers toward
+/// authoring + confirming scenarios.
+#[tokio::test]
+async fn next_on_empty_plan_steers_to_scenarios_15() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (project_id, plan_id) = mk_plan(&base, &suffix).await;
+    // Make the plan active so it is the project's active plan: confirm one
+    // scenario, approve, then there IS an active plan with a round to open.
+    cli.post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id, "short_code": format!("SCN-{}", &suffix[..6]),
+            "given": "g", "when": "w", "then": "t", "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+
+    let nxt: serde_json::Value = cli
+        .get(format!("{}/projects/{}/next", base, project_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    // Confirmed scenarios exist, no round yet → next is "create + activate a round".
+    assert!(
+        nxt["command"]
+            .as_str()
+            .unwrap()
+            .contains("sdi round create"),
+        "got: {}",
+        nxt["command"]
+    );
 }

@@ -66,6 +66,10 @@ struct CreateDecisionBody {
     /// D28 — when this row IS a rollback of another decision, the original id.
     #[serde(default)]
     reversal_of: Option<String>,
+    /// #16 — provisional revisit trigger. Free-text condition ("revisit
+    /// when X"). Present ⇒ the decision is provisional (accepted + flagged).
+    #[serde(default)]
+    supersede_when: Option<String>,
 }
 
 async fn create(
@@ -122,6 +126,7 @@ async fn create(
         blast_radius_score: b.blast_radius_score.unwrap_or(5),
         reversal_of: b.reversal_of.map(Id::from),
         created_at: now(),
+        supersede_when: b.supersede_when,
     };
     repo::insert(&conn, &decision)?;
     let fresh = repo::get(&conn, &decision.id)?;
@@ -263,6 +268,7 @@ async fn rollback(
         blast_radius_score: score,
         reversal_of: Some(orig_id.clone()),
         created_at: now(),
+        supersede_when: None,
     };
     repo::insert(&conn, &rollback_decision)?;
     let fresh = repo::get(&conn, &rollback_decision.id)?;

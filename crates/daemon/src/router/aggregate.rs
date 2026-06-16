@@ -44,6 +44,9 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/dashboard", get(dashboard))
         .route("/projects/:id/handoff", get(handoff))
+        .route("/projects/:id/next", get(next_step))
+        .route("/tasks/:id/brief", get(task_brief))
+        .route("/rounds/:id/baseline", post(set_baseline).get(get_baseline))
         .route("/metrics", get(metrics))
         .route("/usage", post(record_usage).get(list_usage))
         .route("/plans/:id/usage", get(plan_usage))
@@ -175,6 +178,181 @@ async fn handoff(State(state): State<AppState>, Path(id): Path<String>) -> ApiRe
         "recent_decisions": recent_decisions,
         "recent_activity": activity,
     })))
+}
+
+// ---------------------------------------------------------------------------
+// #15 — sdi next / task brief / round baseline
+// ---------------------------------------------------------------------------
+
+/// The single mechanical next step for the project's active plan, computed
+/// from daemon state. `sdi next` renders `command` + `reason`; provisional
+/// decisions (#16) ride along as revisit reminders.
+async fn next_step(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let project = project_repo::get(&conn, &Id::from(id))?;
+    let active_plan = plan_repo::find_active_for_project(&conn, &project.id)?;
+
+    let (command, reason): (String, String) = match active_plan.as_ref() {
+        None => (
+            "sdi plan create <PROJECT-ID> <SHORT> \"<title>\"".into(),
+            "No active plan. Create one, author Given/When/Then scenarios, confirm them, \
+             and approve the plan (needs ≥1 confirmed scenario)."
+                .into(),
+        ),
+        Some(plan) => {
+            let active_round = round_repo::find_active_for_plan(&conn, &plan.id)?;
+            match active_round {
+                None => {
+                    let confirmed = scenario_repo::count_confirmed(&conn, &plan.id)?;
+                    if confirmed == 0 {
+                        (
+                            format!(
+                                "sdi scenario create {} <SHORT> --given \"…\" --when \"…\" --then \"…\" --confirmed",
+                                plan.id
+                            ),
+                            "Active plan has no confirmed scenarios. Author and confirm at least one before opening a round."
+                                .into(),
+                        )
+                    } else {
+                        (
+                            format!("sdi round create {} R1 && sdi round activate <ROUND-ID>", plan.id),
+                            format!(
+                                "{confirmed} confirmed scenario(s) exist but no round is active. Create and activate a round to start verification."
+                            ),
+                        )
+                    }
+                }
+                Some(round) => {
+                    let in_flight = task_repo::list_in_flight_for_plan(&conn, &plan.id)?;
+                    if let Some(t) = in_flight.first() {
+                        (
+                            format!("sdi task brief {0} # implement, then: sdi task complete {0} --evidence \"<SCN>=passing@<ref>\"", t.id),
+                            format!("Task {} is in progress — brief it, implement, and complete with evidence.", t.short_code),
+                        )
+                    } else {
+                        let needs =
+                            round_repo::scenarios_needing_verification(&conn, &round.id, &plan.id)?;
+                        if let Some(s) = needs.first() {
+                            (
+                                format!(
+                                    "sdi task create {} <SHORT> \"<one-line>\" --scenario {}",
+                                    round.id, s.scenario_id
+                                ),
+                                format!(
+                                    "Round {} is active with {} scenario(s) needing verification and no task in progress — decompose the next one ({}).",
+                                    round.short_code, needs.len(), s.short_code
+                                ),
+                            )
+                        } else {
+                            (
+                                format!("sdi round complete {}", round.id),
+                                "Every scenario in the active round is verified and no task is in progress — complete the round."
+                                    .into(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    let provisional = match active_plan.as_ref() {
+        Some(p) => decision_repo::list_provisional(&conn, &p.id)?,
+        None => Vec::new(),
+    };
+
+    Ok(Json(json!({
+        "project": project,
+        "active_plan": active_plan,
+        "command": command,
+        "reason": reason,
+        // #16 — provisional decisions whose revisit condition the run should
+        // keep in view; the daemon remembers what a weak model forgets.
+        "provisional_decisions": provisional,
+    })))
+}
+
+/// A delegation brief for one task: the linked scenarios' full GWT inline plus
+/// the round's verification baseline, wrapped with the SDI-universal evidence
+/// format, report schema, and prohibitions. The model adds only the design
+/// decisions; the template parts come from the daemon so brief-writing (a
+/// strong-model job) is separated from brief-following (a weak-model job).
+async fn task_brief(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let task = task_repo::get(&conn, &Id::from(id))?;
+    let round = round_repo::get(&conn, &task.round_id)?;
+    let baseline = round_repo::get_baseline(&conn, &task.round_id)?;
+    let mut scenarios = Vec::new();
+    for sid in &task.parent_scenario_ids {
+        if let Ok(s) = scenario_repo::get(&conn, sid) {
+            scenarios.push(s);
+        }
+    }
+
+    Ok(Json(json!({
+        "task": task,
+        "round": round,
+        "baseline": baseline,
+        // Full GWT inline so the executing agent does not re-fetch scenarios.
+        "scenarios": scenarios,
+        "evidence_format": "<SCN-id-or-short-code>=<passing|failing|blocked>@<file:line | test name | url>",
+        "report_schema": {
+            "summary": "one line: what changed and whether the linked scenarios now pass",
+            "evidence": "one entry per parent scenario in the evidence_format above",
+            "follow_ups": "optional: provisional decisions or new scenarios surfaced while implementing"
+        },
+        "prohibitions": [
+            "do NOT git commit or git push (the user commits via their own tooling)",
+            "do NOT git reset / checkout <ref> -- <path> / restore (destructive history rewrite)",
+            "complete the task only with real evidence — a ghost or non-parent scenario id is rejected"
+        ],
+        "complete_with": format!(
+            "sdi task complete {} --evidence \"<SCN>=passing@<ref>\" [--evidence …]",
+            task.id
+        ),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct BaselineBody {
+    baseline_json: Value,
+}
+
+async fn set_baseline(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<BaselineBody>,
+) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let rid = Id::from(id);
+    let raw = serde_json::to_string(&b.baseline_json)
+        .map_err(|e| DomainError::Validation(format!("encode baseline: {e}")))?;
+    round_repo::set_baseline(&conn, &rid, &raw)?;
+    Ok(Json(
+        json!({ "round_id": rid.to_string(), "baseline": b.baseline_json }),
+    ))
+}
+
+async fn get_baseline(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let rid = Id::from(id);
+    let raw = round_repo::get_baseline(&conn, &rid)?;
+    let parsed = raw
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .unwrap_or(Value::Null);
+    Ok(Json(
+        json!({ "round_id": rid.to_string(), "baseline": parsed }),
+    ))
 }
 
 // ---------------------------------------------------------------------------

@@ -118,6 +118,14 @@ pub struct Decision {
     /// decision id. The original is never mutated (D12 SNAPSHOT-ONLY).
     #[serde(default)]
     pub reversal_of: Option<Id>,
+    /// #16 — a provisional decision's revisit trigger. Free-text condition
+    /// ("revisit when X"). `Some` ⇒ the decision is provisional: still
+    /// `accepted` and in effect (a Type-2 / reversible call made to keep an
+    /// autonomous run moving), but flagged for re-examination. The existing
+    /// supersession chain replaces it when the trigger fires; no new status is
+    /// introduced (the provisional set is `supersede_when IS NOT NULL`).
+    #[serde(default)]
+    pub supersede_when: Option<String>,
     pub created_at: Timestamp,
 }
 

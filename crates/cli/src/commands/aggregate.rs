@@ -28,6 +28,14 @@ pub async fn handoff(cli: &Client, args: HandoffArgs) -> Result<()> {
     emit(&v, false)
 }
 
+pub async fn next(cli: &Client, args: HandoffArgs) -> Result<()> {
+    let project_id = resolve_project_id(cli, &args.selector).await?;
+    let v: Value = cli
+        .get_json(&format!("/projects/{project_id}/next"))
+        .await?;
+    emit(&v, false)
+}
+
 pub async fn summary(cli: &Client, args: SummaryArgs) -> Result<()> {
     let path = build_dashboard_path(
         "/dashboard",

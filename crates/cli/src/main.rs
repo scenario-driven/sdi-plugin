@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
         Cmd::Usage(sub) => commands::usage::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Dashboard(args) => commands::aggregate::dashboard(&entity_client().await?, args).await,
         Cmd::Handoff(args) => commands::aggregate::handoff(&entity_client().await?, args).await,
+        Cmd::Next(args) => commands::aggregate::next(&entity_client().await?, args).await,
         Cmd::Timeline(args) => commands::aggregate::timeline(&entity_client().await?, args).await,
         Cmd::Board(args) => commands::aggregate::board(&entity_client().await?, args).await,
         Cmd::Wiki(args) => commands::aggregate::wiki(&entity_client().await?, args).await,

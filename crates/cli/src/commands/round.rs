@@ -13,9 +13,30 @@ pub async fn run(cli: &Client, cmd: RoundCmd, quiet: bool) -> Result<()> {
         RoundCmd::View { id } => view(cli, &id, quiet).await,
         RoundCmd::Activate { id } => activate(cli, &id, quiet).await,
         RoundCmd::Complete { id } => transition(cli, &id, "complete", quiet).await,
+        RoundCmd::Baseline { id, set } => baseline(cli, &id, set, quiet).await,
         RoundCmd::Result(args) => post_result(cli, args).await,
         RoundCmd::Results { id } => list_results(cli, &id).await,
         RoundCmd::Active { plan_id } => active(cli, &plan_id).await,
+    }
+}
+
+async fn baseline(cli: &Client, id: &str, set: Option<String>, quiet: bool) -> Result<()> {
+    match set {
+        Some(raw) => {
+            let parsed: Value = serde_json::from_str(&raw)
+                .map_err(|e| anyhow::anyhow!("--set must be valid JSON: {e}"))?;
+            let v: Value = cli
+                .post_json(
+                    &format!("/rounds/{id}/baseline"),
+                    &json!({ "baseline_json": parsed }),
+                )
+                .await?;
+            emit(&v, quiet)
+        }
+        None => {
+            let v: Value = cli.get_json(&format!("/rounds/{id}/baseline")).await?;
+            emit(&v, quiet)
+        }
     }
 }
 

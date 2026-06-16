@@ -46,6 +46,16 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         MIGRATION_011_DIRECT_PROVENANCE_BACKFILL_RERUN,
     ),
     (12, "scenario retirement", MIGRATION_012_SCENARIO_RETIRE),
+    (
+        13,
+        "provisional decision supersede-when",
+        MIGRATION_013_DECISION_SUPERSEDE_WHEN,
+    ),
+    (
+        14,
+        "round verification baseline",
+        MIGRATION_014_ROUND_BASELINE,
+    ),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -63,6 +73,9 @@ const MIGRATION_010_SHORT_CODE_SCOPE: &str = include_str!("./migrations/010_shor
 const MIGRATION_011_DIRECT_PROVENANCE_BACKFILL_RERUN: &str =
     include_str!("./migrations/011_direct_provenance_backfill_rerun.sql");
 const MIGRATION_012_SCENARIO_RETIRE: &str = include_str!("./migrations/012_scenario_retire.sql");
+const MIGRATION_013_DECISION_SUPERSEDE_WHEN: &str =
+    include_str!("./migrations/013_decision_supersede_when.sql");
+const MIGRATION_014_ROUND_BASELINE: &str = include_str!("./migrations/014_round_baseline.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {

@@ -15,6 +15,7 @@ pub async fn run(cli: &Client, cmd: TaskCmd, quiet: bool) -> Result<()> {
         TaskCmd::Create(args) => create(cli, args, quiet).await,
         TaskCmd::List { round_id } => list(cli, &round_id).await,
         TaskCmd::View { id } => view(cli, &id, quiet).await,
+        TaskCmd::Brief { id } => simple_get(cli, &format!("/tasks/{id}/brief")).await,
         TaskCmd::Start { id } => set_status(cli, &id, "in_progress", quiet).await,
         TaskCmd::Block { id } => set_status(cli, &id, "blocked", quiet).await,
         TaskCmd::Cancel { id } => set_status(cli, &id, "cancelled", quiet).await,

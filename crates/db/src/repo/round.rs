@@ -216,6 +216,37 @@ pub fn list_results(conn: &Connection, round_id: &Id) -> DomainResult<Vec<Scenar
     Ok(out)
 }
 
+/// #15 — set the round's verification baseline blob (free-form JSON; the
+/// shape is the caller's contract). Stored out-of-struct to keep the `Round`
+/// DTO stable across consumers.
+pub fn set_baseline(conn: &Connection, round_id: &Id, baseline_json: &str) -> DomainResult<()> {
+    let n = conn
+        .execute(
+            "UPDATE rounds SET baseline_json = ?1, updated_at = ?2 WHERE id = ?3",
+            params![baseline_json, fmt_ts(now()), round_id.as_str()],
+        )
+        .map_err(map_sqlite_err)?;
+    if n == 0 {
+        return Err(DomainError::NotFound(round_id.to_string()));
+    }
+    Ok(())
+}
+
+/// #15 — read the round's verification baseline blob, if any.
+pub fn get_baseline(conn: &Connection, round_id: &Id) -> DomainResult<Option<String>> {
+    match conn.query_row(
+        "SELECT baseline_json FROM rounds WHERE id = ?1",
+        [round_id.as_str()],
+        |r| r.get::<_, Option<String>>(0),
+    ) {
+        Ok(v) => Ok(v),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            Err(DomainError::NotFound(round_id.to_string()))
+        }
+        Err(e) => Err(map_sqlite_err(e)),
+    }
+}
+
 /// One scenario in the round's "needs verification" set (#7).
 #[derive(Debug, serde::Serialize)]
 pub struct NeedsVerificationRow {
