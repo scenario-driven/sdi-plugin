@@ -45,6 +45,7 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "D23 direct-provenance back-fill rerun",
         MIGRATION_011_DIRECT_PROVENANCE_BACKFILL_RERUN,
     ),
+    (12, "scenario retirement", MIGRATION_012_SCENARIO_RETIRE),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -61,6 +62,7 @@ const MIGRATION_009_DIRECT_PROVENANCE_BACKFILL: &str =
 const MIGRATION_010_SHORT_CODE_SCOPE: &str = include_str!("./migrations/010_short_code_scope.sql");
 const MIGRATION_011_DIRECT_PROVENANCE_BACKFILL_RERUN: &str =
     include_str!("./migrations/011_direct_provenance_backfill_rerun.sql");
+const MIGRATION_012_SCENARIO_RETIRE: &str = include_str!("./migrations/012_scenario_retire.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {

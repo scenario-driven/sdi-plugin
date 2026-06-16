@@ -500,6 +500,18 @@ pub enum ScenarioCmd {
         /// Scenario id.
         id: String,
     },
+    /// Retire a scenario: exclude it from verification / regression / the
+    /// approve count while keeping its history. Reversible (`unretire`);
+    /// draft/confirmed status is preserved for restore (#8).
+    Retire {
+        /// Scenario id.
+        id: String,
+    },
+    /// Restore a retired scenario to its preserved status (#8).
+    Unretire {
+        /// Scenario id.
+        id: String,
+    },
     /// Full-text search across one plan's scenarios.
     // FTS5; mirrors the MCP `search_scenarios` tool (PRD §5.4).
     Search(ScenarioSearchArgs),

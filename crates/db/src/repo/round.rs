@@ -242,7 +242,7 @@ pub fn scenarios_needing_verification(
         .prepare(
             "SELECT s.id, s.short_code, s.given, s.when_clause, s.then_clause \
              FROM scenarios s \
-             WHERE s.plan_id = ?1 AND s.status = 'confirmed' \
+             WHERE s.plan_id = ?1 AND s.status = 'confirmed' AND s.retired_at IS NULL \
                AND NOT EXISTS ( \
                  SELECT 1 FROM scenario_results sr \
                  WHERE sr.round_id = ?2 AND sr.scenario_id = s.id \
@@ -292,7 +292,8 @@ pub fn carry_over_results(
             "SELECT sr.scenario_id, sr.result \
              FROM scenario_results sr \
              JOIN scenarios s ON s.id = sr.scenario_id \
-             WHERE sr.round_id = ?1 AND s.plan_id = ?2 AND s.status = 'confirmed'",
+             WHERE sr.round_id = ?1 AND s.plan_id = ?2 \
+               AND s.status = 'confirmed' AND s.retired_at IS NULL",
         )
         .map_err(map_sqlite_err)?;
     let pairs: Vec<(String, String)> = stmt
@@ -407,6 +408,7 @@ mod tests {
             claimed_resources_json: "[]".into(),
             claim_status: sdi_core::pattern::ClaimStatus::None,
             produced_via_pattern_id: None,
+            retired_at: None,
             created_at: now(),
             updated_at: now(),
         };

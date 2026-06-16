@@ -2,7 +2,7 @@
 //! every field non-empty after trim before touching SQL.
 
 use crate::map_sqlite_err;
-use crate::repo::{fmt_ts, json, parsed, s, s_opt, ts};
+use crate::repo::{fmt_ts, json, parsed, s, s_opt, ts, ts_opt};
 use rusqlite::{params, Connection, Row};
 use sdi_core::error::{DomainError, DomainResult};
 use sdi_core::ids::{now, Id};
@@ -28,13 +28,14 @@ fn row_to_scenario(row: &Row<'_>) -> rusqlite::Result<Scenario> {
         produced_via_pattern_id: s_opt(row, 14)?,
         created_at: ts(row, 15)?,
         updated_at: ts(row, 16)?,
+        retired_at: ts_opt(row, 17)?,
     })
 }
 
 const COLS: &str = "id, plan_id, short_code, given, when_clause, then_clause, tags, \
                     origin_round_id, status, depends_on, produced_by, verified_by, \
                     claimed_resources_json, claim_status, produced_via_pattern_id, \
-                    created_at, updated_at";
+                    created_at, updated_at, retired_at";
 
 pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
     Scenario::validate_gwt(
@@ -52,7 +53,7 @@ pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
     conn.execute(
         &format!(
             "INSERT INTO scenarios({COLS}) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)"
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"
         ),
         params![
             scenario.id.as_str(),
@@ -75,9 +76,33 @@ pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
             scenario.produced_via_pattern_id,
             fmt_ts(scenario.created_at),
             fmt_ts(scenario.updated_at),
+            scenario.retired_at.map(fmt_ts),
         ],
     )
     .map_err(map_sqlite_err)?;
+    Ok(())
+}
+
+/// #8 — set or clear the retirement marker. `retire=true` stamps `retired_at`
+/// (excluding the scenario from verification while keeping its history);
+/// `retire=false` clears it, restoring the scenario at its preserved `status`.
+pub fn set_retired(conn: &Connection, id: &Id, retire: bool) -> DomainResult<()> {
+    let now_s = fmt_ts(now());
+    let n = if retire {
+        conn.execute(
+            "UPDATE scenarios SET retired_at = ?1, updated_at = ?1 WHERE id = ?2",
+            params![now_s, id.as_str()],
+        )
+    } else {
+        conn.execute(
+            "UPDATE scenarios SET retired_at = NULL, updated_at = ?1 WHERE id = ?2",
+            params![now_s, id.as_str()],
+        )
+    }
+    .map_err(map_sqlite_err)?;
+    if n == 0 {
+        return Err(DomainError::NotFound(id.to_string()));
+    }
     Ok(())
 }
 
@@ -110,8 +135,10 @@ pub fn list_by_plan(conn: &Connection, plan_id: &Id) -> DomainResult<Vec<Scenari
 }
 
 pub fn count_confirmed(conn: &Connection, plan_id: &Id) -> DomainResult<i64> {
+    // #8 — a retired scenario does not count toward the D8 approve gate.
     conn.query_row(
-        "SELECT COUNT(*) FROM scenarios WHERE plan_id = ?1 AND status = 'confirmed'",
+        "SELECT COUNT(*) FROM scenarios \
+         WHERE plan_id = ?1 AND status = 'confirmed' AND retired_at IS NULL",
         [plan_id.as_str()],
         |r| r.get(0),
     )
@@ -228,7 +255,7 @@ pub fn search(
             "SELECT s.id, s.plan_id, s.short_code, s.given, s.when_clause, s.then_clause, \
                     s.tags, s.origin_round_id, s.status, s.depends_on, s.produced_by, \
                     s.verified_by, s.claimed_resources_json, s.claim_status, \
-                    s.produced_via_pattern_id, s.created_at, s.updated_at \
+                    s.produced_via_pattern_id, s.created_at, s.updated_at, s.retired_at \
              FROM scenarios s JOIN scenarios_fts f ON f.rowid = s.rowid \
              WHERE s.plan_id = ?1 AND scenarios_fts MATCH ?2 \
              ORDER BY rank LIMIT ?3",
@@ -314,6 +341,7 @@ mod tests {
             claimed_resources_json: "[]".into(),
             claim_status: ClaimStatus::None,
             produced_via_pattern_id: None,
+            retired_at: None,
             created_at: now(),
             updated_at: now(),
         }

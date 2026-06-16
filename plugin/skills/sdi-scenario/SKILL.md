@@ -123,6 +123,25 @@ authored scenarios is `confirmed` (not just `draft`).
 
 ---
 
+## Retiring a scenario (cleanup without history loss)
+
+When a scenario becomes redundant or non-atomic, **retire it** — do not
+overwrite its body with a different scenario (that severs the SCN id from its
+history):
+
+```bash
+sdi scenario retire <SCN-ID>     # exclude from verification / regression / approve count
+sdi scenario unretire <SCN-ID>   # restore (status is preserved, so it comes back as-was)
+```
+
+Retirement is reversible and history-preserving (D12): past round verdicts
+stay intact, the draft/confirmed status is kept for restore, and retired
+scenarios drop out of the round's needs-verification set and strict-regression
+carry-over. Splitting one non-atomic scenario into several is normal authoring
+— retire the original after the replacements are confirmed.
+
+---
+
 ## What you do NOT do here
 
 - **You don't run rounds.** That's `/round activate` after `/plan approve` —

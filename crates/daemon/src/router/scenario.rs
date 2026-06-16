@@ -30,6 +30,8 @@ pub fn router() -> Router<AppState> {
         .route("/scenarios/search", get(search))
         .route("/scenarios/:id", get(get_one).put(update))
         .route("/scenarios/:id/confirm", post(confirm))
+        .route("/scenarios/:id/retire", post(retire))
+        .route("/scenarios/:id/unretire", post(unretire))
         .route("/scenarios/:id/claim", post(claim))
         .route("/scenarios/:id/release", post(release))
 }
@@ -98,6 +100,7 @@ async fn create(
         claimed_resources_json: b.claimed_resources_json.unwrap_or_else(|| "[]".into()),
         claim_status: ClaimStatus::None,
         produced_via_pattern_id,
+        retired_at: None,
         created_at: now(),
         updated_at: now(),
     };
@@ -166,6 +169,33 @@ async fn confirm(State(state): State<AppState>, Path(id): Path<String>) -> ApiRe
     let fresh = repo::get(&conn, &sid)?;
     state.publish(EventEnvelope {
         kind: "scenario.confirmed".into(),
+        entity_id: Some(fresh.id.to_string()),
+        payload: serde_json::to_value(&fresh).unwrap_or(Value::Null),
+    });
+    Ok(Json(json!(fresh)))
+}
+
+// #8 — retire / un-retire. Reversible, history-preserving, orthogonal to the
+// draft/confirmed status (which is untouched, so un-retire restores exactly).
+async fn retire(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+    set_retired_and_emit(state, id, true).await
+}
+
+async fn unretire(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+    set_retired_and_emit(state, id, false).await
+}
+
+async fn set_retired_and_emit(state: AppState, id: String, retire: bool) -> ApiResult<Json<Value>> {
+    let conn = state.conn()?;
+    let sid = Id::from(id);
+    repo::set_retired(&conn, &sid, retire)?;
+    let fresh = repo::get(&conn, &sid)?;
+    state.publish(EventEnvelope {
+        kind: if retire {
+            "scenario.retired".into()
+        } else {
+            "scenario.unretired".into()
+        },
         entity_id: Some(fresh.id.to_string()),
         payload: serde_json::to_value(&fresh).unwrap_or(Value::Null),
     });

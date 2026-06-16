@@ -13,6 +13,8 @@ pub async fn run(cli: &Client, cmd: ScenarioCmd, quiet: bool) -> Result<()> {
         ScenarioCmd::View { id } => view(cli, &id, quiet).await,
         ScenarioCmd::Update(args) => update(cli, args, quiet).await,
         ScenarioCmd::Confirm { id } => confirm(cli, &id, quiet).await,
+        ScenarioCmd::Retire { id } => retire(cli, &id, quiet).await,
+        ScenarioCmd::Unretire { id } => unretire(cli, &id, quiet).await,
         ScenarioCmd::Search(args) => search(cli, args).await,
         ScenarioCmd::Claim { id } => claim(cli, &id, quiet).await,
         ScenarioCmd::Release { id } => release(cli, &id, quiet).await,
@@ -70,6 +72,18 @@ async fn update(cli: &Client, args: ScenarioUpdateArgs, quiet: bool) -> Result<(
 async fn confirm(cli: &Client, id: &str, quiet: bool) -> Result<()> {
     let v: Value = cli
         .post_empty(&format!("/scenarios/{}/confirm", id))
+        .await?;
+    emit(&v, quiet)
+}
+
+async fn retire(cli: &Client, id: &str, quiet: bool) -> Result<()> {
+    let v: Value = cli.post_empty(&format!("/scenarios/{}/retire", id)).await?;
+    emit(&v, quiet)
+}
+
+async fn unretire(cli: &Client, id: &str, quiet: bool) -> Result<()> {
+    let v: Value = cli
+        .post_empty(&format!("/scenarios/{}/unretire", id))
         .await?;
     emit(&v, quiet)
 }

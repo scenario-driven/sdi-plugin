@@ -1389,3 +1389,97 @@ async fn round_activate_returns_scenarios_needing_verification_7() {
     // GWT is inlined so the LLM can decompose without a second fetch.
     assert!(needs[0]["given"].is_string() && needs[0]["then_clause"].is_string());
 }
+
+/// #8 — retire excludes a confirmed scenario from the approve count and the
+/// needs-verification set; un-retire restores it with status preserved; past
+/// round verdicts are untouched.
+#[tokio::test]
+async fn scenario_retire_excludes_and_unretire_restores_8() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    let mk_scn = |code: String| {
+        let plan_id = plan_id.clone();
+        let base = base.clone();
+        async move {
+            let cli = c();
+            let scn: serde_json::Value = cli
+                .post(format!("{}/scenarios", base))
+                .json(&serde_json::json!({
+                    "plan_id": plan_id, "short_code": code,
+                    "given": "g", "when": "w", "then": "t", "confirmed": true
+                }))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            scn["id"].as_str().unwrap().to_string()
+        }
+    };
+    let keep = mk_scn(format!("SCN-KEEP-{}", &suffix[..6])).await;
+    let retire = mk_scn(format!("SCN-RET-{}", &suffix[..6])).await;
+
+    // Retire one scenario.
+    let r = cli
+        .post(format!("{}/scenarios/{}/retire", base, retire))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let body: serde_json::Value = r.json().await.unwrap();
+    assert!(body["retired_at"].is_string(), "retired_at stamped");
+    assert_eq!(
+        body["status"], "confirmed",
+        "authoring status preserved across retire"
+    );
+
+    // Approve still works (the kept scenario satisfies D8); activate R1.
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(
+            &serde_json::json!({"plan_id": plan_id, "short_code": format!("R1-{}", &suffix[..6])}),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    let act: serde_json::Value = cli
+        .post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // Needs-verification excludes the retired scenario.
+    let needs: Vec<String> = act["scenarios_needing_verification"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["scenario_id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(needs.contains(&keep), "kept scenario needs verification");
+    assert!(!needs.contains(&retire), "retired scenario excluded (#8)");
+
+    // Un-retire restores it (status preserved); now it's verification-eligible.
+    let r = cli
+        .post(format!("{}/scenarios/{}/unretire", base, retire))
+        .send()
+        .await
+        .unwrap();
+    let body: serde_json::Value = r.json().await.unwrap();
+    assert!(body["retired_at"].is_null(), "retired_at cleared");
+    assert_eq!(body["status"], "confirmed", "status restored");
+}

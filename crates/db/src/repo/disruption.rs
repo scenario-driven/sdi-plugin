@@ -220,6 +220,7 @@ mod tests {
             claimed_resources_json: "[]".into(),
             claim_status: sdi_core::pattern::ClaimStatus::None,
             produced_via_pattern_id: None,
+            retired_at: None,
             created_at: now(),
             updated_at: now(),
         };

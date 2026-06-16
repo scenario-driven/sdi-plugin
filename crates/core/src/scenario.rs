@@ -104,6 +104,12 @@ pub struct Scenario {
     /// migrated rows; daemon write paths backfill `direct` at creation.
     #[serde(default)]
     pub produced_via_pattern_id: Option<String>,
+    /// #8 — retirement marker. `Some` ⇒ the scenario is retired (excluded from
+    /// verification / carry-over / approve count) while its history is kept.
+    /// Reversible: un-retire sets it back to `None`. Orthogonal to `status`,
+    /// which is preserved across retire/un-retire.
+    #[serde(default)]
+    pub retired_at: Option<Timestamp>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
