@@ -84,3 +84,61 @@ fn daemon_start_status_stop_cycle() {
     let v: serde_json::Value = serde_json::from_str(&s5).unwrap();
     assert_eq!(v["running"], false);
 }
+
+/// Regression: `daemon stop` must actually terminate the process even when a
+/// long-lived `/events` SSE stream is open. axum's graceful shutdown waits for
+/// in-flight connections to finish; an open SSE stream never finishes, so an
+/// unbounded wait closed the listener (port stops responding, `stop` reports
+/// success) but left the process orphaned holding the DB. The daemon now bounds
+/// the graceful shutdown and force-exits.
+#[cfg(unix)]
+#[test]
+fn daemon_stop_does_not_orphan_on_open_sse() {
+    use std::io::Write;
+
+    let home = fresh_home();
+    let (c, s, e) = run(&["daemon", "start"], &home);
+    assert_eq!(c, 0, "start failed: {e}");
+    let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+    let port = v["port"].as_u64().unwrap() as u16;
+    std::thread::sleep(Duration::from_millis(150));
+
+    let pid: i32 = std::fs::read_to_string(home.join(".cache/sdi/sdid.pid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    // Open a long-lived SSE connection (a dashboard tab) and keep it open.
+    let mut sse = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    sse.write_all(
+        b"GET /events HTTP/1.1\r\nHost: localhost\r\nAccept: text/event-stream\r\nConnection: keep-alive\r\n\r\n",
+    )
+    .unwrap();
+    sse.flush().unwrap();
+    std::thread::sleep(Duration::from_millis(250));
+
+    let (cstop, _, _) = run(&["daemon", "stop"], &home);
+    assert_eq!(cstop, 0);
+
+    // The PROCESS must exit (bounded shutdown), not just stop serving the port.
+    let mut alive = true;
+    for _ in 0..80 {
+        let dead = !Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .unwrap()
+            .status
+            .success();
+        if dead {
+            alive = false;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    drop(sse); // keep the SSE stream open across the stop
+    assert!(
+        !alive,
+        "daemon (pid {pid}) orphaned after stop with an open SSE stream"
+    );
+}

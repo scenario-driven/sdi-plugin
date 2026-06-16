@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use sdi_daemon::lifecycle;
 use sdi_db::Paths;
+use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -60,11 +61,37 @@ async fn main() -> Result<()> {
     );
 
     let paths_for_cleanup = paths.clone();
-    let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
-        lifecycle::shutdown_signal().await;
-    });
+    // Bound the graceful shutdown. axum's graceful shutdown waits for EVERY
+    // in-flight connection to finish — but the `/events` SSE stream is a
+    // long-lived connection (an open dashboard tab) that never completes on
+    // its own, so an unbounded wait hangs the process forever: it closes the
+    // listener (the port stops responding, so `sdi daemon stop` reports
+    // success) yet never exits, leaving an orphan still holding the DB. After
+    // the signal fires we give in-flight work a short grace window, then force
+    // exit so SSE clients cannot wedge shutdown.
+    let (signalled_tx, signalled_rx) = tokio::sync::oneshot::channel::<()>();
+    let serve = axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            lifecycle::shutdown_signal().await;
+            let _ = signalled_tx.send(());
+        })
+        .into_future();
+    tokio::pin!(serve);
 
-    let res = serve.await;
+    let res = tokio::select! {
+        r = &mut serve => r,
+        _ = async {
+            // Only starts counting once the shutdown signal has fired.
+            let _ = signalled_rx.await;
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        } => {
+            tracing::warn!(
+                "graceful shutdown exceeded 3s (likely an open SSE stream); forcing exit"
+            );
+            lifecycle::cleanup(&paths_for_cleanup);
+            std::process::exit(0);
+        }
+    };
     lifecycle::cleanup(&paths_for_cleanup);
     res?;
     Ok(())

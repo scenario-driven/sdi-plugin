@@ -8,6 +8,19 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.5.3] - 2026-06-16
+
+### Fixed
+- **Daemon no longer orphans on `daemon stop` when a dashboard tab is open.**
+  axum's graceful shutdown waited for every in-flight connection to finish, but
+  the `/events` SSE stream is long-lived and never completes — so SIGTERM closed
+  the listener (the port stopped responding, so `sdi daemon stop` reported
+  success) yet the process hung forever, leaving an orphan still holding the
+  SQLite DB. Each stop-while-dashboard-open leaked a daemon. The daemon now
+  bounds graceful shutdown: after the signal it waits a 3s grace window for
+  in-flight work, then force-exits. No open SSE → still exits immediately
+  (~0.1s); SSE open → exits within the grace window instead of hanging.
+
 ## [0.5.2] - 2026-06-16
 
 ### Changed
