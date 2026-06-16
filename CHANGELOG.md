@@ -8,6 +8,72 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.5.0] - 2026-06-16
+
+Resolves the 13 dogfooding issues #4–#16. Decision rationale (with primary
+sources) is recorded in `docs/decisions/ADR-001-issues-4-16-resolution.md`.
+
+### Fixed — D21 delegation gate (#4, #9, #10, #11, #14)
+- Unregistered `agent_type` (e.g. Claude Code's built-in `general-purpose`)
+  is no longer hard-blocked. It acts at **L3** (read + execution work) with a
+  one-line advisory; D26 consensus autonomy stays out of reach (needs a
+  registered `(name, stance)` tuple). The old deny was a deadlock with no
+  escape hatch (#11).
+- The specialist registry is read from three roots — project `.claude/agents`,
+  user `~/.claude/agents`, and the plugin — matching Claude Code's own
+  subagent discovery, with mtime cache invalidation (#4/#11).
+- The `sdi` read-only exemption is split by subcommand: the main session may
+  author plan/scenario/round/decide (the spec, per D2/D3) and read tasks, but
+  task lifecycle mutation delegates. Absolute paths to the bundled binary,
+  read-only `gh`, `cd`/`export`/`VAR=` prefixes, and `/dev/null` redirects are
+  recognised; `Monitor` is gated like `Bash` (#4/#10).
+- The active-task gate reads **daemon state** (an in_progress task in the
+  active plan) instead of the unsatisfiable `SDI_ACTIVE_TASK` env, and points
+  at the real `sdi task start` (#9).
+- The machine-global bypass marker's concurrency limit is documented: per-
+  `(session, agent)` scoping is impossible because Claude Code exposes neither
+  id as an env var (#14). #9 removes the routine driver of bypass.
+
+### Fixed — data integrity (#12, #13)
+- `task complete` is now atomic: the done transition, evidence write, and
+  round-result mirror commit together or not at all. Each evidence
+  `scenario_id` is resolved (SCN ULID **or** plan-scoped short code) and must
+  be one of the task's parent scenarios — ghost / non-parent / short-code
+  references are rejected up front instead of FK-failing after a partial
+  commit.
+
+### Fixed — doc/CLI alignment (#5, #6, #7)
+- Round mode is `strict-regression | forward-only` (D6); `additive` is now
+  accepted as an alias for `forward-only` (the CLI help and sdi-round skill
+  advertised it but the daemon rejected it). Disruption is a `--disruption`
+  policy, not a mode (#5).
+- `round activate` returns `scenarios_needing_verification` (new +
+  carried-failing/blocked, GWT inline) (#7).
+- The sdi-round skill's `sdi task create --title --tier` example is corrected
+  to the real positional form; priority lives in scenario tags. The short_code
+  409 states that cancelled/terminal entities keep their code (#6).
+
+### Added
+- **Scenario retirement** (#8): `sdi scenario retire | unretire`
+  (POST `/scenarios/:id/retire` | `/unretire`). Reversible, history-
+  preserving, orthogonal to the draft/confirmed status (preserved for exact
+  restore). Retired scenarios drop out of the approve count, the
+  needs-verification set, and strict-regression carry-over.
+- **`sdi next`** (#15): the single mechanical next step computed from daemon
+  state, plus provisional decisions to revisit.
+- **`sdi task brief <TASK-ID>`** (#15): linked scenarios' GWT inline + round
+  baseline + evidence format + report schema + prohibitions.
+- **`sdi round baseline <ROUND-ID> [--set <json>]`** (#15): per-round
+  verification baseline, surfaced in the brief.
+- **Provisional decisions** (#16): `sdi decide create … --supersede-when
+  "<condition>"`. The decision stays accepted and in effect but is flagged for
+  revisit; the provisional set is `supersede_when IS NOT NULL` (no new status).
+
+### Migration
+- Automatic. 012 adds `scenarios.retired_at`; 013 adds
+  `decisions.supersede_when`; 014 adds `rounds.baseline_json` — all
+  `ALTER ADD COLUMN`, no table rebuild.
+
 ## [0.4.2] - 2026-06-10
 
 ### Changed
