@@ -609,7 +609,9 @@ pub struct RoundCreateArgs {
     pub plan_id: String,
     /// Short stable code (e.g. `R1`).
     pub short_code: String,
-    /// Regression mode: `strict-regression` (default) | `additive` | `disruption`.
+    /// Regression mode: `strict-regression` (default) | `forward-only`
+    /// (`additive` accepted as an alias). Disruption review is a separate
+    /// `--disruption` policy, not a mode.
     #[arg(long)]
     pub mode: Option<String>,
     /// In-flight task policy: `pause` (default) | `abort` | `continue-on-noimpact`.

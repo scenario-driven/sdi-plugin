@@ -1312,3 +1312,80 @@ async fn task_complete_resolves_short_code_13() {
     );
     assert_ne!(arr[0]["scenario_id"], scn_short);
 }
+
+/// #7 — round activate response includes `scenarios_needing_verification`:
+/// confirmed scenarios without a passing/retired verdict in the new round.
+#[tokio::test]
+async fn round_activate_returns_scenarios_needing_verification_7() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let suffix = ulid::Ulid::new().to_string();
+    let (_pid, plan_id) = mk_plan(&base, &suffix).await;
+
+    // Two confirmed scenarios + one still draft (must NOT appear).
+    let mut confirmed = vec![];
+    for i in 0..2 {
+        let scn: serde_json::Value = cli
+            .post(format!("{}/scenarios", base))
+            .json(&serde_json::json!({
+                "plan_id": plan_id, "short_code": format!("SCN-{}-{i}", &suffix[..6]),
+                "given": "g", "when": format!("w{i}"), "then": format!("t{i}"),
+                "confirmed": true
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        confirmed.push(scn["id"].as_str().unwrap().to_string());
+    }
+    cli.post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id, "short_code": format!("SCN-DRAFT-{}", &suffix[..6]),
+            "given": "g", "when": "wd", "then": "td", "confirmed": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(
+            &serde_json::json!({"plan_id": plan_id, "short_code": format!("R1-{}", &suffix[..6])}),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+
+    let act: serde_json::Value = cli
+        .post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let needs = act["scenarios_needing_verification"].as_array().unwrap();
+    let ids: Vec<String> = needs
+        .iter()
+        .map(|n| n["scenario_id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        needs.len(),
+        2,
+        "both confirmed scenarios need verification at R1"
+    );
+    assert!(ids.contains(&confirmed[0]) && ids.contains(&confirmed[1]));
+    // GWT is inlined so the LLM can decompose without a second fetch.
+    assert!(needs[0]["given"].is_string() && needs[0]["then_clause"].is_string());
+}

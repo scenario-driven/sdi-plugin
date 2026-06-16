@@ -216,6 +216,59 @@ pub fn list_results(conn: &Connection, round_id: &Id) -> DomainResult<Vec<Scenar
     Ok(out)
 }
 
+/// One scenario in the round's "needs verification" set (#7).
+#[derive(Debug, serde::Serialize)]
+pub struct NeedsVerificationRow {
+    pub scenario_id: String,
+    pub short_code: String,
+    pub given: String,
+    pub when_clause: String,
+    pub then_clause: String,
+}
+
+/// #7 — scenarios that still need a fresh verdict in `round_id`: confirmed
+/// scenarios in the plan with NO `passing`/`retired` result recorded for this
+/// round. That set is exactly { newly-added scenarios (no result row) } ∪
+/// { carried-failing / carried-blocked }, the input the LLM decomposes into
+/// tasks at activation (SKILL: sdi-round "Task auto-decomposition"). Returned
+/// in the round-activate response so the caller never has to recompute it from
+/// a full scenario list.
+pub fn scenarios_needing_verification(
+    conn: &Connection,
+    round_id: &Id,
+    plan_id: &Id,
+) -> DomainResult<Vec<NeedsVerificationRow>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT s.id, s.short_code, s.given, s.when_clause, s.then_clause \
+             FROM scenarios s \
+             WHERE s.plan_id = ?1 AND s.status = 'confirmed' \
+               AND NOT EXISTS ( \
+                 SELECT 1 FROM scenario_results sr \
+                 WHERE sr.round_id = ?2 AND sr.scenario_id = s.id \
+                   AND sr.result IN ('passing', 'retired') \
+               ) \
+             ORDER BY s.created_at",
+        )
+        .map_err(map_sqlite_err)?;
+    let rows = stmt
+        .query_map(params![plan_id.as_str(), round_id.as_str()], |r| {
+            Ok(NeedsVerificationRow {
+                scenario_id: s(r, 0)?,
+                short_code: s(r, 1)?,
+                given: s(r, 2)?,
+                when_clause: s(r, 3)?,
+                then_clause: s(r, 4)?,
+            })
+        })
+        .map_err(map_sqlite_err)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(map_sqlite_err)?);
+    }
+    Ok(out)
+}
+
 /// PRD §6.3 R2+ auto-regression population.
 ///
 /// Carries forward only scenarios that actually received a verdict in the

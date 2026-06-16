@@ -27,7 +27,7 @@ recording task evidence at `done` time (use `sdi-evidence`).
 
 ---
 
-## The three round modes
+## The two round modes (D6)
 
 Pick one at `sdi round create … --mode <mode>`:
 
@@ -37,20 +37,21 @@ Pick one at `sdi round create … --mode <mode>`:
   that distinguishes SDI from TDD/BDD; pick anything else only when the user
   explicitly asks.
 
-- **`additive`** — skip carry-over; only new scenarios verify this round.
+- **`forward-only`** — skip carry-over; only new scenarios verify this round.
   Surface the consequence to the user before choosing this: prior regressions
   go untracked this round, so a previously failing scenario will appear absent
   rather than failing. Use only when the user accepts that trade-off, or at
-  R1 where there is nothing to carry.
+  R1 where there is nothing to carry. `additive` is accepted as an alias for
+  `forward-only`.
 
-- **`disruption`** — used after a confirmed change to existing scenarios. The
-  daemon flips the plan to a needs-review state; you must resolve the review
-  before the round can be activated. The daemon returns `DISRUPTION_PENDING`
-  on activation attempts until the review is resolved.
+Disruption review is **not a mode** — it is a separate `--disruption <policy>`
+(`needs-review` default | `auto`) plus the disruption-review gate (see below).
+A round whose plan has unresolved scenario changes returns `DISRUPTION_PENDING`
+on activation regardless of mode.
 
-Default to strict-regression at R≥2. Omit `--mode` at R1 (or use `additive`)
-— strict-regression is rejected at R1 because there are no prior verdicts to
-carry; the daemon returns `MODE_REJECTED_AT_R1`.
+Default to strict-regression at R≥2. Omit `--mode` at R1 (or use
+`forward-only`) — strict-regression is rejected at R1 because there are no
+prior verdicts to carry; the daemon returns `MODE_REJECTED_AT_R1`.
 
 ---
 
@@ -97,14 +98,19 @@ default.
    verification (new scenarios + carried-failing ones).
 
    The LLM **auto-decomposes** that list into tasks — tasks are runtime
-   artifacts, not human-authored upfront. Each task references its parent
-   scenario:
+   artifacts, not human-authored upfront. The arguments are positional
+   (`<ROUND-ID> <SHORT-CODE> <DESCRIPTION>`); each task links its parent
+   scenario with a repeatable `--scenario <SCN-ID>`:
    ```bash
-   sdi task create --scenario <SC-CODE> --round <ROUND-ID> \
-     --title "<one-line>" --tier <low|med|high>
+   sdi task create <ROUND-ID> <SHORT-CODE> "<one-line description>" \
+     --scenario <SCN-ID>
    ```
-   Do not pre-author tasks before activation; do not author tasks that don't
-   trace back to a scenario in the round's needs-verification set.
+   There is no `--title` or `--tier` flag: the description IS the title, and a
+   task carries no priority column (priority is the LLM's decomposition order,
+   not persisted state per D3). Encode any priority hint in the scenario's
+   `tags` instead. Do not pre-author tasks before activation; do not author
+   tasks that don't trace back to a scenario in the round's needs-verification
+   set.
 
 3. **Verify**
    Implement, then record evidence on each task's `done` transition — the
@@ -133,9 +139,9 @@ sdi disruption resolve <REVIEW-ID> --reject    # discard the scenario change
 ```
 Then retry `sdi round activate <ROUND-ID>`.
 
-The disruption mode itself (`--mode disruption` at create time) is what
-triggers the review when the round contains scenarios whose bodies changed
-since the prior round.
+Disruption review is triggered by the `--disruption` policy and the plan's
+scenario-change state (a confirmed change to an existing scenario opens a
+review), independent of the round `--mode`. It is not a round mode.
 
 ---
 
@@ -152,9 +158,9 @@ Under strict-regression, the daemon copies every prior round's verdict
   exemption — the verdict is sticky in both directions.
 - **Blocked** scenarios carry as blocked and surface as needs-attention.
 
-Under `additive`, none of the above happens — only new scenarios verify and
-no carry-over occurs. Under `disruption`, the daemon refuses to activate
-until the human review resolves.
+Under `forward-only` (alias `additive`), none of the above happens — only new
+scenarios verify and no carry-over occurs. Independently, when a disruption
+review is open the daemon refuses to activate until the human resolves it.
 
 ---
 
@@ -180,6 +186,6 @@ in the current SDI baseline tier is a warning surface, not a hard block.
 |---|---|---|
 | `INVALID_TRANSITION` | Another round on the same plan is already `active`. | `sdi round complete <PREDECESSOR-ID>` first, then retry activation. |
 | `DISRUPTION_PENDING` | A disruption review is open on the plan. | `sdi disruption resolve <REVIEW-ID> --approve\|--reject`, then retry. |
-| `MODE_REJECTED_AT_R1` | `strict-regression` was requested at R1 (nothing to carry). | Use `--mode additive` or omit `--mode`. |
+| `MODE_REJECTED_AT_R1` | `strict-regression` was requested at R1 (nothing to carry). | Use `--mode forward-only` (or its alias `additive`), or omit `--mode`. |
 | `EVIDENCE_REQUIRED` | A task tried to transition to `done` without evidence — blocks round completion. | See the `sdi-evidence` skill; record at least one checkable evidence item, then retry. |
 | `NOT_FOUND` | Round id or plan id wrong. | Re-resolve via `sdi round list <PLAN-ID>` or `sdi plan active <PROJECT-ID>`. |

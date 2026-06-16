@@ -71,7 +71,14 @@ fn humanize_unique_violation(msg: &str) -> String {
                 "plan_id" => "plan",
                 other => other,
             };
-            format!("{table}: short_code already used within this {noun}")
+            // A cancelled/terminal entity keeps its short_code (#6: codes are
+            // single-purpose ticket labels and are not recycled), so a "used"
+            // code may belong to a row that is no longer active — pick a new
+            // suffix rather than expecting the code to free up.
+            format!(
+                "{table}: short_code already used within this {noun} \
+                 (cancelled/terminal {table} keep their code — choose a new suffix)"
+            )
         }
         [single] => format!("{table}: {single} already exists"),
         _ => format!("{table}: duplicate value for unique ({})", names.join(", ")),

@@ -61,7 +61,13 @@ impl FromStr for RoundMode {
     fn from_str(s: &str) -> DomainResult<Self> {
         match s {
             "strict-regression" => Ok(RoundMode::StrictRegression),
-            "forward-only" => Ok(RoundMode::ForwardOnly),
+            // `additive` is the documented R1 word for "skip carry-over, only
+            // new scenarios verify" — exactly forward-only's semantics. The
+            // skill docs and CLI help advertised `additive`, but the daemon
+            // enum only had `forward-only`, so a doc-following session was
+            // rejected at R1 (#5). Accept it as an alias; canonical
+            // serialization stays `forward-only`.
+            "forward-only" | "additive" => Ok(RoundMode::ForwardOnly),
             other => Err(DomainError::InvalidRoundMode(other.to_string())),
         }
     }
@@ -177,5 +183,33 @@ impl Round {
             });
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_mode_parses_canonical_and_additive_alias() {
+        // Canonical values.
+        assert_eq!(
+            RoundMode::from_str("strict-regression").unwrap(),
+            RoundMode::StrictRegression
+        );
+        assert_eq!(
+            RoundMode::from_str("forward-only").unwrap(),
+            RoundMode::ForwardOnly
+        );
+        // #5 — `additive` is the documented alias for forward-only; the daemon
+        // used to reject it, breaking doc-following sessions at R1.
+        assert_eq!(
+            RoundMode::from_str("additive").unwrap(),
+            RoundMode::ForwardOnly
+        );
+        // Serialization stays canonical (alias is input-only).
+        assert_eq!(RoundMode::ForwardOnly.to_string(), "forward-only");
+        // Unknown values still error.
+        assert!(RoundMode::from_str("disruption").is_err());
     }
 }

@@ -185,9 +185,14 @@ async fn activate(State(state): State<AppState>, Path(id): Path<String>) -> ApiR
     let activated_at = now();
     repo::set_status(&conn, &rid, RoundStatus::Active, Some(activated_at), None)?;
     let fresh = repo::get(&conn, &rid)?;
+    // #7 — the daemon emits the scenarios needing fresh verification (new +
+    // carried-failing/blocked) so the LLM decomposes from a daemon-computed
+    // set instead of re-deriving it from a full scenario list.
+    let needs_verification = repo::scenarios_needing_verification(&conn, &rid, &round.plan_id)?;
     let payload = json!({
         "round": fresh,
         "carried_results": carried,
+        "scenarios_needing_verification": needs_verification,
         "in_flight": {
             "policy": round.in_flight_policy.to_string(),
             "action": action,
