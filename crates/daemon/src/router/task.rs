@@ -14,7 +14,9 @@ use axum::{
 use sdi_core::error::DomainError;
 use sdi_core::ids::{now, Id, IdKind};
 use sdi_core::task::{Task, TaskEvidence, TaskStatus};
+use sdi_db::map_sqlite_err;
 use sdi_db::repo::round as round_repo;
+use sdi_db::repo::scenario as scenario_repo;
 use sdi_db::repo::task as repo;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -136,22 +138,74 @@ async fn complete(
     Path(id): Path<String>,
     Json(b): Json<CompleteTaskBody>,
 ) -> ApiResult<Json<Value>> {
-    let conn = state.conn()?;
+    let mut conn = state.conn()?;
     let tid = Id::from(id);
     let task = repo::get(&conn, &tid)?;
     task.check_transition(TaskStatus::Done, Some(&b.evidence))?;
-    repo::complete_with_evidence(&conn, &tid, &b.evidence)?;
-    // D6: mirror per-scenario evidence into round.scenario_results so
-    // /rounds/<id>/results reflects the verdict the task carried.
-    for se in &b.evidence.scenarios {
-        round_repo::upsert_result(
-            &conn,
-            &task.round_id,
-            &se.scenario_id,
-            se.result,
-            se.note.as_deref(),
-            Some(se.evidence_ref.as_str()),
-        )?;
+
+    // #12 / #13 — evidence integrity. Each evidence reference must resolve to a
+    // scenario in the task's plan AND be one of the task's parent scenarios.
+    // The reference may be an SCN ULID or the plan-scoped human short code
+    // (#13: resolve it rather than letting a short code FK-fail downstream). A
+    // reference that resolves to nothing, or to a scenario the task does not
+    // own, is rejected up front (#12: ghost / mismatched ids used to slip
+    // through and silently drop the verdict at round-results time).
+    let parents: std::collections::HashSet<String> = task
+        .parent_scenario_ids
+        .iter()
+        .map(|i| i.to_string())
+        .collect();
+    let mut evidence = b.evidence.clone();
+    for se in evidence.scenarios.iter_mut() {
+        let reference = se.scenario_id.to_string();
+        let resolved =
+            scenario_repo::resolve_ref(&conn, &task.plan_id, &reference)?.ok_or_else(|| {
+                DomainError::Validation(format!(
+                    "evidence references unknown scenario '{reference}' — \
+                     not an SCN id or a short code in this task's plan"
+                ))
+            })?;
+        if !parents.contains(resolved.as_str()) {
+            return Err(DomainError::Validation(format!(
+                "evidence scenario '{reference}' is not a parent scenario of task {tid}; \
+                 task parents: [{}]",
+                task.parent_scenario_ids
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+            .into());
+        }
+        se.scenario_id = resolved;
+    }
+
+    // #13 — atomic completion. The done transition, the evidence write, and the
+    // D6 round-result mirror all commit together or not at all. Previously the
+    // task flipped to done first and a later FK failure on a bad scenario_id
+    // left the row done with a broken result set (error returned, state
+    // committed — the caller could not tell what actually happened).
+    let fresh = {
+        let tx = conn.transaction().map_err(map_sqlite_err)?;
+        repo::complete_with_evidence(&tx, &tid, &evidence)?;
+        for se in &evidence.scenarios {
+            round_repo::upsert_result(
+                &tx,
+                &task.round_id,
+                &se.scenario_id,
+                se.result,
+                se.note.as_deref(),
+                Some(se.evidence_ref.as_str()),
+            )?;
+        }
+        let fresh = repo::get(&tx, &tid)?;
+        tx.commit().map_err(map_sqlite_err)?;
+        fresh
+    };
+
+    // Events are published only after the transaction commits, so a subscriber
+    // never sees a verdict that was rolled back.
+    for se in &evidence.scenarios {
         state.publish(EventEnvelope {
             kind: "round.result.updated".into(),
             entity_id: Some(task.round_id.to_string()),
@@ -163,7 +217,6 @@ async fn complete(
             }),
         });
     }
-    let fresh = repo::get(&conn, &tid)?;
     state.publish(EventEnvelope {
         kind: "task.completed".into(),
         entity_id: Some(fresh.id.to_string()),

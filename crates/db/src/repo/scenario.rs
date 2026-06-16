@@ -118,6 +118,22 @@ pub fn count_confirmed(conn: &Connection, plan_id: &Id) -> DomainResult<i64> {
     .map_err(map_sqlite_err)
 }
 
+/// Resolve an evidence reference to a scenario id WITHIN a plan. The reference
+/// may be the SCN ULID or the plan-scoped human short code. Returns `None` when
+/// neither matches a scenario in the plan — the caller treats that as a ghost
+/// / invalid reference (#12 ghost id, #13 short code that does not resolve).
+pub fn resolve_ref(conn: &Connection, plan_id: &Id, reference: &str) -> DomainResult<Option<Id>> {
+    match conn.query_row(
+        "SELECT id FROM scenarios WHERE plan_id = ?1 AND (id = ?2 OR short_code = ?2) LIMIT 1",
+        params![plan_id.as_str(), reference],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(id) => Ok(Some(Id::from(id))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(map_sqlite_err(e)),
+    }
+}
+
 pub fn update_gwt(
     conn: &Connection,
     id: &Id,

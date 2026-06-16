@@ -1131,3 +1131,184 @@ async fn task_stats_is_project_scoped() {
         "dashboard task_status must not leak project B's in_progress task"
     );
 }
+
+// ── #12 / #13 — evidence integrity at task complete ────────────────────────
+
+/// Plan → confirmed scenario → active round → in_progress task whose only
+/// parent is that scenario. Returns (plan_id, scn_id, scn_short, round_id,
+/// task_id).
+async fn setup_in_progress_task(
+    base: &str,
+    suffix: &str,
+) -> (String, String, String, String, String) {
+    let cli = c();
+    let (_pid, plan_id) = mk_plan(base, suffix).await;
+    let scn_short = format!("SCN-{}", &suffix[..6]);
+    let scn: serde_json::Value = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id, "short_code": scn_short,
+            "given": "g", "when": "w", "then": "t", "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scn_id = scn["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/plans/{}/approve", base, plan_id))
+        .send()
+        .await
+        .unwrap();
+    let r1: serde_json::Value = cli
+        .post(format!("{}/rounds", base))
+        .json(
+            &serde_json::json!({"plan_id": plan_id, "short_code": format!("R1-{}", &suffix[..6])}),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r1_id = r1["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/rounds/{}/activate", base, r1_id))
+        .send()
+        .await
+        .unwrap();
+    let task: serde_json::Value = cli
+        .post(format!("{}/tasks", base))
+        .json(&serde_json::json!({
+            "round_id": r1_id, "short_code": format!("T-{}", &suffix[..6]),
+            "description": "impl", "parent_scenario_ids": [scn_id.clone()]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let task_id = task["id"].as_str().unwrap().to_string();
+    cli.post(format!("{}/tasks/{}/status", base, task_id))
+        .json(&serde_json::json!({"status": "in_progress"}))
+        .send()
+        .await
+        .unwrap();
+    (plan_id, scn_id, scn_short, r1_id, task_id)
+}
+
+/// #12 — a ghost scenario_id in evidence is rejected, and the task stays
+/// in_progress (the done transition was NOT committed): nothing partial.
+#[tokio::test]
+async fn task_complete_rejects_ghost_scenario_id_12() {
+    let (base, _h) = spawn_server().await;
+    let suffix = ulid::Ulid::new().to_string();
+    let (_plan, _scn, _short, _r1, task_id) = setup_in_progress_task(&base, &suffix).await;
+    let cli = c();
+
+    let r = cli
+        .post(format!("{}/tasks/{}/complete", base, task_id))
+        .json(&serde_json::json!({
+            "evidence": { "scenarios": [{
+                "scenario_id": "SCN-DOES-NOT-EXIST",
+                "result": "passing",
+                "evidence_ref": "x.rs:1"
+            }], "summary": "s" }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400, "ghost scenario id must be rejected");
+
+    // Atomicity: the task did NOT flip to done.
+    let task: serde_json::Value = cli
+        .get(format!("{}/tasks/{}", base, task_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        task["status"], "in_progress",
+        "rejected complete must not partially commit"
+    );
+}
+
+/// #12 — a real scenario that is NOT a parent of the task is rejected.
+#[tokio::test]
+async fn task_complete_rejects_non_parent_scenario_12() {
+    let (base, _h) = spawn_server().await;
+    let suffix = ulid::Ulid::new().to_string();
+    let (plan_id, _scn, _short, _r1, task_id) = setup_in_progress_task(&base, &suffix).await;
+    let cli = c();
+    // A second scenario in the same plan, NOT linked to the task.
+    let other: serde_json::Value = cli
+        .post(format!("{}/scenarios", base))
+        .json(&serde_json::json!({
+            "plan_id": plan_id, "short_code": format!("SCN-OTHER-{}", &suffix[..6]),
+            "given": "g", "when": "w2", "then": "t2", "confirmed": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let other_id = other["id"].as_str().unwrap().to_string();
+
+    let r = cli
+        .post(format!("{}/tasks/{}/complete", base, task_id))
+        .json(&serde_json::json!({
+            "evidence": { "scenarios": [{
+                "scenario_id": other_id, "result": "passing", "evidence_ref": "x.rs:1"
+            }], "summary": "s" }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400, "a non-parent scenario must be rejected");
+}
+
+/// #13 — evidence may reference a scenario by its plan-scoped SHORT CODE; the
+/// daemon resolves it to the SCN ULID (instead of FK-failing) and the round
+/// result is keyed by the ULID.
+#[tokio::test]
+async fn task_complete_resolves_short_code_13() {
+    let (base, _h) = spawn_server().await;
+    let suffix = ulid::Ulid::new().to_string();
+    let (_plan, scn_id, scn_short, r1_id, task_id) = setup_in_progress_task(&base, &suffix).await;
+    let cli = c();
+
+    let r = cli
+        .post(format!("{}/tasks/{}/complete", base, task_id))
+        .json(&serde_json::json!({
+            "evidence": { "scenarios": [{
+                "scenario_id": scn_short,  // short code, NOT the ULID
+                "result": "passing",
+                "evidence_ref": "tests/x.rs:1"
+            }], "summary": "via short code" }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "short code must resolve, not FK-fail");
+
+    // The round result is keyed by the resolved ULID, not the short code.
+    let results: serde_json::Value = cli
+        .get(format!("{}/rounds/{}/results", base, r1_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let arr = results["results"].as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(
+        arr[0]["scenario_id"], scn_id,
+        "result keyed by resolved ULID"
+    );
+    assert_ne!(arr[0]["scenario_id"], scn_short);
+}
