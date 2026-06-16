@@ -68,6 +68,26 @@ function hookLog() {
 // claim overlap. Splitting the surface per gate would re-introduce the
 // self-deadlock the marker exists to fix (user disarms one gate, next one
 // blocks them again).
+//
+// #14 — KNOWN LIMITATION (machine-global scope under concurrent agents). The
+// marker is a single machine-global file, so a marker armed by one agent can
+// be consumed by a concurrently-waking PreToolUse of a *different* agent on
+// the same machine. Per-(session, agent) scoping is NOT implementable: Claude
+// Code exposes `session_id` / `agent_id` ONLY in the hook payload JSON, never
+// as environment variables (official docs: code.claude.com/docs/en/hooks —
+// "There is no $CLAUDE_SESSION_ID/$CLAUDE_AGENT_ID env var"). `sdi bypass arm`
+// runs in the agent's Bash shell, which therefore cannot read its own
+// session/agent id to key the marker, and a lease-token scheme fails for the
+// same reason (lease acquisition is also a CLI call with no agent id). So
+// neither a file nor a daemon-mediated marker can correlate arm↔consume by
+// agent. This is a platform constraint, not a band-aid.
+//
+// Mitigation: the primary driver of routine bypass — the old active-task gate
+// reading the unsatisfiable `SDI_ACTIVE_TASK` env (#9) — is gone; the gate now
+// reads daemon state, so specialists no longer arm a marker per mutation.
+// Routine bypass is therefore rare. For a deliberately-windowed emergency
+// during a concurrent run, prefer the startup-time `SDI_HOOK_V05_DISABLE`
+// switch over the one-shot marker.
 function bypassOnceFile() {
   return path.join(xdgHome(), '.cache', 'sdi', 'bypass-once');
 }

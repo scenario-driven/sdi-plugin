@@ -19,6 +19,17 @@
 //! invocation and applies it uniformly. The env surfaces
 //! (`SDI_DELEGATION_BYPASS=1`, `SDI_BYPASS_HOOKS=1`, `SDI_HOOK_V05_DISABLE=1`)
 //! remain as startup-time switches for users who export them from shell rc.
+//!
+//! #14 — KNOWN LIMITATION: the marker is a single machine-global file, so a
+//! marker armed here can be consumed by a concurrently-waking PreToolUse of a
+//! *different* agent on the same machine. Per-(session, agent) scoping is not
+//! implementable: this CLI runs in the agent's Bash shell, which cannot read
+//! its own `session_id` / `agent_id` — Claude Code exposes those ONLY in the
+//! hook payload JSON, never as env vars (official docs). So the arming side
+//! has no key to scope by. The platform constraint is documented rather than
+//! worked around; the routine driver of bypass (the old env-based active-task
+//! gate, #9) is gone, so concurrent races are rare. For a windowed emergency
+//! during concurrent runs, prefer the startup-time `SDI_HOOK_V05_DISABLE`.
 
 use crate::cli::{BypassArmArgs, BypassCmd};
 use anyhow::{anyhow, Context, Result};
