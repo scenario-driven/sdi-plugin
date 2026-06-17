@@ -1511,12 +1511,10 @@ test('SessionStart: buildSessionSummary renders a rich work banner', async () =>
     const env = shimEnv(home, {});
     process.env.SDI_HOME = home; // daemonBase reads the pinned port under SDI_HOME
     const mod = require(SHARED);
-    const banner = await mod._internals.buildSessionSummary({
-      id: 'PROJ-test',
-      name: 'Demo',
-      key: 'TEST',
-    });
-    assert.match(banner, /# SDI · Demo \(TEST\)/);
+    const project = { id: 'PROJ-test', name: 'Demo', key: 'TEST' };
+    // Plain mode (model-facing additionalContext) — no ANSI escapes, stable text.
+    const banner = await mod._internals.buildSessionSummary(project);
+    assert.match(banner, /SDI · Demo \(TEST\)/);
     assert.match(banner, /plan: P-1 · demo plan/);
     assert.match(banner, /scenarios: 2 confirmed · 1 draft · 1 retired/);
     assert.match(banner, /tasks: 1 in-flight · 0 backlog/);
@@ -1526,6 +1524,17 @@ test('SessionStart: buildSessionSummary renders a rich work banner', async () =>
     assert.match(banner, /a task is in progress/);
     assert.match(banner, /revisit DEC-1 when: team disagrees/);
     assert.match(banner, /recent:/);
+    // Plain mode must NOT contain ANSI escape codes (would pollute model context).
+    assert.doesNotMatch(banner, /\x1b\[/, 'plain banner must have no ANSI codes');
+
+    // Coloured mode (terminal systemMessage) — same content, wrapped in ANSI.
+    const coloured = await mod._internals.buildSessionSummary(project, { ansi: true });
+    assert.match(coloured, /\x1b\[/, 'coloured banner must contain ANSI codes');
+    assert.match(coloured, /2 confirmed/);
+    assert.match(coloured, /sdi task brief TASK-1/);
+    // Stripping ANSI from the coloured banner yields the same text as plain.
+    // eslint-disable-next-line no-control-regex
+    assert.equal(coloured.replace(/\x1b\[[0-9;]*m/g, ''), banner);
     assert.ok(env); // keep env referenced
   } finally {
     delete process.env.SDI_HOME;
@@ -1537,20 +1546,20 @@ test('SessionStart: buildSessionSummary renders a rich work banner', async () =>
 // The fix for "SDI summary never shows in the terminal": the work banner must
 // go out as `systemMessage` (Claude Code renders that as the visible
 // "SessionStart … says:" line), not only as model-context `additionalContext`.
-test('SessionStart: payload surfaces the banner as systemMessage only when a project is registered', () => {
+test('SessionStart: payload carries plain additionalContext + optional coloured systemMessage', () => {
   delete require.cache[require.resolve(SHARED)];
   const { _internals } = require(SHARED);
   const make = _internals.sessionStartPayload;
 
-  // Registered project → banner is BOTH injected (additionalContext) and shown
-  // to the user (systemMessage).
-  const withProject = make('# SDI · Demo (TEST)\nplan: …\n', true);
-  assert.equal(withProject.hookSpecificOutput.additionalContext, '# SDI · Demo (TEST)\nplan: …\n');
-  assert.equal(withProject.systemMessage, '# SDI · Demo (TEST)\nplan: …\n');
+  // Registered project → plain text goes to the model (additionalContext) while
+  // the COLOURED banner is shown to the user (systemMessage). They differ.
+  const withProject = make('SDI · Demo (TEST)\nplan: …\n', '\x1b[36mSDI\x1b[0m · Demo\n');
+  assert.equal(withProject.hookSpecificOutput.additionalContext, 'SDI · Demo (TEST)\nplan: …\n');
+  assert.equal(withProject.systemMessage, '\x1b[36mSDI\x1b[0m · Demo\n');
 
   // No project → model-only hint, NO visible banner (SDI's hook runs in every
   // cwd; a banner in unrelated dirs would be noise).
-  const noProject = make('# SDI session\nNo SDI project registered\n', false);
+  const noProject = make('# SDI session\nNo SDI project registered\n', null);
   assert.equal(noProject.hookSpecificOutput.additionalContext, '# SDI session\nNo SDI project registered\n');
   assert.ok(!('systemMessage' in noProject), 'no-project payload must omit systemMessage');
 });

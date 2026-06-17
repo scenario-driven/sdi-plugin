@@ -1190,21 +1190,61 @@ async function claimOverlapGate(toolName, toolInput, agentId) {
 // fetch (the daemon-computed next step, #15) — both read-only and local, so
 // the round-trips are cheap. Degrades gracefully: any field the daemon can't
 // supply is simply omitted rather than failing the banner.
-async function buildSessionSummary(project) {
-  let b = `# SDI · ${project.name} (${project.key})\n`;
+// ANSI palette for the terminal banner. Only applied to the user-facing
+// `systemMessage`; the model-facing `additionalContext` stays plain so escape
+// codes never pollute the assistant's context.
+const BANNER_ANSI = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  red: '\x1b[31m',
+  gray: '\x1b[90m',
+};
+
+// One handoff fetch (active plan + scenarios + tasks + decisions + activity)
+// plus one `next` fetch (the daemon-computed next step, #15) — both read-only
+// and local. Fetch ONCE here; `formatSessionBanner` renders the data twice
+// (plain for the model, coloured for the terminal) without re-querying.
+async function gatherSessionData(project) {
   const handoff = await getJson(`/projects/${encodeURIComponent(project.id)}/handoff`).catch(
     () => null,
   );
   const plan = handoff && handoff.active_plan;
-  if (!plan) {
-    b += `\nNo active plan. Author scenarios, then approve a plan:\n`;
+  if (!plan) return { plan: null };
+  const next = await getJson(`/projects/${encodeURIComponent(project.id)}/next`).catch(() => null);
+  return { handoff, plan, next };
+}
+
+// Render gathered data as a banner. `ansi=true` wraps segments in colour for the
+// terminal (`systemMessage`); `ansi=false` returns plain text for the model
+// (`additionalContext`). Degrades gracefully — missing fields are omitted.
+function formatSessionBanner(project, data, ansi) {
+  const C = BANNER_ANSI;
+  const c = (value, ...tokens) => (ansi ? `${tokens.join('')}${value}${C.reset}` : value);
+  const title = `${c('SDI', C.bold, C.cyan)} ${c('·', C.dim)} ${c(project.name, C.bold)} ${c(
+    `(${project.key})`,
+    C.dim,
+  )}`;
+
+  if (!data.plan) {
+    let b = `${title}\n`;
+    b += `${c('no active plan', C.yellow)} — author scenarios, then approve a plan:\n`;
     b += `  sdi plan create ${project.id} <SHORT> "<title>"\n`;
     b += `  sdi scenario create <PLAN-ID> <SHORT> --given "…" --when "…" --then "…" --confirmed\n`;
     b += `  sdi plan approve <PLAN-ID>\n`;
     return b;
   }
 
-  b += `plan: ${plan.short_code} · ${plan.title}\n`;
+  const { handoff, plan, next } = data;
+  const sep = c('·', C.dim);
+  const lines = [title];
+
+  lines.push(`${c('plan:', C.gray)} ${plan.short_code} ${sep} ${plan.title}`);
 
   // Scenario counts (confirmed / draft / retired) from the full list.
   const scenarios = Array.isArray(handoff.scenarios) ? handoff.scenarios : [];
@@ -1212,47 +1252,62 @@ async function buildSessionSummary(project) {
   const confirmed = live.filter((s) => s.status === 'confirmed').length;
   const draft = live.filter((s) => s.status === 'draft').length;
   const retired = scenarios.length - live.length;
-  let scnLine = `scenarios: ${confirmed} confirmed · ${draft} draft`;
-  if (retired > 0) scnLine += ` · ${retired} retired`;
-  b += scnLine + '\n';
+  let scnLine = `${c('scenarios:', C.gray)} ${c(`${confirmed} confirmed`, C.green)} ${sep} ${c(
+    `${draft} draft`,
+    C.yellow,
+  )}`;
+  if (retired > 0) scnLine += ` ${sep} ${c(`${retired} retired`, C.gray)}`;
+  lines.push(scnLine);
 
   // Tasks: counts + in-progress detail.
   const inFlight = Array.isArray(handoff.in_flight_tasks) ? handoff.in_flight_tasks : [];
   const backlog = Array.isArray(handoff.backlog_tasks) ? handoff.backlog_tasks : [];
-  b += `tasks: ${inFlight.length} in-flight · ${backlog.length} backlog\n`;
+  lines.push(
+    `${c('tasks:', C.gray)} ${c(`${inFlight.length} in-flight`, C.cyan)} ${sep} ${c(
+      `${backlog.length} backlog`,
+      C.gray,
+    )}`,
+  );
   for (const t of inFlight.slice(0, 3)) {
     const desc = String(t.description || '').slice(0, 60);
-    b += `  ▸ ${t.short_code} ${desc}\n`;
+    lines.push(`  ${c('▸', C.cyan)} ${c(t.short_code, C.bold)} ${desc}`);
   }
 
   // Decisions: total + provisional (#16) flag.
   const decisions = Array.isArray(handoff.recent_decisions) ? handoff.recent_decisions : [];
   if (decisions.length > 0) {
     const provisional = decisions.filter((d) => d.supersede_when).length;
-    b += `decisions: ${decisions.length}` + (provisional > 0 ? ` · ${provisional} provisional ⚠\n` : '\n');
+    let decLine = `${c('decisions:', C.gray)} ${decisions.length}`;
+    if (provisional > 0) decLine += ` ${sep} ${c(`${provisional} provisional ⚠`, C.yellow)}`;
+    lines.push(decLine);
   }
 
   // The daemon-computed next step (#15) — the headline of the banner.
-  const next = await getJson(`/projects/${encodeURIComponent(project.id)}/next`).catch(() => null);
   if (next && next.command) {
-    b += `↳ next: ${String(next.command).split('\n')[0]}\n`;
-    if (next.reason) b += `        ${next.reason}\n`;
+    lines.push(`${c('↳ next:', C.bold, C.magenta)} ${c(String(next.command).split('\n')[0], C.cyan)}`);
+    if (next.reason) lines.push(c(`        ${next.reason}`, C.dim));
     const prov = Array.isArray(next.provisional_decisions) ? next.provisional_decisions : [];
     for (const d of prov.slice(0, 3)) {
-      if (d.supersede_when) b += `        ⚠ revisit ${d.short_code} when: ${d.supersede_when}\n`;
+      if (d.supersede_when) {
+        lines.push(c(`        ⚠ revisit ${d.short_code} when: ${d.supersede_when}`, C.yellow));
+      }
     }
   }
 
   // Recent activity (most recent first), up to 3.
   const activity = Array.isArray(handoff.recent_activity) ? handoff.recent_activity : [];
   if (activity.length > 0) {
-    b += `recent:\n`;
+    lines.push(c('recent:', C.gray));
     for (const a of activity.slice(0, 3)) {
       const summary = String(a.summary || a.kind || '').slice(0, 70);
-      if (summary) b += `  · ${summary}\n`;
+      if (summary) lines.push(c(`  · ${summary}`, C.dim));
     }
   }
-  return b;
+  return lines.join('\n') + '\n';
+}
+
+async function buildSessionSummary(project, { ansi = false } = {}) {
+  return formatSessionBanner(project, await gatherSessionData(project), ansi);
 }
 
 async function runSessionStart(input) {
@@ -1266,48 +1321,63 @@ async function runSessionStart(input) {
   }
   const cwd = (input && input.cwd) || process.cwd();
   const project = await projectByCwd(cwd);
-  let banner;
+
+  // No registered project → a model-only hint (additionalContext); no visible
+  // banner, since SDI's hook runs in every cwd and a banner in unrelated
+  // directories would be session noise.
   if (!project) {
-    banner = `# SDI session\ncwd: ${cwd}\n`;
-    banner += `\nNo SDI project registered for this cwd.\n`;
-    banner += `Register: \`sdi project create <KEY> <name> --cwd ${cwd}\`\n`;
-  } else {
-    banner = await buildSessionSummary(project);
+    let hint = `# SDI session\ncwd: ${cwd}\n`;
+    hint += `\nNo SDI project registered for this cwd.\n`;
+    hint += `Register: \`sdi project create <KEY> <name> --cwd ${cwd}\`\n`;
+    hint += dashboardLine(root, false);
+    appendHookLog('session_start', { cwd, project_id: null, web_state: webState(root) });
+    process.stdout.write(JSON.stringify(sessionStartPayload(hint, null)) + '\n');
+    return;
   }
-  // Dashboard SPA advisory — single line, opt-out via SDI_WEB_DISABLE=1.
-  // Daemon-owned SPA at <port>/. Status mirrors the daemon's own resolver.
-  if (process.env.SDI_WEB_DISABLE !== '1') {
-    const web = resolveWebDist(root);
-    if (web.state === 'ready') {
-      const port = readDaemonPort();
-      const url = port ? `http://127.0.0.1:${port}/` : '(daemon port unknown)';
-      banner += `dashboard: ready at ${url}\n`;
-    } else if (web.state === 'buildable') {
-      banner += `dashboard: not built. Build once: \`pnpm --dir ${web.source} install && pnpm --dir ${web.source} build\` (or set SDI_WEB_DISABLE=1 to silence).\n`;
-    }
-    // state === 'absent' → no line; bundle simply not shipped.
+
+  // Registered project → gather once, render twice: plain for the model's
+  // context, coloured for the terminal banner.
+  const data = await gatherSessionData(project);
+  const plain = formatSessionBanner(project, data, false) + dashboardLine(root, false);
+  const coloured = formatSessionBanner(project, data, true) + dashboardLine(root, true);
+  appendHookLog('session_start', { cwd, project_id: project.id, web_state: webState(root) });
+  process.stdout.write(JSON.stringify(sessionStartPayload(plain, coloured)) + '\n');
+}
+
+function webState(root) {
+  return process.env.SDI_WEB_DISABLE === '1' ? 'disabled' : resolveWebDist(root).state;
+}
+
+// Dashboard SPA advisory — single line, opt-out via SDI_WEB_DISABLE=1. The
+// daemon-owned SPA is served at <port>/; status mirrors the daemon's resolver.
+// `ansi` colours the URL for the terminal banner.
+function dashboardLine(root, ansi) {
+  if (process.env.SDI_WEB_DISABLE === '1') return '';
+  const C = BANNER_ANSI;
+  const c = (value, ...tokens) => (ansi ? `${tokens.join('')}${value}${C.reset}` : value);
+  const web = resolveWebDist(root);
+  if (web.state === 'ready') {
+    const port = readDaemonPort();
+    const url = port ? `http://127.0.0.1:${port}/` : '(daemon port unknown)';
+    return `${c('dashboard:', C.gray)} ${c(url, C.blue)}\n`;
   }
-  appendHookLog('session_start', {
-    cwd,
-    project_id: project && project.id,
-    web_state: process.env.SDI_WEB_DISABLE === '1' ? 'disabled' : resolveWebDist(root).state,
-  });
-  process.stdout.write(JSON.stringify(sessionStartPayload(banner, !!project)) + '\n');
+  if (web.state === 'buildable') {
+    return `${c('dashboard:', C.gray)} not built. Build once: \`pnpm --dir ${web.source} install && pnpm --dir ${web.source} build\` (or set SDI_WEB_DISABLE=1 to silence).\n`;
+  }
+  return ''; // state === 'absent' → bundle simply not shipped.
 }
 
 // `additionalContext` is injected into the MODEL's context but is invisible to
 // the user. To render the work summary in the terminal — the way Clawket's
-// SessionStart banner appears — the same payload must ALSO go out as
-// `systemMessage`, which Claude Code surfaces as the "SessionStart … says:"
-// line. Only attach the visible banner for a REGISTERED project: SDI's hook
-// runs in every cwd, so showing the "no project / register" hint or a bare
-// dashboard line as a banner in unrelated directories would be session noise.
-function sessionStartPayload(banner, hasProject) {
+// SessionStart banner appears — the payload must ALSO carry a `systemMessage`,
+// which Claude Code surfaces as the visible "SessionStart … says:" line. Pass
+// `systemMessage = null` to keep a hint model-only (no visible banner).
+function sessionStartPayload(additionalContext, systemMessage) {
   const out = {
-    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: banner },
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext },
   };
-  if (hasProject) {
-    out.systemMessage = banner;
+  if (systemMessage) {
+    out.systemMessage = systemMessage;
   }
   return out;
 }

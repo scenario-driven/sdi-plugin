@@ -8,6 +8,18 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.6.3] - 2026-06-17
+
+### Changed
+- **SessionStart terminal banner now has colour and visual structure.** The
+  banner that v0.6.2 made visible was plain monochrome text, harder to scan than
+  Clawket's. It now renders with ANSI colour (cyan title, green/yellow scenario
+  counts, cyan task counts, magenta `↳ next`, blue dashboard URL, dim reason
+  lines) and clearer section structure. Colour is applied **only** to the
+  user-facing `systemMessage`; the model-facing `additionalContext` stays plain
+  so escape codes never pollute the assistant's context. The data is fetched
+  once and rendered twice (plain + coloured) — no extra daemon round-trips.
+
 ## [0.6.2] - 2026-06-17
 
 ### Fixed
