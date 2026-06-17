@@ -1466,6 +1466,10 @@ test('SessionStart runs ensureInstalled against workspace binaries and spawns th
     // Banner has minimal session info.
     assert.match(r.stdout, /SessionStart/);
     assert.match(r.stdout, /No SDI project registered/);
+    // No registered project for this cwd → the register hint is model-only
+    // (additionalContext); it must NOT be surfaced as a visible terminal
+    // banner (systemMessage) in unrelated directories.
+    assert.doesNotMatch(r.stdout, /systemMessage/);
     // Daemon should have written a pid file under the temp SDI_HOME.
     const pidFile = path.join(home, '.cache/sdi/sdid.pid');
     const portFile = path.join(home, '.cache/sdi/sdid.port');
@@ -1528,4 +1532,25 @@ test('SessionStart: buildSessionSummary renders a rich work banner', async () =>
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+// The fix for "SDI summary never shows in the terminal": the work banner must
+// go out as `systemMessage` (Claude Code renders that as the visible
+// "SessionStart … says:" line), not only as model-context `additionalContext`.
+test('SessionStart: payload surfaces the banner as systemMessage only when a project is registered', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { _internals } = require(SHARED);
+  const make = _internals.sessionStartPayload;
+
+  // Registered project → banner is BOTH injected (additionalContext) and shown
+  // to the user (systemMessage).
+  const withProject = make('# SDI · Demo (TEST)\nplan: …\n', true);
+  assert.equal(withProject.hookSpecificOutput.additionalContext, '# SDI · Demo (TEST)\nplan: …\n');
+  assert.equal(withProject.systemMessage, '# SDI · Demo (TEST)\nplan: …\n');
+
+  // No project → model-only hint, NO visible banner (SDI's hook runs in every
+  // cwd; a banner in unrelated dirs would be noise).
+  const noProject = make('# SDI session\nNo SDI project registered\n', false);
+  assert.equal(noProject.hookSpecificOutput.additionalContext, '# SDI session\nNo SDI project registered\n');
+  assert.ok(!('systemMessage' in noProject), 'no-project payload must omit systemMessage');
 });

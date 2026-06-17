@@ -8,6 +8,21 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.6.2] - 2026-06-17
+
+### Fixed
+- **SessionStart work summary now shows in the terminal.** The hook built a rich
+  banner (plan, scenario counts, in-flight tasks, next step, dashboard URL) but
+  emitted it only as `hookSpecificOutput.additionalContext` — which Claude Code
+  injects into the model's context, invisible to the user. So the summary was
+  there for the assistant but never rendered in the terminal, unlike Clawket's
+  banner. The hook now also emits the banner as `systemMessage`, the field
+  Claude Code surfaces as the visible "SessionStart … says:" line. The visible
+  banner is attached **only when an SDI project is registered for the cwd** —
+  SDI's hook runs in every directory, so a banner in unrelated dirs (the
+  "register your project" hint or a bare dashboard line) would be session noise;
+  those stay model-only.
+
 ## [0.6.1] - 2026-06-16
 
 ### Fixed

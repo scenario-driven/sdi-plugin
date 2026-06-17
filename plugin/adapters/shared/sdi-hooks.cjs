@@ -1292,11 +1292,24 @@ async function runSessionStart(input) {
     project_id: project && project.id,
     web_state: process.env.SDI_WEB_DISABLE === '1' ? 'disabled' : resolveWebDist(root).state,
   });
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: banner },
-    }) + '\n',
-  );
+  process.stdout.write(JSON.stringify(sessionStartPayload(banner, !!project)) + '\n');
+}
+
+// `additionalContext` is injected into the MODEL's context but is invisible to
+// the user. To render the work summary in the terminal — the way Clawket's
+// SessionStart banner appears — the same payload must ALSO go out as
+// `systemMessage`, which Claude Code surfaces as the "SessionStart … says:"
+// line. Only attach the visible banner for a REGISTERED project: SDI's hook
+// runs in every cwd, so showing the "no project / register" hint or a bare
+// dashboard line as a banner in unrelated directories would be session noise.
+function sessionStartPayload(banner, hasProject) {
+  const out = {
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: banner },
+  };
+  if (hasProject) {
+    out.systemMessage = banner;
+  }
+  return out;
 }
 
 // UserPromptSubmit: inject active task / plan context. Warn if no active task.
@@ -1767,6 +1780,7 @@ module.exports = {
     parseRoundDecomposeIntent,
     decomposePatternAdvisory,
     buildSessionSummary,
+    sessionStartPayload,
     resolveSdiBin,
     resolveSdidBin,
     resolveWebDist,
