@@ -53,7 +53,12 @@ Claude Code 위에 얹힌 훅 체인:
 
 D21 위임 게이트: 오케스트레이터(메인 세션) 는 실행 도구(`Edit` / `Write` / `MultiEdit` / `NotebookEdit` / 변경성 `Bash`) 호출이 차단된다. `Agent` 로 스폰된 전문가만이 게이트를 만족시키는 `hookInput.agent_id` 를 갖는다.
 
-D26 패턴 무결성 (권고): `Agent` 또는 `Task` 디스패치가 멀티 에이전트 의도 토큰(`specialist team`, `parallel`, `swarm`, `graph review`, `fan-out`, `agents-as-tools`, `multi-agent`) 이나 `pattern_id` 를 동반하면, 훅이 `/patterns/active` 를 조회한다. 행이 없으면 비차단 경고가 발생하고; 데몬이 자율성을 L3 로 제한하는 `direct` 행을 자동 생성한다.
+D26 패턴 무결성 (권고): 두 개의 상호보완 트리거가, 작업이 L3 로 제한되는 `direct` 마커 아래로 분기되기 전에 세션을 실제 CollaborationPattern 으로 유도한다.
+
+- **디스패치 트리거** — `Agent` 또는 `Task` 디스패치가 멀티 에이전트 의도 토큰(`specialist team`, `parallel`, `swarm`, `graph review`, `fan-out`, `agents-as-tools`, `multi-agent`) 이나 `pattern_id` 를 동반하면, 훅이 `/patterns/active` 를 조회하고 행이 없으면 경고한다.
+- **분해 트리거 (D13)** — 라운드 분해의 구조적 seam 에서 발동: `sdi round activate <R>`(메인 세션) 와 라운드의 첫 `sdi task create <R>`(decomposer 서브에이전트). 비-`direct` 활성 패턴이 라운드의 plan 을 지배하지 않고 create 에 `--produced-via-pattern` 도 없으면, 훅이 먼저 pattern-orchestrator 를 띄우라고 유도한다. 일반적인 분해를 잡아내는 것은 바로 이쪽이다 — 디스패치 트리거는 의도 토큰이 이미 있을 때만 발동한다.
+
+둘 다 비차단이며; 데몬은 work 엔티티가 패턴 없이 생성될 때마다 `direct` 행을 back-fill 한다(L3 cap). 생성 시점에 선택한 패턴을 `sdi task create … --produced-via-pattern <PAT-ID>` 로 바인딩한다; 데몬이 그 참조가 `active` 이고 scope 호환인지 검증하거나 거부한다(조용한 `direct` 강등 없음).
 
 D29 멀티세션 클레임: `Edit` / `Write` / `NotebookEdit` 에 대해 훅이 `/scenarios/active-claims` 를 조회한다. 세션 간 겹침은 코드 2 와 구조화된 `{ block: 'sdi_claim_overlap', target_path, my_scenario, holders, hint }` 페이로드로 종료된다. 데몬 도달 불가 → 진행 (오프라인 데몬이 결코 에디터를 잠그지 않도록).
 

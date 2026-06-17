@@ -60,11 +60,27 @@ execution tools (`Edit` / `Write` / `MultiEdit` / `NotebookEdit` / mutating
 `Bash`). Only `Agent`-spawned specialists carry the `hookInput.agent_id` that
 satisfies the gate.
 
-D26 pattern integrity (advisory): when an `Agent` or `Task` dispatch carries
-multi-agent intent tokens (`specialist team`, `parallel`, `swarm`, `graph
-review`, `fan-out`, `agents-as-tools`, `multi-agent`) or a `pattern_id`, the
-hook queries `/patterns/active`. Missing rows trigger a non-blocking warning;
-the daemon auto-creates a `direct` row that caps autonomy at L3.
+D26 pattern integrity (advisory): two complementary triggers steer the session
+toward a real CollaborationPattern before work fans out under the L3-capped
+`direct` marker.
+
+- **Dispatch trigger** — when an `Agent` or `Task` dispatch carries multi-agent
+  intent tokens (`specialist team`, `parallel`, `swarm`, `graph review`,
+  `fan-out`, `agents-as-tools`, `multi-agent`) or a `pattern_id`, the hook
+  queries `/patterns/active` and warns when no row exists.
+- **Decompose trigger (D13)** — on the structural seam of round decompose: `sdi
+  round activate <R>` (main session) and the first `sdi task create <R>` of a
+  round (decomposer sub-agent). When no non-`direct` active pattern governs the
+  round's plan and the create carries no `--produced-via-pattern`, the hook
+  nudges the session to run the pattern-orchestrator first. This is what catches
+  ordinary decompose — the dispatch trigger alone fires only once an intent
+  token is already present.
+
+Both are non-blocking; the daemon back-fills a `direct` row (L3 cap) whenever a
+work entity is produced without a pattern. Bind a chosen pattern at creation
+with `sdi task create … --produced-via-pattern <PAT-ID>`; the daemon validates
+the reference is `active` and scope-compatible, or rejects it (no silent
+`direct` degrade).
 
 D29 multi-session claims: for `Edit` / `Write` / `NotebookEdit`, the hook
 queries `/scenarios/active-claims`. Cross-session overlap exits with code 2
