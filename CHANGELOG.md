@@ -8,6 +8,36 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.7.0] - 2026-06-22
+
+### Added
+- **Chore lane for trivial post-round edits (#18).** After a round/plan closes
+  there is no active plan, so the active-task gate could never be satisfied for
+  a one-line consistency fix without authoring a full scenario → round → task
+  cycle (or bypassing). New commands give such edits a legitimate lightweight
+  home: `sdi chore "<desc>"` creates a `kind='chore'` task already in_progress
+  (no scenario/round needed); `sdi chore list` shows in-flight chores;
+  `sdi chore done <id> --note "<text>"` completes one with a free-text note
+  instead of scenario evidence. A chore is still a real audited, evidence-bearing
+  task — it just skips the GWT-scenario requirement it has no behaviour for. The
+  PreToolUse active-task gate now also accepts an in-flight chore. Backed by a
+  per-project `CHORE` container plan/round (migration 015, additive); D8's
+  single-active-plan/-round invariants are preserved for real work plans (the
+  container is excluded from the partial unique indexes and `find_active`).
+
+### Fixed
+- **Stale daemon after a plugin update (#17).** The install gate only checked
+  that the daemon `/health` responded, never its version — so after a plugin
+  auto-update the old daemon kept running and served a stale dashboard bundle,
+  diverging silently from the CLI. The SessionStart install gate now compares the
+  live daemon's `/health` version against the plugin manifest and, on a mismatch,
+  stops the old daemon and respawns the current one (SQLite state preserved).
+- **Read-only `git` with global options was blocked (#18).** The D21 read-only
+  Bash whitelist judged `git` by its first token, so `git -C <path> remote`,
+  `git --no-pager log`, and `git -c k=v diff` failed the match and were blocked
+  despite being read-only. Global options are now skipped to reach the real
+  subcommand; mutating subcommands after them stay blocked.
+
 ## [0.6.3] - 2026-06-17
 
 ### Changed

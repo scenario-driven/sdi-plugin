@@ -1,6 +1,6 @@
 {
   "name": "sdi",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "description": "Scenario-Driven Implementation engine for Claude Code. Natural-language GWT scenarios as first-class citizens; LLM implements + verifies + auto-regresses.",
   "author": {
     "name": "SDI contributors"
