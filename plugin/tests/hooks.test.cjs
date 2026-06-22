@@ -514,6 +514,33 @@ test('D21: isReadOnlyBash — /dev/null, PATH idiom, sdi split, gh (#4/#10)', ()
   assert.equal(isReadOnlyBash('gh pr merge 5'), false);
 });
 
+test('D21 (#18): git global flags (-C / -c / --no-pager) reach the real subcommand', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { isReadOnlyBash } = require(SHARED)._internals;
+  // Global options precede the subcommand — judge the subcommand, not the flag.
+  assert.equal(isReadOnlyBash('git -C /repo remote -v'), true);
+  assert.equal(isReadOnlyBash('git -C /repo status'), true);
+  assert.equal(isReadOnlyBash('git --no-pager log --oneline -5'), true);
+  assert.equal(isReadOnlyBash('git -c color.ui=always diff'), true);
+  assert.equal(isReadOnlyBash('git -C /a -c x=y rev-parse HEAD'), true);
+  // A mutating subcommand after global flags is still blocked.
+  assert.equal(isReadOnlyBash('git -C /repo push'), false);
+  assert.equal(isReadOnlyBash('git -C /repo checkout main -- file'), false);
+  // Bare git mutations remain blocked (regression anchor).
+  assert.equal(isReadOnlyBash('git commit -m x'), false);
+  assert.equal(isReadOnlyBash('git status'), true);
+});
+
+test('install gate (#17): pluginVersion reads .claude-plugin/plugin.json', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { pluginVersion } = require(SHARED)._internals;
+  // Against this repo's own plugin/ root, returns the manifest version string.
+  const v = pluginVersion(PLUGIN_ROOT);
+  assert.match(v, /^\d+\.\d+\.\d+$/, `expected semver, got ${v}`);
+  // Unknown root → null (graceful, never throws).
+  assert.equal(pluginVersion('/nonexistent/path'), null);
+});
+
 test('D13: parseRoundDecomposeIntent — round activate / task create seams', () => {
   delete require.cache[require.resolve(SHARED)];
   const { _internals } = require(SHARED);

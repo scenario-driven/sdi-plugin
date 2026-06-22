@@ -349,9 +349,25 @@ async function ensureInstalled(rootArg) {
   const skillsOk = verifySdiSkills(root);
 
   if (sdiBin && sdidBin && skillsOk) {
-    const healthy = await pingHealth().catch(() => false);
-    if (healthy) return true;
-    // Health failed — fall through to setup which will spawn the daemon.
+    const health = await daemonHealth().catch(() => null);
+    if (health) {
+      const want = pluginVersion(root);
+      if (!want || !health.version || health.version === want) {
+        return true; // healthy and on the current plugin version (or unknown)
+      }
+      // #17 — the plugin updated but the daemon is still running the old binary:
+      // it serves a stale dashboard bundle and reports an old /health version,
+      // diverging silently from the CLI. Restart it so the new daemon + SPA take
+      // over. State lives in SQLite and survives the restart.
+      process.stderr.write(
+        `[sdi] daemon is ${health.version} but plugin is ${want} — restarting to match ` +
+          `(SQLite data preserved)…\n`,
+      );
+      appendHookLog('daemon_version_restart', { from: health.version, to: want });
+      await stopDaemon();
+      // fall through to setup, which spawns the new daemon.
+    }
+    // health unreachable OR version mismatch (now stopped) → run setup.
   }
 
   return await runSetup({ sdiBin, sdidBin });
@@ -540,6 +556,77 @@ async function pingHealth() {
     return r.status === 200;
   } catch {
     return false;
+  }
+}
+
+// Parsed /health payload (`{ ok, service, version }`) or null if the daemon is
+// unreachable. Used by the install gate's version check (#17).
+async function daemonHealth() {
+  const base = daemonBase();
+  if (!base) return null;
+  try {
+    const r = await httpGet(`${base}/health`);
+    if (r.status !== 200) return null;
+    return JSON.parse(r.text);
+  } catch {
+    return null;
+  }
+}
+
+// The plugin's own version, from `.claude-plugin/plugin.json`. This is the
+// version of the binaries the install gate just resolved; comparing it to the
+// live daemon's `/health` version detects a daemon left running on an older
+// plugin build (#17).
+function pluginVersion(root) {
+  try {
+    const manifest = path.join(root || pluginRoot(), '.claude-plugin', 'plugin.json');
+    return JSON.parse(fs.readFileSync(manifest, 'utf8')).version || null;
+  } catch {
+    return null;
+  }
+}
+
+// Stop the running daemon (SIGTERM, then SIGKILL if it overstays the bounded
+// graceful-shutdown window) and clear its pid/port files so a fresh spawn is
+// unambiguous. SQLite state is untouched. Best-effort: a missing/dead pid is a
+// no-op.
+async function stopDaemon() {
+  const pf = pidFile();
+  const ptf = portFile();
+  let pid = null;
+  try {
+    pid = parseInt(fs.readFileSync(pf, 'utf8').trim(), 10);
+  } catch {
+    return;
+  }
+  if (!Number.isFinite(pid) || pid <= 0) return;
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // already gone
+    return;
+  }
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      break; // exited
+    }
+    await sleep(100);
+  }
+  try {
+    process.kill(pid, 0);
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // exited within the grace window
+  }
+  for (const f of [pf, ptf]) {
+    try {
+      if (fs.existsSync(f)) fs.unlinkSync(f);
+    } catch {
+      // leave stale file; spawnDaemon re-checks anyway
+    }
   }
 }
 
@@ -758,8 +845,23 @@ function segmentIsReadOnly(segment) {
   }
 
   if (verb === 'git') {
+    // Skip git's global options so the real subcommand is judged, not the flag:
+    // `git -C <path> remote -v` and `git --no-pager log` are read-only (#18).
+    let gi = 1;
+    while (gi < tokens.length) {
+      const t = tokens[gi];
+      if (t === '-C' || t === '-c') {
+        gi += 2; // these consume the following token
+      } else if (t === '--no-pager' || t === '-P' || t === '--paginate' || t === '--no-replace-objects') {
+        gi += 1;
+      } else if (t.startsWith('--git-dir=') || t.startsWith('--work-tree=') || t.startsWith('-C=')) {
+        gi += 1;
+      } else {
+        break;
+      }
+    }
     return /^(status|log|diff|show|branch|remote|config|rev-parse|describe|ls-files|blame|tag)$/.test(
-      tokens[1] || '',
+      tokens[gi] || '',
     );
   }
   if (verb === 'cargo') {
@@ -1847,6 +1949,7 @@ module.exports = {
   // Internals exposed for tests
   _internals: {
     isReadOnlyBash,
+    pluginVersion,
     parseRoundDecomposeIntent,
     decomposePatternAdvisory,
     buildSessionSummary,
