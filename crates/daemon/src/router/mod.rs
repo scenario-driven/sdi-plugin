@@ -11,6 +11,7 @@ use tower_http::services::{ServeDir, ServeFile};
 pub mod agent_note;
 pub mod aggregate;
 pub mod autonomy_policy;
+pub mod chore;
 pub mod collab;
 pub mod decision;
 pub mod disruption;
@@ -44,6 +45,7 @@ pub fn build(state: AppState) -> Router {
         .merge(autonomy_policy::router())
         .merge(agent_note::router())
         .merge(pattern::router())
+        .merge(chore::router())
         .with_state(state);
 
     match locate_web_bundle() {

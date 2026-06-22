@@ -37,6 +37,7 @@ async fn main() -> Result<()> {
         }
         Cmd::Consensus(sub) => commands::consensus::run(&entity_client().await?, sub).await,
         Cmd::Pattern(sub) => commands::pattern::run(&entity_client().await?, sub, app.quiet).await,
+        Cmd::Chore(args) => commands::chore::run(&entity_client().await?, args, app.quiet).await,
         Cmd::Comment(sub) => commands::comment::run(&entity_client().await?, sub, app.quiet).await,
         Cmd::Question(sub) => {
             commands::question::run(&entity_client().await?, sub, app.quiet).await

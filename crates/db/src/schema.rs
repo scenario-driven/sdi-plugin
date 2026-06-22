@@ -56,6 +56,7 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "round verification baseline",
         MIGRATION_014_ROUND_BASELINE,
     ),
+    (15, "chore task kind", MIGRATION_015_TASK_KIND),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -76,6 +77,7 @@ const MIGRATION_012_SCENARIO_RETIRE: &str = include_str!("./migrations/012_scena
 const MIGRATION_013_DECISION_SUPERSEDE_WHEN: &str =
     include_str!("./migrations/013_decision_supersede_when.sql");
 const MIGRATION_014_ROUND_BASELINE: &str = include_str!("./migrations/014_round_baseline.sql");
+const MIGRATION_015_TASK_KIND: &str = include_str!("./migrations/015_task_kind.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {

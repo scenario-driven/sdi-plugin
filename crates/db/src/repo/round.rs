@@ -85,6 +85,25 @@ pub fn list_by_plan(conn: &Connection, plan_id: &Id) -> DomainResult<Vec<Round>>
     Ok(out)
 }
 
+/// Look up a round by its `short_code` within a plan. Used to resolve the
+/// `CHORE-R` round under the per-project maintenance container idempotently (#18).
+pub fn find_by_plan_short_code(
+    conn: &Connection,
+    plan_id: &Id,
+    short_code: &str,
+) -> DomainResult<Option<Round>> {
+    let r = conn.query_row(
+        &format!("SELECT {COLS} FROM rounds WHERE plan_id = ?1 AND short_code = ?2"),
+        params![plan_id.as_str(), short_code],
+        row_to_round,
+    );
+    match r {
+        Ok(p) => Ok(Some(p)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(map_sqlite_err(e)),
+    }
+}
+
 pub fn find_active_for_plan(conn: &Connection, plan_id: &Id) -> DomainResult<Option<Round>> {
     let r = conn.query_row(
         &format!("SELECT {COLS} FROM rounds WHERE plan_id = ?1 AND status = 'active'"),

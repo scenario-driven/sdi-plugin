@@ -132,6 +132,12 @@ pub enum Cmd {
     // D22 entity, D24 parent-child DAG, D26 shape gate at pending→active.
     #[command(subcommand)]
     Pattern(PatternCmd),
+    /// Chore: lightweight maintenance lane (#18). `sdi chore "<desc>"` creates
+    /// a chore already in-progress (no scenario/round needed) so a trivial
+    /// consistency edit satisfies the active-task gate when no plan is active.
+    /// `sdi chore list` shows in-flight chores; `sdi chore done <id> --note`
+    /// completes one with a free-text note.
+    Chore(ChoreArgs),
     /// MCP server (stdio JSON-RPC, exposes the rag scope only).
     Mcp,
     /// Initialise a project anchored to the current cwd (idempotent).
@@ -197,6 +203,49 @@ pub struct BypassArmArgs {
     /// but do NOT open the gate.
     #[arg(long, default_value_t = 60)]
     pub ttl: i64,
+}
+
+/// `sdi chore` — the maintenance lane (#18).
+///
+/// Three forms, resolved against the cwd's project:
+/// - `sdi chore "<desc>"`            → create a chore, already in-progress
+/// - `sdi chore list`                → list in-flight chores
+/// - `sdi chore done <id> [--note]`  → complete a chore with a free-text note
+///
+/// The create form takes a bare positional description; `list` / `done` are
+/// subcommands. `subcommand_negates_reqs` + the optional positional let clap
+/// route `sdi chore list` / `sdi chore done <id>` to the subcommand while
+/// `sdi chore "<desc>"` falls through to the positional. The handler treats
+/// "no subcommand + a description" as create, and "no subcommand + nothing" as
+/// a usage error.
+#[derive(Debug, Args)]
+pub struct ChoreArgs {
+    /// Description for a new chore (create form). Omit when using a subcommand.
+    pub description: Option<String>,
+    /// Resolve the owning project by path (default: current working directory).
+    /// Applies to the create + `list` forms. `global` so it is accepted after
+    /// the `list` subcommand too (`sdi chore list --cwd <path>`).
+    #[arg(long, global = true)]
+    pub cwd: Option<String>,
+    #[command(subcommand)]
+    pub cmd: Option<ChoreCmd>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ChoreCmd {
+    /// List in-flight (in_progress) chores for the project.
+    List,
+    /// Complete a chore with an optional free-text note.
+    Done(ChoreDoneArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ChoreDoneArgs {
+    /// Chore task id (e.g. `TASK-…`).
+    pub id: String,
+    /// Free-text completion note recorded as the chore's evidence summary.
+    #[arg(long)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Args)]

@@ -72,6 +72,7 @@ async fn create(
         short_code: b.short_code,
         description: b.description,
         status: TaskStatus::Todo,
+        kind: "task".into(),
         parent_scenario_ids: b.parent_scenario_ids.into_iter().map(Id::from).collect(),
         parent_requirement_ids: b.parent_requirement_ids.into_iter().map(Id::from).collect(),
         evidence: None,

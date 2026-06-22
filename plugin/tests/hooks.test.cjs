@@ -88,6 +88,7 @@ function startMockSdiDaemon(opts) {
   };
   const plan = o.plan === undefined ? null : o.plan; // null = no active plan
   const inFlight = o.inFlight || []; // in_progress tasks for the active plan (#9)
+  const chores = o.chores || []; // in_progress chores for the project (#18)
   const policy = o.policy || { mode: 'L5' };
   const scenarios = o.scenarios || [];
   const patterns = o.patterns || [];
@@ -129,6 +130,9 @@ function startMockSdiDaemon(opts) {
     }
     if (plan && u.pathname === `/plans/${plan.id}/tasks/in-flight`) {
       return send(200, { tasks: inFlight });
+    }
+    if (u.pathname === `/projects/${project.id}/chores`) {
+      return send(200, { tasks: chores });
     }
     if (u.pathname === '/autonomy_policies/resolve') return send(200, { policy });
     if (u.pathname === '/scenarios/active-claims') {
@@ -283,6 +287,83 @@ test('shim wraps: PreToolUse exits 0 with no active task (deny path, not crash)'
     // Should print the deny JSON payload on stdout.
     assert.match(r.stdout, /permissionDecision.*deny/);
     assert.match(r.stdout, /no active task/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// #18 — chore lane satisfies the active-task gate.
+
+test('#18: inFlightChores + hasActiveTaskContext read the chore lane', async () => {
+  const home = mkTempHome('sdi-chore-unit');
+  const chore = { id: 'TASK-chore1', kind: 'chore', status: 'in_progress' };
+  const { server, port } = await startMockSdiDaemon({ plan: null, chores: [chore] });
+  const prevHome = process.env.SDI_HOME;
+  try {
+    pinDaemonPort(home, port);
+    process.env.SDI_HOME = home;
+    delete require.cache[require.resolve(SHARED)];
+    const { _internals } = require(SHARED);
+    const project = { id: 'PROJ-test' };
+
+    const chores = await _internals.inFlightChores(project.id);
+    assert.equal(chores.length, 1);
+    assert.equal(chores[0].id, 'TASK-chore1');
+
+    // No active plan, but a chore is in flight → context is satisfied (#18).
+    const has = await _internals.hasActiveTaskContext(project);
+    assert.equal(has, true);
+  } finally {
+    if (prevHome === undefined) delete process.env.SDI_HOME;
+    else process.env.SDI_HOME = prevHome;
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('#18: hasActiveTaskContext is false with no plan and no chores', async () => {
+  const home = mkTempHome('sdi-chore-empty');
+  const { server, port } = await startMockSdiDaemon({ plan: null, chores: [] });
+  const prevHome = process.env.SDI_HOME;
+  try {
+    pinDaemonPort(home, port);
+    process.env.SDI_HOME = home;
+    delete require.cache[require.resolve(SHARED)];
+    const { _internals } = require(SHARED);
+    const has = await _internals.hasActiveTaskContext({ id: 'PROJ-test' });
+    assert.equal(has, false);
+  } finally {
+    if (prevHome === undefined) delete process.env.SDI_HOME;
+    else process.env.SDI_HOME = prevHome;
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('#18: PreToolUse allows a sub-agent Edit when a chore is in flight (no active plan)', async () => {
+  const home = mkTempHome('sdi-chore-pretool');
+  const chore = { id: 'TASK-chore1', kind: 'chore', status: 'in_progress' };
+  const { server, port } = await startMockSdiDaemon({ plan: null, chores: [chore] });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '' });
+    // Registered sub-agent (agent_id present) so the D21 delegation gate passes
+    // and the active-task gate is what's under test. The chore lane satisfies it.
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'Edit',
+        agent_id: '00000000-0000-0000-0000-000000000099',
+        agent_type: 'impl-coder',
+      }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    // Active-task gate satisfied → no "no active task" deny payload.
+    assert.doesNotMatch(r.stdout, /no active task/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });

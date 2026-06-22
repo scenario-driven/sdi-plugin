@@ -14,9 +14,103 @@
 
 use sdi_core::error::{DomainError, DomainResult};
 use sdi_core::ids::{now, Id, IdKind};
+use sdi_core::plan::{Plan, PlanStatus};
+use sdi_core::round::{DisruptionPolicy, InFlightPolicy, Round, RoundMode, RoundStatus};
 use sdi_db::repo::pattern::{self as pattern_repo, PatternRow};
 use sdi_db::repo::plan as plan_repo;
+use sdi_db::repo::round as round_repo;
 use sdi_db::PooledConn;
+
+/// Stable short_codes for the per-project chore maintenance lane (#18).
+const CHORE_PLAN_SHORT_CODE: &str = "CHORE";
+const CHORE_ROUND_SHORT_CODE: &str = "CHORE-R";
+
+/// Find (or create) the per-project chore container — a permanently-`active`
+/// Plan (`short_code = "CHORE"`) holding one permanently-`active` Round
+/// (`short_code = "CHORE-R"`) — and return `(plan_id, round_id)` (#18).
+///
+/// This is the lightweight maintenance lane: a `kind='chore'` task lives under
+/// this round so the active-task PreToolUse gate is satisfiable for a trivial
+/// consistency edit when there is no real active plan. The container is
+/// idempotent — one CHORE plan + one CHORE-R round per project, reused across
+/// every chore. It does NOT count as the project's active plan: migration 015's
+/// partial unique indexes and `plan_repo::find_active_for_project` both exclude
+/// `short_code LIKE 'CHORE%'`, so D8's single-active-plan invariant is untouched
+/// for real work plans and the container can coexist with one.
+///
+/// Mirrors [`ensure_direct_pattern`]'s race handling: a caller that loses the
+/// insert race on the UNIQUE short_code re-reads the winning row.
+pub fn ensure_chore_container(conn: &PooledConn, project_id: &Id) -> DomainResult<(Id, Id)> {
+    let plan_id = ensure_chore_plan(conn, project_id)?;
+    let round_id = ensure_chore_round(conn, &plan_id)?;
+    Ok((plan_id, round_id))
+}
+
+fn ensure_chore_plan(conn: &PooledConn, project_id: &Id) -> DomainResult<Id> {
+    if let Some(existing) =
+        plan_repo::find_by_project_short_code(conn, project_id, CHORE_PLAN_SHORT_CODE)?
+    {
+        return Ok(existing.id);
+    }
+    let plan = Plan {
+        id: Id::new(IdKind::Plan),
+        project_id: project_id.clone(),
+        short_code: CHORE_PLAN_SHORT_CODE.into(),
+        title: "Chores / maintenance".into(),
+        body: String::new(),
+        status: PlanStatus::Active,
+        version: 0,
+        // The container is solo-flow scaffolding; provenance is resolved lazily
+        // by the chore tasks themselves (each binds the plan's `direct`
+        // sentinel), never by the container shell.
+        produced_via_pattern_id: None,
+        approved_at: Some(now()),
+        completed_at: None,
+        created_at: now(),
+        updated_at: now(),
+    };
+    match plan_repo::insert(conn, &plan) {
+        Ok(()) => Ok(plan.id),
+        Err(DomainError::Conflict(_)) => {
+            plan_repo::find_by_project_short_code(conn, project_id, CHORE_PLAN_SHORT_CODE)?
+                .map(|p| p.id)
+                .ok_or_else(|| DomainError::NotFound(CHORE_PLAN_SHORT_CODE.into()))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn ensure_chore_round(conn: &PooledConn, plan_id: &Id) -> DomainResult<Id> {
+    if let Some(existing) =
+        round_repo::find_by_plan_short_code(conn, plan_id, CHORE_ROUND_SHORT_CODE)?
+    {
+        return Ok(existing.id);
+    }
+    let round = Round {
+        id: Id::new(IdKind::Round),
+        plan_id: plan_id.clone(),
+        short_code: CHORE_ROUND_SHORT_CODE.into(),
+        round_number: 1,
+        mode: RoundMode::ForwardOnly,
+        in_flight_policy: InFlightPolicy::Pause,
+        disruption_policy: DisruptionPolicy::NeedsReview,
+        status: RoundStatus::Active,
+        produced_via_pattern_id: None,
+        activated_at: Some(now()),
+        completed_at: None,
+        created_at: now(),
+        updated_at: now(),
+    };
+    match round_repo::insert(conn, &round) {
+        Ok(()) => Ok(round.id),
+        Err(DomainError::Conflict(_)) => {
+            round_repo::find_by_plan_short_code(conn, plan_id, CHORE_ROUND_SHORT_CODE)?
+                .map(|r| r.id)
+                .ok_or_else(|| DomainError::NotFound(CHORE_ROUND_SHORT_CODE.into()))
+        }
+        Err(e) => Err(e),
+    }
+}
 
 /// Stable short_code for a plan's direct sentinel. Plan short_codes are
 /// globally unique (001_core.sql), so this never collides across plans.

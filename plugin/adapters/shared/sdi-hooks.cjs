@@ -689,25 +689,41 @@ async function getTask(taskId) {
   return json || null;
 }
 
+// #18 — In-flight chores for a project (the lightweight maintenance lane). A
+// chore is a kind='chore' task under the per-project CHORE container, created
+// already in_progress; `GET /projects/:id/chores` returns exactly that
+// in_progress set. Distinct from `inFlightTasks` (which is scoped to a real
+// active plan's rounds) because a chore exists precisely when no real plan is
+// active.
+async function inFlightChores(projectId) {
+  const json = await getJson(`/projects/${encodeURIComponent(projectId)}/chores`);
+  return json && Array.isArray(json.tasks) ? json.tasks : [];
+}
+
 function readActiveTaskHint() {
   // Explicit fast-path pin (set before Claude Code launches). Optional — the
   // active-task gate falls back to live daemon state when this is unset (#9).
   return process.env.SDI_ACTIVE_TASK || process.env.CLAUDE_ACTIVE_TASK || null;
 }
 
-// #9 — Is there active task context for `project`, judged from DAEMON STATE?
-// True iff the project's active plan has at least one in_progress task (the
-// daemon's `/tasks/in-flight` endpoint returns exactly the in_progress set).
-// `sdi task start <id>` moves a task todo → in_progress, so an agent satisfies
-// this from inside the session — unlike the old `SDI_ACTIVE_TASK` env, which
-// could only be set before launch. Daemon unreachable → caller treats as
-// false but the surrounding gate degrades gracefully (bypass / explicit env).
+// #9 / #18 — Is there active task context for `project`, judged from DAEMON
+// STATE? True iff EITHER:
+//   (a) the project's active plan has ≥1 in_progress task, OR
+//   (b) the project has ≥1 in-flight chore (the maintenance lane).
+// `sdi task start <id>` satisfies (a) from inside the session; `sdi chore
+// "<desc>"` satisfies (b) in one step when there is no active plan — that is
+// the #18 escape hatch for trivial consistency edits after a plan/round closes.
+// Daemon unreachable → caller treats as false but the surrounding gate degrades
+// gracefully (bypass / explicit env).
 async function hasActiveTaskContext(project) {
   if (!project) return false;
   const plan = await activePlanForProject(project.id);
-  if (!plan) return false;
-  const tasks = await inFlightTasks(plan.id);
-  return Array.isArray(tasks) && tasks.length > 0;
+  if (plan) {
+    const tasks = await inFlightTasks(plan.id);
+    if (Array.isArray(tasks) && tasks.length > 0) return true;
+  }
+  const chores = await inFlightChores(project.id);
+  return Array.isArray(chores) && chores.length > 0;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1963,6 +1979,8 @@ module.exports = {
     appendHookLog,
     bypassOnceFile,
     consumeBypassMarker,
+    inFlightChores,
+    hasActiveTaskContext,
     SDI_SKILLS,
   },
 };

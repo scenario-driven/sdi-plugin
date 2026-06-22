@@ -213,6 +213,9 @@ async fn decompose(
             short_code: child.short_code,
             description: child.description,
             status: TaskStatus::Todo,
+            // A subtask inherits its parent's lane: decomposing a chore yields
+            // chores, decomposing a D3 task yields tasks.
+            kind: parent.kind.clone(),
             parent_scenario_ids: child
                 .parent_scenario_ids
                 .into_iter()

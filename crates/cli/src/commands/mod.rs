@@ -6,6 +6,7 @@ pub mod agent_note;
 pub mod aggregate;
 pub mod autonomy;
 pub mod bypass;
+pub mod chore;
 pub mod comment;
 pub mod consensus;
 pub mod decision;

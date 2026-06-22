@@ -78,9 +78,37 @@ pub fn list_by_project(conn: &Connection, project_id: &Id) -> DomainResult<Vec<P
 }
 
 pub fn find_active_for_project(conn: &Connection, project_id: &Id) -> DomainResult<Option<Plan>> {
+    // The per-project `CHORE` maintenance container (#18) is permanently
+    // `active` so it can hold in_progress chores, but it is NOT "the active
+    // plan" — it is an orthogonal always-on lane. Exclude it so the active-plan
+    // view, the approve gate, and the single-active-plan invariant continue to
+    // describe real work plans only. (Mirrors the partial-index predicate in
+    // migration 015.)
     let r = conn.query_row(
-        &format!("SELECT {COLS} FROM plans WHERE project_id = ?1 AND status = 'active'"),
+        &format!(
+            "SELECT {COLS} FROM plans \
+             WHERE project_id = ?1 AND status = 'active' AND short_code NOT LIKE 'CHORE%'"
+        ),
         [project_id.as_str()],
+        row_to_plan,
+    );
+    match r {
+        Ok(p) => Ok(Some(p)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(map_sqlite_err(e)),
+    }
+}
+
+/// Look up a plan by its project-scoped `short_code`. Used to resolve the
+/// per-project `CHORE` maintenance container idempotently (#18).
+pub fn find_by_project_short_code(
+    conn: &Connection,
+    project_id: &Id,
+    short_code: &str,
+) -> DomainResult<Option<Plan>> {
+    let r = conn.query_row(
+        &format!("SELECT {COLS} FROM plans WHERE project_id = ?1 AND short_code = ?2"),
+        params![project_id.as_str(), short_code],
         row_to_plan,
     );
     match r {

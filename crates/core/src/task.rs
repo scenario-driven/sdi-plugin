@@ -97,6 +97,10 @@ impl TaskEvidence {
     }
 }
 
+fn default_task_kind() -> String {
+    "task".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
@@ -109,6 +113,13 @@ pub struct Task {
     pub short_code: String,
     pub description: String,
     pub status: TaskStatus,
+    /// Discriminator. `"task"` is the D3 scenario-decomposed runtime artifact;
+    /// `"chore"` is the lightweight maintenance lane (#18) — created + started
+    /// in one step, completed with a free-text note instead of scenario
+    /// evidence. `serde(default)` keeps pre-015 payloads (without the field)
+    /// deserializing as ordinary tasks.
+    #[serde(default = "default_task_kind")]
+    pub kind: String,
     pub parent_scenario_ids: Vec<Id>,
     pub parent_requirement_ids: Vec<Id>,
     pub evidence: Option<TaskEvidence>,
@@ -168,6 +179,7 @@ mod tests {
             short_code: "SDI-1".into(),
             description: "x".into(),
             status: TaskStatus::InProgress,
+            kind: "task".into(),
             parent_scenario_ids: vec![],
             parent_requirement_ids: vec![],
             evidence: None,

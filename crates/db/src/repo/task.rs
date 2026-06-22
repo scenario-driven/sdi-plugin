@@ -31,10 +31,11 @@ fn row_to_task(row: &Row<'_>) -> rusqlite::Result<Task> {
         created_at: ts(row, 10)?,
         updated_at: ts(row, 11)?,
         produced_via_pattern_id: s_opt(row, 12)?,
+        kind: s(row, 13)?,
     })
 }
 
-const COLS: &str = "id, round_id, plan_id, short_code, description, status, parent_scenario_ids, parent_requirement_ids, evidence, evidence_at, created_at, updated_at, produced_via_pattern_id";
+const COLS: &str = "id, round_id, plan_id, short_code, description, status, parent_scenario_ids, parent_requirement_ids, evidence, evidence_at, created_at, updated_at, produced_via_pattern_id, kind";
 
 pub fn insert(conn: &Connection, task: &Task) -> DomainResult<()> {
     let parent_scn = serde_json::to_string(&task.parent_scenario_ids)
@@ -49,7 +50,9 @@ pub fn insert(conn: &Connection, task: &Task) -> DomainResult<()> {
         None => None,
     };
     conn.execute(
-        &format!("INSERT INTO tasks({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"),
+        &format!(
+            "INSERT INTO tasks({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"
+        ),
         params![
             task.id.as_str(),
             task.round_id.as_str(),
@@ -64,6 +67,7 @@ pub fn insert(conn: &Connection, task: &Task) -> DomainResult<()> {
             fmt_ts(task.created_at),
             fmt_ts(task.updated_at),
             task.produced_via_pattern_id,
+            task.kind,
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -111,6 +115,35 @@ pub fn list_in_flight_for_plan(conn: &Connection, plan_id: &Id) -> DomainResult<
         .map_err(map_sqlite_err)?;
     let rows = stmt
         .query_map([plan_id.as_str()], row_to_task)
+        .map_err(map_sqlite_err)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(map_sqlite_err)?);
+    }
+    Ok(out)
+}
+
+/// In-flight chores for a project (#18). A chore's plan is the per-project
+/// `CHORE` maintenance container, so resolution goes task → plan → project
+/// (chores live outside any real work plan). Powers the active-task gate's
+/// "OR a chore is in flight" branch and `sdi chore list`.
+pub fn list_in_flight_chores_for_project(
+    conn: &Connection,
+    project_id: &Id,
+) -> DomainResult<Vec<Task>> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {} FROM tasks t JOIN plans p ON p.id = t.plan_id \
+             WHERE p.project_id = ?1 AND t.kind = 'chore' AND t.status = 'in_progress' \
+             ORDER BY t.created_at",
+            COLS.split(", ")
+                .map(|c| format!("t.{c}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+        .map_err(map_sqlite_err)?;
+    let rows = stmt
+        .query_map([project_id.as_str()], row_to_task)
         .map_err(map_sqlite_err)?;
     let mut out = Vec::new();
     for r in rows {
@@ -288,6 +321,7 @@ mod tests {
             short_code: format!("TASK-{}", ulid::Ulid::new()),
             description: "wire CLI".into(),
             status: TaskStatus::Todo,
+            kind: "task".into(),
             parent_scenario_ids: parent_scn,
             parent_requirement_ids: vec![],
             evidence: None,
