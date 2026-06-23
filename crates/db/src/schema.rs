@@ -57,6 +57,12 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         MIGRATION_014_ROUND_BASELINE,
     ),
     (15, "chore task kind", MIGRATION_015_TASK_KIND),
+    (
+        16,
+        "v2 oracle layer: ssot graph + user flows + decision-question engine",
+        MIGRATION_016_ORACLE_LAYER,
+    ),
+    (17, "v2 plan↔flow targeting", MIGRATION_017_PLAN_FLOWS),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -78,6 +84,8 @@ const MIGRATION_013_DECISION_SUPERSEDE_WHEN: &str =
     include_str!("./migrations/013_decision_supersede_when.sql");
 const MIGRATION_014_ROUND_BASELINE: &str = include_str!("./migrations/014_round_baseline.sql");
 const MIGRATION_015_TASK_KIND: &str = include_str!("./migrations/015_task_kind.sql");
+const MIGRATION_016_ORACLE_LAYER: &str = include_str!("./migrations/016_oracle_layer.sql");
+const MIGRATION_017_PLAN_FLOWS: &str = include_str!("./migrations/017_plan_flows.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {

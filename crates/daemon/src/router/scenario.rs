@@ -66,6 +66,12 @@ struct CreateScenarioBody {
     /// D23 — pattern this scenario was produced under.
     #[serde(default)]
     produced_via_pattern_id: Option<String>,
+    /// D33 (PRD-v2) — UserFlow this scenario verifies a step of.
+    #[serde(default)]
+    belongs_to_flow_id: Option<String>,
+    /// D33 — which flow step (FlowStep `idx` as string) it covers.
+    #[serde(default)]
+    covers_flow_step: Option<String>,
 }
 
 async fn create(
@@ -101,6 +107,8 @@ async fn create(
         claim_status: ClaimStatus::None,
         produced_via_pattern_id,
         retired_at: None,
+        belongs_to_flow_id: b.belongs_to_flow_id,
+        covers_flow_step: b.covers_flow_step,
         created_at: now(),
         updated_at: now(),
     };

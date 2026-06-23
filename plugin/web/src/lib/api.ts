@@ -17,13 +17,18 @@ import { authHeaders } from './auth';
 import type {
   CollaborationPattern,
   Decision,
+  DecisionQuestion,
+  OracleVerify,
   PatternLifecycle,
   Plan,
   Project,
+  QuestionOption,
   Round,
   Scenario,
   ScenarioClaim,
+  SsotNode,
   Task,
+  UserFlow,
 } from '../types/entities';
 
 export interface DaemonErrorBody {
@@ -302,4 +307,73 @@ export interface TaskBrief {
  *  template. */
 export function getTaskBrief(taskId: string): Promise<TaskBrief> {
   return getJson<TaskBrief>(`/tasks/${encodeURIComponent(taskId)}/brief`);
+}
+
+// ─── Oracle (PRD-v2 D32/D33/D34/D35) ─────────────────────────────────────────
+
+/** D34 — deterministic completeness verdict (L0 facet/link, L1 coverage,
+ *  open-question count, L2 enforced flag, oracle_complete). The verdict object
+ *  is a scalar DTO, so `request` returns it untouched (not a list envelope). */
+export function getOracleVerify(projectId: string): Promise<OracleVerify> {
+  return getJson<OracleVerify>(
+    `/projects/${encodeURIComponent(projectId)}/oracle/verify`,
+  );
+}
+
+/** L0 — SSoT graph nodes for the project. */
+export function listSsotNodes(projectId: string): Promise<SsotNode[]> {
+  return getJson<SsotNode[]>(
+    `/projects/${encodeURIComponent(projectId)}/ssot-nodes`,
+  );
+}
+
+/** L1 — UserFlow rows for the project. */
+export function listUserFlows(projectId: string): Promise<UserFlow[]> {
+  return getJson<UserFlow[]>(
+    `/projects/${encodeURIComponent(projectId)}/user-flows`,
+  );
+}
+
+/** D35 — every decision question for the project (open / answered / auto_decided). */
+export function listDecisionQuestions(
+  projectId: string,
+): Promise<DecisionQuestion[]> {
+  return getJson<DecisionQuestion[]>(
+    `/projects/${encodeURIComponent(projectId)}/decision-questions`,
+  );
+}
+
+/** D35 — the options of one question (the SA-exam choices). */
+export function listQuestionOptions(
+  questionId: string,
+): Promise<QuestionOption[]> {
+  return getJson<QuestionOption[]>(
+    `/decision-questions/${encodeURIComponent(questionId)}/options`,
+  );
+}
+
+/** D35 — answer payload. The daemon records the answer, flips question status,
+ *  and (when `apply_*` is present) deterministically compiles the decision into
+ *  the scoped SSoT node — closing an OPEN marker and/or replacing facets. */
+export interface AnswerQuestionBody {
+  chosen_option_id?: string;
+  free_text?: string;
+  answered_by?: string;
+  /** `true` for a fact-type 1-survivor auto-decision → status `auto_decided`. */
+  auto?: boolean;
+  apply_node_id?: string;
+  resolve_marker_id?: string;
+  apply_facets_json?: string;
+}
+
+/** D35 — submit an answer to a decision question. Returns the recorded answer +
+ *  the question in its new status. */
+export function answerQuestion(
+  questionId: string,
+  body: AnswerQuestionBody,
+): Promise<{ answer: unknown; question: DecisionQuestion }> {
+  return postJson<{ answer: unknown; question: DecisionQuestion }>(
+    `/decision-questions/${encodeURIComponent(questionId)}/answer`,
+    body,
+  );
 }

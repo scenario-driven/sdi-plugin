@@ -16,6 +16,8 @@ pub mod collab;
 pub mod decision;
 pub mod disruption;
 pub mod knowledge;
+pub mod llm_proxy;
+pub mod oracle;
 pub mod pattern;
 pub mod plan;
 pub mod project;
@@ -46,6 +48,8 @@ pub fn build(state: AppState) -> Router {
         .merge(agent_note::router())
         .merge(pattern::router())
         .merge(chore::router())
+        .merge(oracle::router())
+        .merge(llm_proxy::router())
         .with_state(state);
 
     match locate_web_bundle() {

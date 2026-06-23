@@ -157,7 +157,7 @@ function startMockSdiDaemon(opts) {
 test('shared module: SDI_SKILLS is in lock-step with skills/ and plugin.json#skillsList', () => {
   delete require.cache[require.resolve(SHARED)];
   const { _internals } = require(SHARED);
-  // Four `sdi-` prefixed skills, all self-contained. Lock-step contract
+  // Six `sdi-` prefixed skills, all self-contained. Lock-step contract
   // enforced across three sources: SDI_SKILLS array, skills/<name>/SKILL.md
   // files, plugin.json#skillsList.
   assert.deepEqual(_internals.SDI_SKILLS, [
@@ -165,6 +165,8 @@ test('shared module: SDI_SKILLS is in lock-step with skills/ and plugin.json#ski
     'sdi-scenario',
     'sdi-round',
     'sdi-evidence',
+    'sdi-converge',
+    'sdi-impl-loop',
   ]);
   for (const name of _internals.SDI_SKILLS) {
     assert.ok(

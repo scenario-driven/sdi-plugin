@@ -6,6 +6,8 @@ import { getStoredTheme, setTheme, getCurrentEffectiveTheme, type Theme } from '
 export type ViewId =
   | 'summary'
   | 'next'
+  | 'oracle'
+  | 'questions'
   | 'board'
   | 'backlog'
   | 'timeline'
@@ -20,6 +22,8 @@ interface ViewMeta {
 const VIEWS: readonly ViewMeta[] = [
   { id: 'summary', label: 'Summary' },
   { id: 'next', label: 'Next' },
+  { id: 'oracle', label: 'Oracle' },
+  { id: 'questions', label: 'Questions' },
   { id: 'board', label: 'Board' },
   { id: 'backlog', label: 'Backlog' },
   { id: 'timeline', label: 'Timeline' },

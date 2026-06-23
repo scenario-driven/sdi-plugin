@@ -30,6 +30,13 @@ pub enum IdKind {
     AgentNote,
     AgentSpec,
     Pattern,
+    // SDI 2.0 oracle layer (PRD-v2 D32/D33/D35)
+    SsotNode,
+    SsotEdge,
+    UserFlow,
+    DecisionQuestion,
+    QuestionOption,
+    QuestionAnswer,
 }
 
 impl IdKind {
@@ -55,6 +62,12 @@ impl IdKind {
             IdKind::AgentNote => "ANOTE",
             IdKind::AgentSpec => "ASPEC",
             IdKind::Pattern => "CP",
+            IdKind::SsotNode => "SN",
+            IdKind::SsotEdge => "SE",
+            IdKind::UserFlow => "UF",
+            IdKind::DecisionQuestion => "DQ",
+            IdKind::QuestionOption => "QOPT",
+            IdKind::QuestionAnswer => "QANS",
         }
     }
 }

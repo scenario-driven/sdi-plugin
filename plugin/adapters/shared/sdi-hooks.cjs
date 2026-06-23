@@ -98,14 +98,18 @@ function bypassOnceFile() {
 // `.claude-plugin/plugin.json` (same lock-step contract Clawket's
 // `skill-file-integrity-on-install` rule enforces — three-way sync).
 //
-// Four skills, all `sdi-` prefixed:
-//   - sdi-overview : cold-read orientation (entities, lifecycle, MCP map,
-//                    failure codes)
-//   - sdi-scenario : natural-language → GWT normalisation for scenarios
-//   - sdi-round    : round create/activate/complete + mode, in-flight
-//                    policy, disruption review, task auto-decomposition
-//   - sdi-evidence : structured TaskEvidence at task done
-const SDI_SKILLS = ['sdi-overview', 'sdi-scenario', 'sdi-round', 'sdi-evidence'];
+// Six skills, all `sdi-` prefixed:
+//   - sdi-overview  : cold-read orientation (entities, lifecycle, MCP map,
+//                     failure codes)
+//   - sdi-scenario  : natural-language → GWT normalisation for scenarios
+//   - sdi-round     : round create/activate/complete + mode, in-flight
+//                     policy, disruption review, task auto-decomposition
+//   - sdi-evidence  : structured TaskEvidence at task done
+//   - sdi-converge  : outer loop — spec convergence to the completeness oracle
+//                     (D31/D34/D35); §2a elimination, auto-decide / ask, loop-until-dry
+//   - sdi-impl-loop : inner loop — implementation convergence over rounds
+//                     (D30/D31); bounded retry + auto round-advance on regression
+const SDI_SKILLS = ['sdi-overview', 'sdi-scenario', 'sdi-round', 'sdi-evidence', 'sdi-converge', 'sdi-impl-loop'];
 
 // ────────────────────────────────────────────────────────────────────────────
 // Plugin root resolution

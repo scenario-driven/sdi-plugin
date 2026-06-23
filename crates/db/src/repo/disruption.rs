@@ -221,6 +221,8 @@ mod tests {
             claim_status: sdi_core::pattern::ClaimStatus::None,
             produced_via_pattern_id: None,
             retired_at: None,
+            belongs_to_flow_id: None,
+            covers_flow_step: None,
             created_at: now(),
             updated_at: now(),
         };

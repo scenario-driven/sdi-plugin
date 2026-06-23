@@ -1,6 +1,6 @@
 {
   "name": "sdi",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Scenario-Driven Implementation engine for Claude Code. Natural-language GWT scenarios as first-class citizens; LLM implements + verifies + auto-regresses.",
   "author": {
     "name": "SDI contributors"
@@ -28,6 +28,16 @@
       "name": "sdi-evidence",
       "path": "./skills/sdi-evidence/SKILL.md",
       "description": "Record structured TaskEvidence (code / test / ci / external / transcript) at task done"
+    },
+    {
+      "name": "sdi-converge",
+      "path": "./skills/sdi-converge/SKILL.md",
+      "description": "Outer loop — spec convergence to the completeness oracle (D31/D34/D35): scan oracle/verify, §2a-eliminate decision-points, auto-decide facts / ask preferences, loop until uncovered=0 & unanswered=0 & unasked=0, then approve"
+    },
+    {
+      "name": "sdi-impl-loop",
+      "path": "./skills/sdi-impl-loop/SKILL.md",
+      "description": "Inner loop — implementation convergence over rounds (D30/D31): decompose → impl → test → bounded-N retry / escalate, complete on all-pass, auto-open next round on regression, loop until regressions=0"
     }
   ]
 }

@@ -14,6 +14,8 @@ import { Topbar, type ViewId } from './components/shell/Topbar';
 import Sidebar, { type SelectedItem } from './components/Sidebar';
 import { SummaryView } from './views/SummaryView';
 import { NextView } from './views/NextView';
+import { OracleView } from './views/OracleView';
+import { QuestionsView } from './views/QuestionsView';
 import { BoardView } from './views/BoardView';
 import { BacklogView } from './views/BacklogView';
 import { TimelineView } from './views/TimelineView';
@@ -35,6 +37,8 @@ import { cn } from './lib/cn';
 const VIEWS = new Set<ViewId>([
   'summary',
   'next',
+  'oracle',
+  'questions',
   'board',
   'backlog',
   'timeline',
@@ -441,6 +445,10 @@ export function App() {
         return <SummaryView projectId={selectedProjectId} refreshKey={sseState.structuralSeq} />;
       case 'next':
         return <NextView projectId={selectedProjectId} refreshKey={sseState.structuralSeq} />;
+      case 'oracle':
+        return <OracleView projectId={selectedProjectId} refreshKey={sseState.structuralSeq} />;
+      case 'questions':
+        return <QuestionsView projectId={selectedProjectId} refreshKey={sseState.structuralSeq} />;
       case 'board':
         return <BoardView projectId={selectedProjectId} refreshKey={sseState.structuralSeq} taskPatches={sseState.taskPatches} onSelectTask={(id) => setSelectedItem({ type: 'task', id })} />;
       case 'backlog':
@@ -582,6 +590,24 @@ export function App() {
               keywords: 'summary',
               run: () => {
                 setActiveView('summary');
+                setPaletteOpen(false);
+              },
+            },
+            {
+              id: 'view-oracle',
+              label: 'Go to Oracle',
+              keywords: 'oracle completeness verify coverage ssot',
+              run: () => {
+                setActiveView('oracle');
+                setPaletteOpen(false);
+              },
+            },
+            {
+              id: 'view-questions',
+              label: 'Go to Questions',
+              keywords: 'questions decision answer fact preference',
+              run: () => {
+                setActiveView('questions');
                 setPaletteOpen(false);
               },
             },

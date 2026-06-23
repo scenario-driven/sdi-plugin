@@ -110,6 +110,13 @@ pub struct Scenario {
     /// which is preserved across retire/un-retire.
     #[serde(default)]
     pub retired_at: Option<Timestamp>,
+    /// D33 (PRD-v2) — the UserFlow whose step this DetailScenario verifies.
+    /// NULL for legacy / unanchored scenarios.
+    #[serde(default)]
+    pub belongs_to_flow_id: Option<String>,
+    /// D33 — which step of that flow (FlowStep `idx` as a string) this covers.
+    #[serde(default)]
+    pub covers_flow_step: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }

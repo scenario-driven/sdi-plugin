@@ -5,6 +5,7 @@ pub mod agent_spec;
 pub mod autonomy_policy;
 pub mod collab;
 pub mod decision;
+pub mod decision_question;
 pub mod disruption;
 pub mod error;
 pub mod ids;
@@ -16,8 +17,10 @@ pub mod requirement;
 pub mod round;
 pub mod run;
 pub mod scenario;
+pub mod ssot;
 pub mod task;
 pub mod usage;
+pub mod user_flow;
 
 pub use agent_note::{AgentNote, AgentNoteId, AgentNoteKind, AgentNoteScope};
 pub use agent_spec::{AgentSpec, AgentSpecId, AgentSpecStatus, STOCK_AGENTS, STOCK_META_AGENTS};
@@ -35,9 +38,15 @@ pub use pattern::{
     CollaborationPattern, CollaborationPatternId, PatternKind, PatternLifecycle, PatternStep,
     PeerLink, ReversalPlan, Reviewer, Stance,
 };
+pub use decision_question::{
+    DecisionQuestion, DecisionQuestionId, QuestionAnswer, QuestionAnswerId, QuestionOption,
+    QuestionOptionId, QuestionStatus, QuestionType,
+};
 pub use plan::{Plan, PlanId, PlanStatus};
 pub use project::{Project, ProjectId};
 pub use requirement::{Requirement, RequirementId};
 pub use round::{DisruptionPolicy, InFlightPolicy, Round, RoundId, RoundMode, RoundStatus};
 pub use scenario::{Scenario, ScenarioId, ScenarioResult, ScenarioStatus};
+pub use ssot::{Confidence, OpenMarker, SsotEdge, SsotEdgeId, SsotNode, SsotNodeId};
 pub use task::{ScenarioEvidence, Task, TaskEvidence, TaskId, TaskStatus};
+pub use user_flow::{FlowStatus, FlowStep, UserFlow, UserFlowId};

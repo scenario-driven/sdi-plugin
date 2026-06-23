@@ -8,6 +8,54 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.8.0] - 2026-06-24
+
+SDI 2.0 — the scenario engine gains a completeness **oracle** and two
+deterministic **convergence loops**, the gaps diagnosed in v0.x ("a plan never
+loops past R1; scenarios are under-specified"). Additive: v1 flows are
+untouched (D8 plan-approve still applies to plans that do not adopt the oracle).
+
+### Added
+- **Product-definition oracle (D32/D33).** A native SSoT graph — `ssot_nodes`
+  (Persona / Capability / Domain / …, with 4-axis facets + OPEN markers) and
+  `ssot_edges` — plus a **UserFlow** tier (one persona × one purpose journey) and
+  DetailScenarios anchored to flow steps (`belongs_to_flow_id` / `covers_flow_step`).
+  Migrations 016/017 (additive).
+- **Deterministic completeness verify + forced gates (D34).** `GET
+  /projects/:id/oracle/verify` judges L0 facet completeness (no unresolved OPEN),
+  L0 link completeness (no dangling edge), L1 (Persona × Capability) coverage, and
+  open-question count. **Plan approve is superseded by D34** for oracle-scoped
+  plans (those targeting UserFlows via `POST /plans/:id/target-flows/:flow_id`):
+  approve is blocked until every targeted flow's steps are covered by confirmed
+  DetailScenarios. Plans with no targeted flow keep the legacy D8 gate.
+- **Decision-question engine (D35).** OPEN markers become SA-exam-style blocking
+  decision requests: `decision_questions` (qtype `fact` → 1 survivor auto-decided,
+  `preference` → user choice), `question_options` (label + rationale + LLM
+  recommendation), `question_answers` (+@ free-text). Answering **compiles
+  deterministically** into the oracle — atomically closing the targeted OPEN
+  marker and applying the decided facet.
+- **Web authoring surface (D36).** The dashboard SPA gains an Oracle completeness
+  view, an SA-exam Question card (fact/preference distinction, per-option
+  rationale, LLM-recommended badge, +@), and two answer modes — batch submit and
+  one-by-one with live LLM discussion.
+- **Subscription LLM bridge (D37).** A Node `llm-bridge` sidecar reuses
+  `@agent-devtools/core` (ACP + SDK providers) to talk to Claude over the local
+  `~/.claude` subscription (no API key); sdid proxies `/v1/agent/stream` (SSE).
+- **Orchestrator spine (D30/D31).** New skills `sdi-converge` (outer spec-
+  convergence loop: scan → elimination → question/auto-decide → compile → critic →
+  loop-until-dry) and `sdi-impl-loop` (inner loop: bounded retry → round complete →
+  auto-open next round on regression), plus `question-author` and
+  `completeness-critic` agents.
+
+### Notes
+- The `llm-bridge` sidecar (D37 web chat mode) is not yet packaged into the
+  release pipeline — it requires a local `npm install` in `plugin/llm-bridge/`.
+  All other SDI 2.0 surfaces (oracle, questions, D34 gate, batch answering) ship
+  and work without it.
+- `verify` reports `l2.enforced: false` at the project level — L2 step coverage is
+  enforced per-plan at approve (the deterministic gate), not yet aggregated into
+  the project-level verdict.
+
 ## [0.7.0] - 2026-06-22
 
 ### Added

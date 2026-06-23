@@ -29,13 +29,15 @@ fn row_to_scenario(row: &Row<'_>) -> rusqlite::Result<Scenario> {
         created_at: ts(row, 15)?,
         updated_at: ts(row, 16)?,
         retired_at: ts_opt(row, 17)?,
+        belongs_to_flow_id: s_opt(row, 18)?,
+        covers_flow_step: s_opt(row, 19)?,
     })
 }
 
 const COLS: &str = "id, plan_id, short_code, given, when_clause, then_clause, tags, \
                     origin_round_id, status, depends_on, produced_by, verified_by, \
                     claimed_resources_json, claim_status, produced_via_pattern_id, \
-                    created_at, updated_at, retired_at";
+                    created_at, updated_at, retired_at, belongs_to_flow_id, covers_flow_step";
 
 pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
     Scenario::validate_gwt(
@@ -53,7 +55,7 @@ pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
     conn.execute(
         &format!(
             "INSERT INTO scenarios({COLS}) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)"
         ),
         params![
             scenario.id.as_str(),
@@ -77,6 +79,8 @@ pub fn insert(conn: &Connection, scenario: &Scenario) -> DomainResult<()> {
             fmt_ts(scenario.created_at),
             fmt_ts(scenario.updated_at),
             scenario.retired_at.map(fmt_ts),
+            scenario.belongs_to_flow_id,
+            scenario.covers_flow_step,
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -243,6 +247,33 @@ pub fn list_active_claims(conn: &Connection, plan_id: Option<&Id>) -> DomainResu
     Ok(out)
 }
 
+/// D34 L2 — distinct flow-step keys covered by confirmed, non-retired scenarios
+/// of this plan that anchor to the given flow. The approve gate compares this
+/// set against the flow's declared steps.
+pub fn covered_flow_steps(
+    conn: &Connection,
+    plan_id: &Id,
+    flow_id: &Id,
+) -> DomainResult<Vec<String>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT covers_flow_step FROM scenarios \
+             WHERE plan_id = ?1 AND belongs_to_flow_id = ?2 AND status = 'confirmed' \
+               AND retired_at IS NULL AND covers_flow_step IS NOT NULL",
+        )
+        .map_err(map_sqlite_err)?;
+    let rows = stmt
+        .query_map(params![plan_id.as_str(), flow_id.as_str()], |r| {
+            r.get::<_, String>(0)
+        })
+        .map_err(map_sqlite_err)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(map_sqlite_err)?);
+    }
+    Ok(out)
+}
+
 /// FTS5-backed keyword search across given/when/then. Returns scenario IDs.
 pub fn search(
     conn: &Connection,
@@ -255,7 +286,8 @@ pub fn search(
             "SELECT s.id, s.plan_id, s.short_code, s.given, s.when_clause, s.then_clause, \
                     s.tags, s.origin_round_id, s.status, s.depends_on, s.produced_by, \
                     s.verified_by, s.claimed_resources_json, s.claim_status, \
-                    s.produced_via_pattern_id, s.created_at, s.updated_at, s.retired_at \
+                    s.produced_via_pattern_id, s.created_at, s.updated_at, s.retired_at, \
+                    s.belongs_to_flow_id, s.covers_flow_step \
              FROM scenarios s JOIN scenarios_fts f ON f.rowid = s.rowid \
              WHERE s.plan_id = ?1 AND scenarios_fts MATCH ?2 \
              ORDER BY rank LIMIT ?3",
@@ -342,6 +374,8 @@ mod tests {
             claim_status: ClaimStatus::None,
             produced_via_pattern_id: None,
             retired_at: None,
+            belongs_to_flow_id: None,
+            covers_flow_step: None,
             created_at: now(),
             updated_at: now(),
         }

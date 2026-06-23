@@ -295,6 +295,87 @@ export interface AgentNote {
   created_at: string;
 }
 
+// ─── Oracle (PRD-v2 D32/D33/D35) ─────────────────────────────────────────────
+
+/** L0 — SSoT product-definition graph node. `facets_json` / `open_markers_json`
+ *  arrive as JSON strings (the daemon stores them verbatim); the dashboard parses
+ *  lazily where it needs the structure. */
+export interface SsotNode {
+  id: string;
+  short_code: string;
+  kind: string;
+  title: string;
+  facets_json: string;
+  open_markers_json: string;
+  confidence: string;
+}
+
+/** One unresolved blank on a node — the OPEN marker a DecisionQuestion fills. */
+export interface OpenMarker {
+  id: string;
+  field?: string;
+  description?: string;
+  question_id?: string;
+}
+
+/** L1 — UserFlow row (persona × purpose journey). */
+export interface UserFlow {
+  id: string;
+  short_code: string;
+  persona_id: string;
+  purpose: string;
+  steps_json: string;
+  covers_capabilities_json: string;
+  status: 'draft' | 'confirmed';
+}
+
+/** D35 — fact = best-practice (1 survivor → auto-decided + rationale);
+ *  preference = trade-off (2+ survivors → pure user decision). */
+export type QuestionType = 'fact' | 'preference';
+export type QuestionStatus = 'open' | 'answered' | 'auto_decided';
+
+/** D35 — a decision question (SA-exam stem) promoted from an OPEN marker. */
+export interface DecisionQuestion {
+  id: string;
+  short_code: string;
+  scope_ref?: string | null;
+  qtype: QuestionType;
+  context_md: string;
+  parent_question_id?: string | null;
+  status: QuestionStatus;
+}
+
+/** D35 — one option (choice) of a DecisionQuestion. */
+export interface QuestionOption {
+  id: string;
+  label: string;
+  body_md: string;
+  rationale_md: string;
+  is_llm_recommended: boolean;
+  idx: number;
+}
+
+/** D34 — deterministic completeness verdict consumed by the oracle dashboard. */
+export interface OracleVerify {
+  l0: {
+    facet_incomplete_nodes: number;
+    dangling_edges: number;
+    complete: boolean;
+  };
+  l1: {
+    uncovered_persona_capability_pairs: Array<{
+      persona: string;
+      persona_title: string;
+      capability: string;
+      capability_title: string;
+    }>;
+    complete: boolean;
+  };
+  questions: { open: number; clear: boolean };
+  l2: { enforced: boolean };
+  oracle_complete: boolean;
+}
+
 export interface KnowledgeEntry {
   id: string;
   scope: 'rag' | 'reference' | 'archive';
