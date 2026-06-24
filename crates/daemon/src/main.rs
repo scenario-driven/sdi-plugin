@@ -43,6 +43,22 @@ async fn main() -> Result<()> {
 
     let paths = Arc::new(Paths::resolve()?);
     paths.ensure_dirs()?;
+
+    // Singleton guard (#19): if a daemon is already serving this data dir, do
+    // NOT start a second one onto the single global DB — exit and let the
+    // running instance own it. Without this, a second `sdid` exec (e.g. a hook
+    // spawn while one is already up) overwrites the pid/port files and binds an
+    // incremented port, so N daemons race one sqlite file. The CLI's
+    // `sdi daemon start` has its own guard, but a direct `sdid` exec bypasses
+    // it — this makes the guard spawn-path-agnostic.
+    if lifecycle::daemon_already_running(&paths, &cli.host) {
+        tracing::info!(
+            port = ?lifecycle::read_port(&paths.port_file),
+            "sdid already running for this data dir; not starting a second instance (#19)"
+        );
+        return Ok(());
+    }
+
     lifecycle::write_pid(&paths.pid_file)?;
 
     let pool = sdi_db::open(&paths)?;

@@ -397,8 +397,11 @@ async function runSetup({ sdiBin, sdidBin }) {
   // (bin/ vs daemon/bin/), so this env is what keeps the two resolvers in lock-step.
   process.env.SDI_DAEMON_BIN = sdidBin;
 
-  // Spawn daemon if not running.
-  const running = isDaemonRunning();
+  // Spawn daemon if not running. Probe the PORT (/health), not the pidfile:
+  // a stale pidfile with a reused pid would otherwise read as "running" and
+  // skip the spawn, leaving no daemon. The daemon binary self-guards against a
+  // second instance (#19), so a redundant spawn here is harmless either way.
+  const running = await pingHealth();
   if (!running) {
     const ok = await spawnDaemon(sdidBin);
     if (!ok) {
@@ -423,20 +426,6 @@ async function runSetup({ sdiBin, sdidBin }) {
 
 // ────────────────────────────────────────────────────────────────────────────
 // Daemon lifecycle
-
-function isDaemonRunning() {
-  const pf = pidFile();
-  const ptf = portFile();
-  if (!fs.existsSync(pf) || !fs.existsSync(ptf)) return false;
-  const pid = parseInt(fs.readFileSync(pf, 'utf8').trim(), 10);
-  if (!Number.isFinite(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function spawnDaemon(sdidBin) {
   const pf = pidFile();
