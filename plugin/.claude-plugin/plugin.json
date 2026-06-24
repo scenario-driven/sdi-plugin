@@ -1,6 +1,6 @@
 {
   "name": "sdi",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Scenario-Driven Implementation engine for Claude Code. Natural-language GWT scenarios as first-class citizens; LLM implements + verifies + auto-regresses.",
   "author": {
     "name": "SDI contributors"
@@ -28,6 +28,11 @@
       "name": "sdi-evidence",
       "path": "./skills/sdi-evidence/SKILL.md",
       "description": "Record structured TaskEvidence (code / test / ci / external / transcript) at task done"
+    },
+    {
+      "name": "sdi-init",
+      "path": "./skills/sdi-init/SKILL.md",
+      "description": "Cold-start the spec for a new/empty project — requirement prompt → first product-definition documents (oracle backbone) via oracle-author, then hand off to sdi-converge. Front half of the planning loop; detects the vacuous empty-oracle complete verdict"
     },
     {
       "name": "sdi-converge",

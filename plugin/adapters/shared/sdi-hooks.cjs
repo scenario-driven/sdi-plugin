@@ -109,7 +109,7 @@ function bypassOnceFile() {
 //                     (D31/D34/D35); §2a elimination, auto-decide / ask, loop-until-dry
 //   - sdi-impl-loop : inner loop — implementation convergence over rounds
 //                     (D30/D31); bounded retry + auto round-advance on regression
-const SDI_SKILLS = ['sdi-overview', 'sdi-scenario', 'sdi-round', 'sdi-evidence', 'sdi-converge', 'sdi-impl-loop'];
+const SDI_SKILLS = ['sdi-overview', 'sdi-scenario', 'sdi-round', 'sdi-evidence', 'sdi-init', 'sdi-converge', 'sdi-impl-loop'];
 
 // ────────────────────────────────────────────────────────────────────────────
 // Plugin root resolution
@@ -1432,6 +1432,15 @@ async function buildSessionSummary(project, { ansi = false } = {}) {
   return formatSessionBanner(project, await gatherSessionData(project), ansi);
 }
 
+// Soft-disabled (`sdi project disable` / dashboard settings) opts a project out
+// of ALL SDI governance for its anchored cwds (the CLI `disable` contract).
+// Every hook that resolves a project must honor it — not just PreToolUse (#20),
+// or a disabled project keeps injecting banners/context and recording activity.
+// Daemon serialises `enabled` as a bool; defensively accept the legacy 0/1 int.
+function projectDisabled(project) {
+  return !!project && (project.enabled === false || project.enabled === 0);
+}
+
 async function runSessionStart(input) {
   const root = pluginRoot();
   const installed = await ensureInstalled(root);
@@ -1454,6 +1463,12 @@ async function runSessionStart(input) {
     hint += dashboardLine(root, false);
     appendHookLog('session_start', { cwd, project_id: null, web_state: webState(root) });
     process.stdout.write(JSON.stringify(sessionStartPayload(hint, null)) + '\n');
+    return;
+  }
+
+  // Soft-disabled → SDI steps fully aside: no banner, no context (#20).
+  if (projectDisabled(project)) {
+    appendHookLog('session_start_skip', { cwd, reason: 'project-disabled', project_id: project.id });
     return;
   }
 
@@ -1511,6 +1526,10 @@ async function runUserPromptSubmit(input) {
   const cwd = (input && input.cwd) || process.cwd();
   const project = await projectByCwd(cwd);
   if (!project) return;
+  if (projectDisabled(project)) {
+    appendHookLog('user_prompt_submit_skip', { reason: 'project-disabled', project_id: project.id });
+    return;
+  }
   const plan = await activePlanForProject(project.id);
   if (!plan) return;
   const tasks = await inFlightTasks(plan.id);
@@ -1618,7 +1637,7 @@ async function runPreToolUse(input) {
     appendHookLog('pre_tool_use_skip', { tool: toolName, reason: 'cwd-not-in-sdi-project' });
     return;
   }
-  if (project.enabled === false || project.enabled === 0) {
+  if (projectDisabled(project)) {
     appendHookLog('pre_tool_use_skip', {
       tool: toolName,
       reason: 'project-disabled',
@@ -1873,6 +1892,7 @@ async function runPostToolUse(input) {
   const cwd = (input && input.cwd) || process.cwd();
   const project = await projectByCwd(cwd).catch(() => null);
   if (!project) return;
+  if (projectDisabled(project)) return; // governance off — don't record activity (#20)
   await recordActivity({
     projectId: project.id,
     kind: 'task.file_touched',
@@ -1894,6 +1914,7 @@ async function runSubagentStart(input) {
   const cwd = (input && input.cwd) || process.cwd();
   const project = await projectByCwd(cwd).catch(() => null);
   if (!project) return;
+  if (projectDisabled(project)) return; // governance off — don't bind subagents (#20)
   await recordActivity({
     projectId: project.id,
     kind: 'subagent.start',
@@ -1915,6 +1936,7 @@ async function runSubagentStop(input) {
   const cwd = (input && input.cwd) || process.cwd();
   const project = await projectByCwd(cwd).catch(() => null);
   if (!project) return;
+  if (projectDisabled(project)) return; // governance off — don't record subagent result (#20)
   const summary =
     typeof result === 'string' && result.length > 0
       ? `subagent stop: ${agent} — ${result.slice(0, 200)}`

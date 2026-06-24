@@ -157,14 +157,16 @@ function startMockSdiDaemon(opts) {
 test('shared module: SDI_SKILLS is in lock-step with skills/ and plugin.json#skillsList', () => {
   delete require.cache[require.resolve(SHARED)];
   const { _internals } = require(SHARED);
-  // Six `sdi-` prefixed skills, all self-contained. Lock-step contract
+  // Seven `sdi-` prefixed skills, all self-contained. Lock-step contract
   // enforced across three sources: SDI_SKILLS array, skills/<name>/SKILL.md
-  // files, plugin.json#skillsList.
+  // files, plugin.json#skillsList. `sdi-init` (cold-start) precedes the
+  // `sdi-converge` it hands off to.
   assert.deepEqual(_internals.SDI_SKILLS, [
     'sdi-overview',
     'sdi-scenario',
     'sdi-round',
     'sdi-evidence',
+    'sdi-init',
     'sdi-converge',
     'sdi-impl-loop',
   ]);
@@ -1560,6 +1562,45 @@ test('project enabled=true: normal D21 enforcement remains (regression anchor)',
       JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
     );
     assert.match(r.stdout, /D21 delegation gate/, 'enabled project must keep D21 active');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// #20 — soft-disable must silence context injection, not just the mutating
+// gate. SessionStart/UserPromptSubmit previously ignored `enabled === false`.
+// UserPromptSubmit runs no ensureInstalled, so the mock daemon exercises the
+// guard directly; SessionStart shares the identical `projectDisabled` guard.
+test('project enabled=false: UserPromptSubmit injects no context (#20)', async () => {
+  const home = mkTempHome('sdi-ups-disabled');
+  const { server, port } = await startMockSdiDaemon({
+    project: {
+      id: 'PROJ-disabled-ups',
+      key: 'DUP',
+      name: 'Disabled',
+      cwd: PROJECT_CWD,
+      enabled: false,
+    },
+  });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, {});
+    const r = await runShimAsync(
+      'user-prompt-submit.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.equal(r.stdout, '', 'disabled project must inject no SDI context');
+    const log = path.join(home, '.local/state/sdi/hook.log');
+    const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.ok(
+      entries.some(
+        (e) => e.event === 'user_prompt_submit_skip' && e.reason === 'project-disabled',
+      ),
+      `audit log missing user_prompt_submit skip:\n${JSON.stringify(entries, null, 2)}`,
+    );
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });

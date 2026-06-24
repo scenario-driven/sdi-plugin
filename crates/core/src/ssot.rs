@@ -102,6 +102,18 @@ fn default_json_array() -> String {
     "[]".to_string()
 }
 
+/// A facet value "counts" as filled when it carries content: a non-blank
+/// string, a non-empty array/object, or any non-null scalar.
+fn facet_value_filled(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => false,
+        serde_json::Value::String(s) => !s.trim().is_empty(),
+        serde_json::Value::Array(a) => !a.is_empty(),
+        serde_json::Value::Object(o) => !o.is_empty(),
+        _ => true,
+    }
+}
+
 impl SsotNode {
     /// `kind` and `title` must be non-empty.
     pub fn validate_header(kind: &str, title: &str) -> DomainResult<()> {
@@ -132,11 +144,52 @@ impl SsotNode {
             .map_err(|e| DomainError::Validation(format!("open_markers_json parse error: {e}")))
     }
 
-    /// D34 facet completeness — no unresolved OPEN marker.
+    /// Per-kind required facets as `axis.field` dotted paths (PRD-v2 D32, the
+    /// four facet axes business / domain / system / governance). A node is not
+    /// facet-complete until each is present and non-empty — the L0 "sufficiency"
+    /// floor, so a title-only node that states nothing about why it exists is
+    /// caught instead of passing as complete. Intentionally a primary-axis
+    /// minimum per kind; extend as the oracle model deepens. An unknown kind
+    /// carries no floor (open-ended `kind`, see module header).
+    pub fn required_facets(kind: &str) -> &'static [&'static str] {
+        match kind {
+            "Persona" | "Capability" | "Screen" | "Endpoint" | "SystemComponent"
+            | "Integration" | "Platform" => &["business.purpose"],
+            "Domain" | "Concept" | "Invariant" | "Decision" => &["domain.definition"],
+            _ => &[],
+        }
+    }
+
+    /// The required `axis.field` paths this node is still missing (absent or
+    /// empty). Empty ⇒ the node meets its kind's facet floor. Malformed
+    /// `facets_json` counts every requirement as missing.
+    pub fn missing_required_facets(&self) -> Vec<String> {
+        let map = Self::parse_facets(&self.facets_json).ok();
+        Self::required_facets(&self.kind)
+            .iter()
+            .filter(|path| {
+                let Some((axis, field)) = path.split_once('.') else {
+                    return true;
+                };
+                let filled = map
+                    .as_ref()
+                    .and_then(|m| m.get(axis))
+                    .and_then(|v| v.get(field))
+                    .map(facet_value_filled)
+                    .unwrap_or(false);
+                !filled
+            })
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// D34 facet completeness — no unresolved OPEN marker AND every required
+    /// facet for the node's kind is filled.
     pub fn is_facet_complete(&self) -> bool {
         Self::parse_open_markers(&self.open_markers_json)
             .map(|m| m.is_empty())
             .unwrap_or(false)
+            && self.missing_required_facets().is_empty()
     }
 
     /// D35 answer→compile — remove the OPEN marker `marker_id`, returning the new
@@ -152,6 +205,23 @@ impl SsotNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::{now, Id, IdKind};
+
+    fn node(kind: &str, facets_json: &str, markers_json: &str) -> SsotNode {
+        SsotNode {
+            id: Id::new(IdKind::SsotNode),
+            project_id: Id::new(IdKind::SsotNode),
+            short_code: "SN-x".into(),
+            kind: kind.into(),
+            title: "t".into(),
+            facets_json: facets_json.into(),
+            open_markers_json: markers_json.into(),
+            confidence: Confidence::Unverified,
+            produced_via_pattern_id: None,
+            created_at: now(),
+            updated_at: now(),
+        }
+    }
 
     #[test]
     fn confidence_roundtrip() {
@@ -196,5 +266,43 @@ mod tests {
         // removing an absent id is a no-op
         let again = SsotNode::remove_open_marker(&after, "ghost").unwrap();
         assert_eq!(SsotNode::parse_open_markers(&again).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn required_facets_per_kind() {
+        assert_eq!(SsotNode::required_facets("Persona"), ["business.purpose"]);
+        assert_eq!(SsotNode::required_facets("Capability"), ["business.purpose"]);
+        assert_eq!(SsotNode::required_facets("Domain"), ["domain.definition"]);
+        assert_eq!(SsotNode::required_facets("Invariant"), ["domain.definition"]);
+        // open-ended / unknown kind carries no facet floor
+        assert!(SsotNode::required_facets("Gizmo").is_empty());
+    }
+
+    #[test]
+    fn facet_floor_drives_completeness() {
+        // title-only persona is missing its business.purpose floor
+        let bare = node("Persona", "{}", "[]");
+        assert_eq!(bare.missing_required_facets(), vec!["business.purpose"]);
+        assert!(!bare.is_facet_complete());
+
+        // a blank string does not count as filled
+        let blank = node("Persona", r#"{"business":{"purpose":"  "}}"#, "[]");
+        assert_eq!(blank.missing_required_facets(), vec!["business.purpose"]);
+
+        // filled purpose + no open markers ⇒ complete
+        let filled = node("Persona", r#"{"business":{"purpose":"결제하려는 사용자"}}"#, "[]");
+        assert!(filled.missing_required_facets().is_empty());
+        assert!(filled.is_facet_complete());
+
+        // still incomplete while an OPEN marker is unresolved, even with facets
+        let marked = node(
+            "Persona",
+            r#"{"business":{"purpose":"x"}}"#,
+            r#"[{"id":"m1","field":"purpose","description":"확인"}]"#,
+        );
+        assert!(!marked.is_facet_complete());
+
+        // unknown kind has no floor, so a bare node is complete
+        assert!(node("Gizmo", "{}", "[]").is_facet_complete());
     }
 }

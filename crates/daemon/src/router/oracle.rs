@@ -451,8 +451,14 @@ async fn verify(
     let conn = state.conn()?;
     let pid = Id::from(project_id);
 
-    // L0 — facet + link completeness.
-    let facet_incomplete = ssot_repo::count_incomplete_nodes(&conn, &pid)?;
+    // L0 — facet + link completeness. A node is facet-incomplete when it has an
+    // unresolved OPEN marker OR is missing a required facet for its kind (the
+    // sufficiency floor, PRD-v2 D32), so the count is computed in-process rather
+    // than in SQL (which cannot inspect the per-kind facet shape).
+    let facet_incomplete = ssot_repo::list_nodes_by_project(&conn, &pid)?
+        .iter()
+        .filter(|n| !n.is_facet_complete())
+        .count() as i64;
     let dangling = ssot_repo::count_dangling_edges(&conn, &pid)?;
     // D35 — open (unanswered) decision questions.
     let open_questions = dq_repo::count_open_questions(&conn, &pid)?;
@@ -488,6 +494,14 @@ async fn verify(
     let l0_complete = facet_incomplete == 0 && dangling == 0;
     let l1_complete = l1_uncovered.is_empty();
     let questions_clear = open_questions == 0;
+    // A non-vacuous backbone is a precondition for completeness. An empty (or
+    // persona-less / capability-less) graph would otherwise read
+    // `oracle_complete:true` vacuously — 0 personas × 0 capabilities = 0
+    // uncovered pairs, 0 incomplete facets, 0 open questions — letting a brand-new
+    // project with *no product definition at all* pass the D34 approve gate. An
+    // unstarted oracle is "incomplete", not "complete": the spec-convergence loop
+    // (sdi-init → sdi-converge) must first author the backbone the gate measures.
+    let has_backbone = !personas.is_empty() && !capabilities.is_empty();
     // L2 (flow-step → scenario) coverage is computed in 4b; flagged here so the
     // verdict never reads "complete" while L2 is unenforced.
     let l2_enforced = false;
@@ -502,9 +516,12 @@ async fn verify(
         "l1": {
             "uncovered_persona_capability_pairs": l1_uncovered,
             "complete": l1_complete,
+            "has_backbone": has_backbone,
+            "persona_count": personas.len(),
+            "capability_count": capabilities.len(),
         },
         "questions": { "open": open_questions, "clear": questions_clear },
         "l2": { "enforced": l2_enforced },
-        "oracle_complete": l0_complete && l1_complete && questions_clear,
+        "oracle_complete": has_backbone && l0_complete && l1_complete && questions_clear,
     })))
 }

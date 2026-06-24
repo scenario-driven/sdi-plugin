@@ -95,7 +95,7 @@ async fn d34_gate_blocks_until_flow_steps_covered() {
         post(
             &cli,
             format!("{}/projects/{}/ssot-nodes", base, project_id),
-            serde_json::json!({ "short_code": format!("SN-P-{}", &sfx[..6]), "kind": "Persona", "title": "Buyer" }),
+            serde_json::json!({ "short_code": format!("SN-P-{}", &sfx[..6]), "kind": "Persona", "title": "Buyer", "facets_json": "{\"business\":{\"purpose\":\"구매를 완료하려는 사용자\"}}" }),
         )
         .await,
     )
@@ -104,7 +104,7 @@ async fn d34_gate_blocks_until_flow_steps_covered() {
         post(
             &cli,
             format!("{}/projects/{}/ssot-nodes", base, project_id),
-            serde_json::json!({ "short_code": format!("SN-C-{}", &sfx[..6]), "kind": "Capability", "title": "Checkout" }),
+            serde_json::json!({ "short_code": format!("SN-C-{}", &sfx[..6]), "kind": "Capability", "title": "Checkout", "facets_json": "{\"business\":{\"purpose\":\"장바구니를 결제로 전환한다\"}}" }),
         )
         .await,
     )
@@ -295,7 +295,7 @@ async fn answer_compiles_into_oracle_closing_open_marker() {
     .await;
     assert!(r.status().is_success());
 
-    // oracle converged: marker closed, question cleared
+    // marker closed + question cleared (the answer→compile mechanism)
     let v2: serde_json::Value = cli
         .get(format!("{}/projects/{}/oracle/verify", base, project_id))
         .send()
@@ -306,5 +306,47 @@ async fn answer_compiles_into_oracle_closing_open_marker() {
         .unwrap();
     assert_eq!(v2["l0"]["facet_incomplete_nodes"], 0);
     assert_eq!(v2["questions"]["open"], 0);
-    assert_eq!(v2["oracle_complete"], true);
+    // …but the oracle is still NOT complete: a lone persona with zero
+    // capabilities has no backbone, so the D34 vacuous-complete guard keeps the
+    // verdict false (closing a marker must not green-light an unspecified product).
+    assert_eq!(v2["l1"]["has_backbone"], false);
+    assert_eq!(v2["oracle_complete"], false);
+}
+
+/// A brand-new project (zero nodes) must not read as complete. Without the
+/// backbone guard, 0 personas × 0 capabilities yields 0 uncovered pairs / 0
+/// incomplete facets / 0 open questions → a vacuous `oracle_complete:true` that
+/// would let an empty product definition pass the D34 approve gate.
+#[tokio::test]
+async fn verify_empty_oracle_is_not_vacuously_complete() {
+    let (base, _h) = spawn_server().await;
+    let cli = c();
+    let sfx = ulid::Ulid::new().to_string();
+
+    let project_id = id_of(
+        post(
+            &cli,
+            format!("{}/projects", base),
+            serde_json::json!({
+                "key": format!("E{}", &sfx[..3]),
+                "name": "Empty",
+                "slug": format!("e-{}", &sfx[..6].to_lowercase()),
+            }),
+        )
+        .await,
+    )
+    .await;
+
+    let v: serde_json::Value = cli
+        .get(format!("{}/projects/{}/oracle/verify", base, project_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["l1"]["has_backbone"], false);
+    assert_eq!(v["l1"]["persona_count"], 0);
+    assert_eq!(v["l1"]["capability_count"], 0);
+    assert_eq!(v["oracle_complete"], false);
 }
