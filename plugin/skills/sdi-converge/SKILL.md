@@ -32,6 +32,13 @@ Don't invoke this for:
 - **A single GWT restatement** → use `sdi-scenario`.
 - **Round lifecycle** → use `sdi-round`.
 
+**Precondition — a non-empty oracle.** This loop *fills* an existing product
+definition; it cannot bootstrap one from nothing. A brand-new project has no
+backbone (`l1.has_backbone:false`), so there is nothing to scan — `sdi-init`
+(cold-start) authors the Persona/Capability/Flow backbone first, then hands back
+here. Step 0 below makes that handoff automatic, so it is safe to invoke this
+skill directly on a fresh project.
+
 ---
 
 ## The daemon seam (HTTP, no CLI subcommand)
@@ -53,6 +60,8 @@ Plan / round / scenario lifecycle that *does* have a CLI (`sdi plan …`,
 
 ```
 while not dry:
+  0. bootstrap → verify l1.has_backbone == false (empty oracle)? → delegate to
+                 sdi-init (cold-start: author the backbone), THEN continue
   1. scan      → GET /projects/<id>/oracle/verify
   2. collect   → OPEN markers, l1.uncovered pairs, uncovered flow-steps
   3. per point → §2a elimination (theoretically-wrong removed FIRST)
@@ -72,8 +81,17 @@ curl -s "$SDI/projects/<PROJECT-ID>/oracle/verify"
 
 returns
 `{ l0:{facet_incomplete_nodes,dangling_edges,complete},
-   l1:{uncovered_persona_capability_pairs,complete},
+   l1:{uncovered_persona_capability_pairs,complete,has_backbone,persona_count,capability_count},
    questions:{open,clear}, l2:{enforced}, oracle_complete }`.
+
+**Step 0 — bootstrap an empty oracle.** `l1.has_backbone:false` (zero personas
+or zero capabilities) means the spec was never started: there are no nodes to
+scan, no OPEN markers, no uncovered pairs. Do **not** loop on emptiness — an
+empty oracle reads `oracle_complete:false` (the vacuous-complete guard, D34) but
+yields no work, so the loop would spin. Hand off to `sdi-init`, which authors the
+backbone (Persona / Capability / Flow with OPEN markers) from the requirement and
+returns here with real decision-points to fill. On a project that already has a
+backbone this step is a no-op.
 
 `oracle_complete` is necessary but **not sufficient** — it cannot see a decision
 nobody encoded. The loop terminates on the critic's `converged`, not on this
