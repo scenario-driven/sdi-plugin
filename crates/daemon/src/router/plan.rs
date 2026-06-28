@@ -157,7 +157,10 @@ async fn approve(State(state): State<AppState>, Path(id): Path<String>) -> ApiRe
                 .collect();
             for step in UserFlow::parse_steps(&flow.steps_json).unwrap_or_default() {
                 if !covered.contains(&step.idx.to_string()) {
-                    uncovered.push(format!("flow {} step {} uncovered", flow.short_code, step.idx));
+                    uncovered.push(format!(
+                        "flow {} step {} uncovered",
+                        flow.short_code, step.idx
+                    ));
                 }
             }
         }

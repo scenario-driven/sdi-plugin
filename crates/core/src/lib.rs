@@ -26,6 +26,10 @@ pub use agent_note::{AgentNote, AgentNoteId, AgentNoteKind, AgentNoteScope};
 pub use agent_spec::{AgentSpec, AgentSpecId, AgentSpecStatus, STOCK_AGENTS, STOCK_META_AGENTS};
 pub use autonomy_policy::{AutonomyMode, AutonomyPolicy, AutonomyPolicyId, AutonomyScopeKind};
 pub use decision::{Decision, DecisionId, DecisionKind, DecisionStatus};
+pub use decision_question::{
+    DecisionQuestion, DecisionQuestionId, QuestionAnswer, QuestionAnswerId, QuestionOption,
+    QuestionOptionId, QuestionStatus, QuestionType,
+};
 pub use disruption::{
     DisruptionResolution, DisruptionReview, DisruptionReviewId, DisruptionReviewStatus,
     DisruptionSource,
@@ -37,10 +41,6 @@ pub use pattern::{
     validate_pattern_shape, validate_reversal_plan_json, AppliesTo, ClaimStatus,
     CollaborationPattern, CollaborationPatternId, PatternKind, PatternLifecycle, PatternStep,
     PeerLink, ReversalPlan, Reviewer, Stance,
-};
-pub use decision_question::{
-    DecisionQuestion, DecisionQuestionId, QuestionAnswer, QuestionAnswerId, QuestionOption,
-    QuestionOptionId, QuestionStatus, QuestionType,
 };
 pub use plan::{Plan, PlanId, PlanStatus};
 pub use project::{Project, ProjectId};

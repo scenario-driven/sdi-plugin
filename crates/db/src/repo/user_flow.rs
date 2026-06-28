@@ -159,7 +159,8 @@ mod tests {
             short_code: format!("UF-{}", ulid::Ulid::new()),
             persona_id,
             purpose: "결제를 완료한다".into(),
-            steps_json: r#"[{"idx":0,"description":"장바구니"},{"idx":1,"description":"결제"}]"#.into(),
+            steps_json: r#"[{"idx":0,"description":"장바구니"},{"idx":1,"description":"결제"}]"#
+                .into(),
             covers_capabilities_json: "[]".into(),
             status: FlowStatus::Draft,
             produced_via_pattern_id: None,

@@ -38,7 +38,9 @@ impl FromStr for QuestionType {
         match s {
             "fact" => Ok(QuestionType::Fact),
             "preference" => Ok(QuestionType::Preference),
-            other => Err(DomainError::Validation(format!("unknown question type: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown question type: {other}"
+            ))),
         }
     }
 }

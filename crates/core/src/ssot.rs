@@ -118,7 +118,9 @@ impl SsotNode {
     /// `kind` and `title` must be non-empty.
     pub fn validate_header(kind: &str, title: &str) -> DomainResult<()> {
         if kind.trim().is_empty() {
-            return Err(DomainError::Validation("ssot node kind must be non-empty".into()));
+            return Err(DomainError::Validation(
+                "ssot node kind must be non-empty".into(),
+            ));
         }
         if title.trim().is_empty() {
             return Err(DomainError::Validation(
@@ -134,7 +136,9 @@ impl SsotNode {
             .map_err(|e| DomainError::Validation(format!("facets_json parse error: {e}")))?;
         match v {
             serde_json::Value::Object(m) => Ok(m),
-            _ => Err(DomainError::Validation("facets_json must be an object".into())),
+            _ => Err(DomainError::Validation(
+                "facets_json must be an object".into(),
+            )),
         }
     }
 
@@ -271,9 +275,15 @@ mod tests {
     #[test]
     fn required_facets_per_kind() {
         assert_eq!(SsotNode::required_facets("Persona"), ["business.purpose"]);
-        assert_eq!(SsotNode::required_facets("Capability"), ["business.purpose"]);
+        assert_eq!(
+            SsotNode::required_facets("Capability"),
+            ["business.purpose"]
+        );
         assert_eq!(SsotNode::required_facets("Domain"), ["domain.definition"]);
-        assert_eq!(SsotNode::required_facets("Invariant"), ["domain.definition"]);
+        assert_eq!(
+            SsotNode::required_facets("Invariant"),
+            ["domain.definition"]
+        );
         // open-ended / unknown kind carries no facet floor
         assert!(SsotNode::required_facets("Gizmo").is_empty());
     }
@@ -290,7 +300,11 @@ mod tests {
         assert_eq!(blank.missing_required_facets(), vec!["business.purpose"]);
 
         // filled purpose + no open markers ⇒ complete
-        let filled = node("Persona", r#"{"business":{"purpose":"결제하려는 사용자"}}"#, "[]");
+        let filled = node(
+            "Persona",
+            r#"{"business":{"purpose":"결제하려는 사용자"}}"#,
+            "[]",
+        );
         assert!(filled.missing_required_facets().is_empty());
         assert!(filled.is_facet_complete());
 

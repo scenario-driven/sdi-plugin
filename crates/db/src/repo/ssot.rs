@@ -36,9 +36,7 @@ pub fn insert_node(conn: &Connection, node: &SsotNode) -> DomainResult<()> {
     SsotNode::parse_facets(&node.facets_json)?;
     SsotNode::parse_open_markers(&node.open_markers_json)?;
     conn.execute(
-        &format!(
-            "INSERT INTO ssot_nodes({NODE_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
-        ),
+        &format!("INSERT INTO ssot_nodes({NODE_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
         params![
             node.id.as_str(),
             node.project_id.as_str(),

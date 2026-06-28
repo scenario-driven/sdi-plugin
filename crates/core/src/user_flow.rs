@@ -33,7 +33,9 @@ impl FromStr for FlowStatus {
         match s {
             "draft" => Ok(FlowStatus::Draft),
             "confirmed" => Ok(FlowStatus::Confirmed),
-            other => Err(DomainError::Validation(format!("unknown flow status: {other}"))),
+            other => Err(DomainError::Validation(format!(
+                "unknown flow status: {other}"
+            ))),
         }
     }
 }
@@ -113,9 +115,10 @@ mod tests {
 
     #[test]
     fn steps_and_capabilities_parse() {
-        let steps =
-            UserFlow::parse_steps(r#"[{"idx":0,"description":"로그인"},{"idx":1,"description":"결제"}]"#)
-                .unwrap();
+        let steps = UserFlow::parse_steps(
+            r#"[{"idx":0,"description":"로그인"},{"idx":1,"description":"결제"}]"#,
+        )
+        .unwrap();
         assert_eq!(steps.len(), 2);
         let caps = UserFlow::parse_covers_capabilities(r#"["SN-abc","SN-def"]"#).unwrap();
         assert_eq!(caps.len(), 2);

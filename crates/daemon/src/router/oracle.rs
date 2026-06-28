@@ -38,7 +38,10 @@ pub fn router() -> Router<AppState> {
             post(create_node).get(list_nodes),
         )
         .route("/ssot-nodes/:id/facets", post(update_node_facets))
-        .route("/projects/:project_id/ssot-edges", post(create_edge).get(list_edges))
+        .route(
+            "/projects/:project_id/ssot-edges",
+            post(create_edge).get(list_edges),
+        )
         // L1 flows
         .route(
             "/projects/:project_id/user-flows",
@@ -260,8 +263,14 @@ async fn link_flow(
     Path((plan_id, flow_id)): Path<(String, String)>,
 ) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
-    plan_flow_repo::link(&conn, &Id::from(plan_id.clone()), &Id::from(flow_id.clone()))?;
-    Ok(Json(json!({ "plan_id": plan_id, "flow_id": flow_id, "linked": true })))
+    plan_flow_repo::link(
+        &conn,
+        &Id::from(plan_id.clone()),
+        &Id::from(flow_id.clone()),
+    )?;
+    Ok(Json(
+        json!({ "plan_id": plan_id, "flow_id": flow_id, "linked": true }),
+    ))
 }
 
 async fn unlink_flow(
@@ -269,8 +278,14 @@ async fn unlink_flow(
     Path((plan_id, flow_id)): Path<(String, String)>,
 ) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
-    plan_flow_repo::unlink(&conn, &Id::from(plan_id.clone()), &Id::from(flow_id.clone()))?;
-    Ok(Json(json!({ "plan_id": plan_id, "flow_id": flow_id, "linked": false })))
+    plan_flow_repo::unlink(
+        &conn,
+        &Id::from(plan_id.clone()),
+        &Id::from(flow_id.clone()),
+    )?;
+    Ok(Json(
+        json!({ "plan_id": plan_id, "flow_id": flow_id, "linked": false }),
+    ))
 }
 
 // ------------------------------------------------------------ D35 questions
@@ -472,8 +487,8 @@ async fn verify(
         if f.status != FlowStatus::Confirmed {
             continue;
         }
-        let caps = UserFlow::parse_covers_capabilities(&f.covers_capabilities_json)
-            .unwrap_or_default();
+        let caps =
+            UserFlow::parse_covers_capabilities(&f.covers_capabilities_json).unwrap_or_default();
         for c in caps {
             covered.insert((f.persona_id.as_str().to_string(), c));
         }

@@ -35,7 +35,9 @@ const Q_COLS: &str = "id, project_id, short_code, scope_ref, qtype, context_md, 
 pub fn insert_question(conn: &Connection, q: &DecisionQuestion) -> DomainResult<()> {
     DecisionQuestion::validate_context(&q.context_md)?;
     conn.execute(
-        &format!("INSERT INTO decision_questions({Q_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"),
+        &format!(
+            "INSERT INTO decision_questions({Q_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+        ),
         params![
             q.id.as_str(),
             q.project_id.as_str(),
@@ -84,11 +86,7 @@ pub fn list_questions_by_project(
     Ok(out)
 }
 
-pub fn set_question_status(
-    conn: &Connection,
-    id: &Id,
-    status: QuestionStatus,
-) -> DomainResult<()> {
+pub fn set_question_status(conn: &Connection, id: &Id, status: QuestionStatus) -> DomainResult<()> {
     let n = conn
         .execute(
             "UPDATE decision_questions SET status = ?1, updated_at = ?2 WHERE id = ?3",
@@ -147,11 +145,14 @@ fn row_to_option(row: &Row<'_>) -> rusqlite::Result<QuestionOption> {
     })
 }
 
-const O_COLS: &str = "id, question_id, label, body_md, rationale_md, is_llm_recommended, idx, created_at";
+const O_COLS: &str =
+    "id, question_id, label, body_md, rationale_md, is_llm_recommended, idx, created_at";
 
 pub fn insert_option(conn: &Connection, opt: &QuestionOption) -> DomainResult<()> {
     if opt.label.trim().is_empty() {
-        return Err(DomainError::Validation("option label must be non-empty".into()));
+        return Err(DomainError::Validation(
+            "option label must be non-empty".into(),
+        ));
     }
     conn.execute(
         &format!("INSERT INTO question_options({O_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"),
@@ -205,11 +206,7 @@ const A_COLS: &str =
 
 /// Record an answer and flip the question to its terminal status atomically.
 /// `auto` (fact-type, 1 survivor) → `auto_decided`; otherwise → `answered`.
-pub fn insert_answer(
-    conn: &Connection,
-    ans: &QuestionAnswer,
-    auto: bool,
-) -> DomainResult<()> {
+pub fn insert_answer(conn: &Connection, ans: &QuestionAnswer, auto: bool) -> DomainResult<()> {
     QuestionAnswer::validate(&ans.chosen_option_id, &ans.free_text)?;
     conn.execute(
         &format!("INSERT INTO question_answers({A_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7)"),

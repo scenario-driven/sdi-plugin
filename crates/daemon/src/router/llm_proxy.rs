@@ -113,9 +113,10 @@ async fn proxy_stream(State(_state): State<AppState>, headers: HeaderMap, body: 
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
 
     // Carry the connection header through so SSE keep-alive survives.
-    response
-        .headers_mut()
-        .insert(header::CONNECTION, header::HeaderValue::from_static("keep-alive"));
+    response.headers_mut().insert(
+        header::CONNECTION,
+        header::HeaderValue::from_static("keep-alive"),
+    );
     response
 }
 
