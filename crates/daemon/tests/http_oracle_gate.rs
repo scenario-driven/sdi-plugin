@@ -28,6 +28,7 @@ async fn spawn_server() -> (String, tokio::task::JoinHandle<()>) {
         port_file: tmp.join("sdid.port"),
         socket_file: tmp.join("sdid.sock"),
         log_file: tmp.join("sdid.log"),
+        lock_file: tmp.join("sdid.lock"),
     });
     let pool = sdi_db::open(&paths).expect("open db");
     let state = AppState::new(pool, paths);
@@ -135,7 +136,10 @@ async fn d34_gate_blocks_until_flow_steps_covered() {
 
     // target the flow → plan becomes oracle-scoped (D34)
     let r = cli
-        .post(format!("{}/plans/{}/target-flows/{}", base, plan_id, flow_id))
+        .post(format!(
+            "{}/plans/{}/target-flows/{}",
+            base, plan_id, flow_id
+        ))
         .send()
         .await
         .unwrap();
@@ -195,7 +199,11 @@ async fn d34_gate_blocks_until_flow_steps_covered() {
         .send()
         .await
         .unwrap();
-    assert!(r.status().is_success(), "expected approve, got {}", r.status());
+    assert!(
+        r.status().is_success(),
+        "expected approve, got {}",
+        r.status()
+    );
     let plan: serde_json::Value = r.json().await.unwrap();
     assert_eq!(plan["status"], "active");
     assert!(plan["approved_at"].is_string());

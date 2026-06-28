@@ -17,6 +17,9 @@ pub struct Client {
 
 impl Client {
     pub fn from_paths(paths: &Paths) -> Result<Self> {
+        // The daemon is a flock-guaranteed singleton, so it is the sole writer of
+        // the port file — the recorded port is authoritative and no canonical
+        // fallback is needed.
         let port = std::fs::read_to_string(&paths.port_file)
             .with_context(|| {
                 format!(

@@ -9,6 +9,13 @@ use std::path::{Path, PathBuf};
 pub const ENV_ALLOW_OVERLAP: &str = "SDI_ALLOW_PLUGIN_OVERLAP";
 pub const ENV_HOME_OVERRIDE: &str = "SDI_HOME";
 
+/// Canonical TCP port for the default ($HOME-resolved) sdi daemon. The daemon is
+/// a singleton per data directory (enforced by a `sdid.lock` flock, not by the
+/// port), so the one daemon binds this port and clients discover it through the
+/// authoritative port file. `SDI_HOME`-isolated instances serve a *different*
+/// data dir and bind an OS-assigned port (0) so they never collide on this one.
+pub const DEFAULT_PORT: u16 = 19500;
+
 /// Resolved user-data paths (PRD §5.3, LM-8 invariant).
 #[derive(Debug, Clone)]
 pub struct Paths {
@@ -21,6 +28,11 @@ pub struct Paths {
     pub pid_file: PathBuf,
     pub port_file: PathBuf,
     pub log_file: PathBuf,
+    /// Per-data-dir singleton lock. The daemon holds an exclusive flock on this
+    /// file for its whole lifetime; a second daemon for the same data dir fails
+    /// to acquire it and stands down. Lives in the cache dir, so SDI_HOME-isolated
+    /// instances (different cache dir) get their own lock and run concurrently.
+    pub lock_file: PathBuf,
 }
 
 impl Paths {
@@ -48,6 +60,7 @@ impl Paths {
             pid_file: cache.join("sdid.pid"),
             port_file: cache.join("sdid.port"),
             log_file: state.join("sdid.log"),
+            lock_file: cache.join("sdid.lock"),
             data,
             cache,
             config,

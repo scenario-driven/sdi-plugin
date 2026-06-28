@@ -5,6 +5,57 @@
 use sdi_db::Paths;
 use std::path::Path;
 
+/// RAII guard for the per-data-dir singleton lock. While it is alive the process
+/// holds an exclusive advisory lock on the lock file; dropping it (or the process
+/// exiting) releases the lock. The daemon keeps it for its whole lifetime.
+pub struct SingletonLock {
+    #[cfg(unix)]
+    _file: std::fs::File,
+}
+
+/// Acquire the per-data-dir singleton lock (`<cache>/sdid.lock`).
+///
+/// This is THE singleton guarantee: exactly one daemon per data dir can hold the
+/// exclusive flock, so a second `sdid` (another Claude profile/session sharing
+/// this `$HOME`, or a stray hook spawn) fails to acquire it and stands down
+/// rather than racing the one SQLite file. The lock is port-independent, and
+/// because it lives in the cache dir, SDI_HOME-isolated instances (a different
+/// cache dir) get their own lock and run concurrently.
+///
+/// Returns `Some(guard)` if acquired (we are the singleton), `None` if another
+/// daemon already holds it. The advisory lock is released automatically on
+/// process exit even after a crash, so a dead daemon never wedges the next one.
+#[cfg(unix)]
+pub fn acquire_singleton_lock(lock_path: &Path) -> Option<SingletonLock> {
+    use std::os::unix::io::AsRawFd;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path)
+        .ok()?;
+    // flock(fd, LOCK_EX | LOCK_NB): exclusive, non-blocking.
+    let rc = unsafe { libc_flock(file.as_raw_fd(), 2 | 4) };
+    if rc == 0 {
+        Some(SingletonLock { _file: file })
+    } else {
+        None
+    }
+}
+
+#[cfg(not(unix))]
+pub fn acquire_singleton_lock(_lock_path: &Path) -> Option<SingletonLock> {
+    // No advisory-lock primitive wired up off-unix; sdi targets unix hosts.
+    Some(SingletonLock {})
+}
+
+#[cfg(unix)]
+extern "C" {
+    #[link_name = "flock"]
+    fn libc_flock(fd: i32, operation: i32) -> i32;
+}
+
 /// Write the current process pid to `pid_path`. Caller is expected to wrap
 /// this in a deletion-on-Drop guard if it cares about cleanup.
 pub fn write_pid(pid_path: &Path) -> std::io::Result<()> {
@@ -91,7 +142,30 @@ mod tests {
             port_file,
             socket_file: dir.join("sdid.sock"),
             log_file: dir.join("sdid.log"),
+            lock_file: dir.join("sdid.lock"),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn singleton_lock_is_exclusive_then_reacquirable() {
+        let dir = std::env::temp_dir().join(format!("sdid-lock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = dir.join("sdid.lock");
+        // First holder wins.
+        let g1 = acquire_singleton_lock(&lock).expect("first acquire");
+        // Second attempt while held → None (a second daemon would stand down).
+        assert!(
+            acquire_singleton_lock(&lock).is_none(),
+            "lock must be exclusive while held"
+        );
+        // Releasing (process-exit equivalent) frees it for the next daemon.
+        drop(g1);
+        assert!(
+            acquire_singleton_lock(&lock).is_some(),
+            "lock must be re-acquirable once released"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

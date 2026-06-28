@@ -19,9 +19,11 @@ struct Cli {
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
 
-    /// Port to bind. Default 19500; auto-increments (+1, up to 20 attempts)
-    /// if the port is already in use. Pass 0 for an OS-assigned random port.
-    #[arg(long, default_value_t = 19500)]
+    /// Port to bind. Default is the canonical sdi port; the daemon is a
+    /// singleton per data dir, so it binds exactly this port and a second
+    /// instance reuses the holder. Pass 0 for an OS-assigned random port
+    /// (SDI_HOME-isolated test instances).
+    #[arg(long, default_value_t = sdi_db::paths::DEFAULT_PORT)]
     port: u16,
 }
 
@@ -44,30 +46,53 @@ async fn main() -> Result<()> {
     let paths = Arc::new(Paths::resolve()?);
     paths.ensure_dirs()?;
 
-    // Singleton guard (#19): if a daemon is already serving this data dir, do
-    // NOT start a second one onto the single global DB — exit and let the
-    // running instance own it. Without this, a second `sdid` exec (e.g. a hook
-    // spawn while one is already up) overwrites the pid/port files and binds an
-    // incremented port, so N daemons race one sqlite file. The CLI's
-    // `sdi daemon start` has its own guard, but a direct `sdid` exec bypasses
-    // it — this makes the guard spawn-path-agnostic.
-    if lifecycle::daemon_already_running(&paths, &cli.host) {
-        tracing::info!(
-            port = ?lifecycle::read_port(&paths.port_file),
-            "sdid already running for this data dir; not starting a second instance (#19)"
-        );
-        return Ok(());
-    }
+    // Singleton guard (#19): the sdi daemon is ONE instance per data dir — every
+    // Claude profile/session sharing this $HOME talks to the same daemon and the
+    // same SQLite file. The guarantee is an exclusive flock on `<cache>/sdid.lock`
+    // held for this process's lifetime: if another daemon already owns this data
+    // dir we cannot acquire it, so we stand down instead of racing the one DB.
+    // The lock is port-independent and lives in the cache dir, so SDI_HOME-isolated
+    // instances (a different cache dir) get their own lock and run concurrently.
+    let _singleton = match lifecycle::acquire_singleton_lock(&paths.lock_file) {
+        Some(guard) => guard,
+        None => {
+            tracing::info!(
+                port = ?lifecycle::read_port(&paths.port_file),
+                "sdid already running for this data dir; not starting a second instance (#19)"
+            );
+            return Ok(());
+        }
+    };
+
+    // We hold the singleton lock, so we are the one daemon for this data dir.
+    // SDI_HOME-isolated instances serve a *different* data dir and must not grab
+    // the shared canonical port, so give them an OS-assigned one; the default
+    // ($HOME) instance keeps the canonical port for a stable dashboard URL.
+    // Either way the actual bound port is written to the (now single-writer,
+    // authoritative) port file for clients to read.
+    let bind_port = if cli.port == sdi_db::paths::DEFAULT_PORT
+        && std::env::var(sdi_db::ENV_HOME_OVERRIDE).is_ok()
+    {
+        0
+    } else {
+        cli.port
+    };
+    let listener = try_bind(&cli.host, bind_port).await.map_err(|e| {
+        anyhow::anyhow!(
+            "failed to bind {}:{} for sdid: {e} (is another process using the port? \
+             start sdid with --port 0 for an OS-assigned port)",
+            cli.host,
+            bind_port
+        )
+    })?;
 
     lifecycle::write_pid(&paths.pid_file)?;
+    let addr = listener.local_addr()?;
+    std::fs::write(&paths.port_file, addr.port().to_string())?;
 
     let pool = sdi_db::open(&paths)?;
     let state = sdi_daemon::AppState::new(pool, paths.clone());
     let app = sdi_daemon::router::build(state);
-
-    let listener = bind_with_fallback(&cli.host, cli.port).await?;
-    let addr = listener.local_addr()?;
-    std::fs::write(&paths.port_file, addr.port().to_string())?;
     tracing::info!(
         host = %cli.host,
         port = addr.port(),
@@ -123,43 +148,15 @@ fn is_loopback_host(host: &str) -> bool {
     false
 }
 
-/// Bind a TCP listener on `host:port`. If `port == 0`, OS picks a random port.
-/// Otherwise try `port`, `port+1`, ... for up to 20 attempts, skipping ports
-/// already in use. Fails if no port in the range is free.
-async fn bind_with_fallback(host: &str, port: u16) -> Result<tokio::net::TcpListener> {
-    if port == 0 {
-        let addr: SocketAddr = format!("{host}:0").parse()?;
-        return Ok(tokio::net::TcpListener::bind(addr).await?);
-    }
-
-    const MAX_ATTEMPTS: u16 = 20;
-    let mut last_err: Option<std::io::Error> = None;
-    for offset in 0..MAX_ATTEMPTS {
-        let candidate = port.saturating_add(offset);
-        let addr: SocketAddr = format!("{host}:{candidate}").parse()?;
-        match tokio::net::TcpListener::bind(addr).await {
-            Ok(listener) => {
-                if offset > 0 {
-                    tracing::warn!(
-                        requested = port,
-                        bound = candidate,
-                        "port in use; bound to next free port"
-                    );
-                }
-                return Ok(listener);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-                last_err = Some(e);
-                continue;
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
-    let end = port.saturating_add(MAX_ATTEMPTS - 1);
-    bail!(
-        "no free port in range {port}..={end}: {}",
-        last_err
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "unknown".into())
-    )
+/// Bind a TCP listener on exactly `host:port`. `port == 0` lets the OS pick a
+/// random port (SDI_HOME-isolated test instances). There is deliberately no
+/// port-increment fallback: the canonical port is the per-data-dir singleton
+/// token, so when it is taken the caller must reuse the holder (if it is a
+/// sibling sdid) rather than move aside onto a second port. Returns the raw
+/// `std::io::Error` so the caller can branch on `AddrInUse`.
+async fn try_bind(host: &str, port: u16) -> std::io::Result<tokio::net::TcpListener> {
+    let addr: SocketAddr = format!("{host}:{port}")
+        .parse()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    tokio::net::TcpListener::bind(addr).await
 }

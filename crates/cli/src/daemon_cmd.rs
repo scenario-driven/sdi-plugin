@@ -69,9 +69,11 @@ pub fn is_running(paths: &Paths) -> bool {
     daemon_responds(paths)
 }
 
-/// True iff something accepts a connection on the daemon's port. `Ok(_)` means
-/// a live listener (busy); any error (no port file, ECONNREFUSED, timeout)
-/// means dead/stale.
+/// True iff something accepts a connection on the daemon's port. The daemon is a
+/// flock-guaranteed singleton, so it is the sole writer of the port file — the
+/// recorded port is authoritative and clients need no fallback. `Ok(_)` means a
+/// live listener; any error (no port file, ECONNREFUSED, timeout) means
+/// dead/stale.
 fn daemon_responds(paths: &Paths) -> bool {
     let Some(port) = read_port(&paths.port_file) else {
         return false;
@@ -105,7 +107,10 @@ extern "C" {
 /// Start the daemon and wait until it writes its port file. Returns the port.
 pub async fn start(paths: &Paths) -> Result<u16> {
     // `is_running` probes the daemon's TCP port, which it can only do after
-    // reading the port file — so a `true` here guarantees a readable port.
+    // reading the port file — so a `true` here guarantees a readable port. The
+    // daemon's flock singleton guard means a redundant spawn (e.g. another
+    // profile racing this one) stands down on its own, so this is just the fast
+    // path that avoids spawning at all.
     if is_running(paths) {
         if let Some(port) = read_port(&paths.port_file) {
             return Ok(port);
@@ -242,8 +247,9 @@ pub struct Status {
 
 pub fn status(paths: &Paths) -> Status {
     // `running` is whether the daemon answers on its port, not whether the pid
-    // exists — a zombie pid would otherwise read as running. `pid` is reported
-    // verbatim from the file for diagnostics.
+    // exists — a zombie pid would otherwise read as running. The flock singleton
+    // makes the daemon the sole writer of the port file, so the recorded port is
+    // authoritative (no cross-profile clobbering) and a plain probe is correct.
     let pid = read_pid(&paths.pid_file);
     let running = daemon_responds(paths);
     let port = read_port(&paths.port_file);

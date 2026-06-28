@@ -38,6 +38,7 @@ async fn web_bundle_serves_index_html_and_does_not_shadow_api() {
         port_file: tmp.join("sdid.port"),
         socket_file: tmp.join("sdid.sock"),
         log_file: tmp.join("sdid.log"),
+        lock_file: tmp.join("sdid.lock"),
     });
     let pool = sdi_db::open(&paths).expect("open db");
     let state = AppState::new(pool, paths);
