@@ -8,6 +8,19 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.9.3] - 2026-06-28
+
+### Fixed
+- **One sdid per data dir (singleton).** Multiple Claude sessions/profiles
+  sharing a `$HOME` each spawned their own daemon against the single shared
+  SQLite database, incrementing ports and clobbering the shared port file — so
+  `sdi daemon status` could report "not running" while a healthy daemon answered
+  on another port, and several daemons raced one database. The daemon now holds
+  an exclusive lock on `<cache>/sdid.lock` for its lifetime; a second `sdid`
+  stands down instead of starting. The port file gains a single authoritative
+  writer, and `SDI_HOME`-isolated instances (a different cache dir) still run
+  concurrently on an OS-assigned port.
+
 ## [0.8.0] - 2026-06-24
 
 SDI 2.0 — the scenario engine gains a completeness **oracle** and two
