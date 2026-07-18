@@ -10,9 +10,10 @@ SDI is a single Cargo workspace (`crates/cli`, `crates/daemon`, `crates/mcp`,
 `crates/core`, `crates/db`) plus the plugin shell at `plugin/` — including the
 dashboard SPA at `plugin/web/`. There is no per-component manifest:
 `Cargo.toml [workspace.package].version` is the single source of truth for the
-CLI + daemon + plugin tag, and the plugin shell (SPA included) ships in
-lock-step with the workspace it lives in. The release pipeline builds
-`plugin/web/dist` before packaging.
+CLI + daemon + plugin tag, and both host manifests
+(`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) carry that same
+version. The plugin shell (SPA included) ships in lock-step with the workspace
+it lives in. The release pipeline builds `plugin/web/dist` before packaging.
 
 [`sdi-desktop`](https://github.com/scenario-driven/sdi-desktop) lives in a
 separate repository, rides on the daemon's HTTP contract, and ships on an
@@ -28,7 +29,7 @@ When the first tagged release ships, the order is **fixed**:
    (macOS + Linux × x86_64 + aarch64). The same tag is the plugin tag.
 2. **Plugin dist branch** — push the built binaries under `plugin/bin/` and
    `plugin/daemon/bin/` to the `dist` branch (see Branch model below).
-   Claude Code's marketplace pulls from this branch.
+   Claude Code and Codex marketplaces pull from this branch.
 3. **Desktop** (independent) — the separate `sdi-desktop` repository
    releases on its own cadence against this daemon's HTTP contract. No
    shared release manifest with this workspace; coordination is done at
@@ -44,7 +45,7 @@ PRD §5.1 specifies two branches in this repo:
   `plugin/bin/` and `plugin/daemon/bin/`.
 - `dist` — distribution. Built `sdi` + `sdid` binaries under
   `plugin/bin/` and `plugin/daemon/bin/`. Tagged. This is the branch
-  Claude Code's plugin marketplace pulls from.
+  Claude Code and Codex plugin marketplaces pull from.
 
 The split exists because the plugin cache (`~/.claude/plugins/cache/`) copies
 the marketplace plugin tree verbatim — source has no place in the user's

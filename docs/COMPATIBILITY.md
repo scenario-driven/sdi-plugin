@@ -8,10 +8,13 @@ repository that rides on the daemon's HTTP contract and ships on its own cadence
 
 `Cargo.toml [workspace.package].version` is the single source of truth.
 The `sdi` CLI, `sdid` daemon, and `plugin/` shell all carry that one
-version — there is no per-component manifest to drift from it. The install
-gate (`adapters/shared/sdi-hooks.cjs::ensureInstalled`) resolves binaries
-by location only (workspace `target/`, `<pluginRoot>/bin/`, then PATH), not
-by tag, because there is nothing to disagree.
+version. The Claude Code and Codex plugin manifests must keep that version in
+lock-step; they are host descriptors for the same artifact, not component
+versions. The install gate and MCP launcher
+(`adapters/shared/sdi-hooks.cjs::ensureInstalled`,
+`plugin/scripts/sdi-mcp.cjs`) resolve binaries by location only (workspace
+`target/`, `<pluginRoot>/bin/`, then PATH), not by tag, because there is
+nothing to disagree.
 
 The release-fetch path (`SDI_RELEASE_FETCH=1`) is structurally present in
 the install gate but errors out until a GitHub Release exists — distribution
@@ -44,18 +47,19 @@ Any change to one of the following triggers a workspace **major** bump:
 - The SSE event names or payload shapes on `/events`.
 - The hook routing in `plugin/hooks/hooks.json` (event names, matchers, shim
   paths).
-- The `${CLAUDE_PLUGIN_ROOT}/bin/` precedence or `SDI_BIN` semantics.
+- The MCP launcher path (`${PLUGIN_ROOT}/scripts/sdi-mcp.cjs`,
+  `${CLAUDE_PLUGIN_ROOT}/scripts/sdi-mcp.cjs`) or `SDI_BIN` / binary
+  resolution semantics.
 - The XDG path mapping (LM-8 invariant guarantees).
-- The `SDI_SKILLS` array — adding/removing a skill changes the surface
-  Claude Code advertises and the plugin manifest must move in lock-step
-  (lint test enforces three-way sync).
+- The `SDI_SKILLS` array — adding/removing a skill changes the surface local
+  agent hosts advertise. Claude Code's `skillsList`, Codex's `skills` pointer,
+  and the on-disk `skills/` tree must move in lock-step (lint tests enforce
+  this).
 
 ## Verification
 
-The plugin lint test
-(`plugin/tests/lint.test.cjs::SDI_SKILLS array, plugin.json#skillsList, and
-skills/ dirs are in lock-step`) asserts the three sources of truth for skills
-never diverge.
+The plugin lint tests assert that the Claude manifest, Codex manifest, and
+on-disk `skills/` tree never diverge.
 
 `sdi doctor` is the user-facing diagnostic:
 

@@ -34,7 +34,7 @@ and conformant; `—` = N/A for that exemplar.
 | Skills                             | `skills/`                    | `./skills/{clawket,pdd,…}/SKILL.md`        | `./skills/<7 dirs>/SKILL.md` | `./skills/`                | `./plugin/skills/sdi/SKILL.md` ✓              |
 | Commands                           | `commands/`                  | — (uses prompts/, skills only)             | `./commands/`             | `./commands/`              | `./plugin/commands/{scenario,round,plan,req,decide,sdi-status}.md` ✓ |
 | Hooks routing                      | `hooks/hooks.json`           | `./hooks/hooks.json`                       | — (no hooks)              | `./hooks/`                 | `./plugin/hooks/hooks.json` ✓                 |
-| MCP wiring                         | `.mcp.json`                  | `./.mcp.json` → `clawket mcp`              | — (no MCP)                | `./.mcp.json`              | `./plugin/.mcp.json` → `sdi mcp` ✓            |
+| MCP wiring                         | `.mcp.json`                  | `./.mcp.json` → `clawket mcp`              | — (no MCP)                | `./.mcp.json`              | `./plugin/.mcp.json` → `scripts/sdi-mcp.cjs` → `sdi mcp` ✓ |
 | Bundled executables                | `bin/`                       | `./bin/clawket` + `./daemon/bin/clawketd`  | — (no binaries)           | — (no binaries)            | `./plugin/bin/sdi` + `./plugin/daemon/bin/sdid` ✓ (populated by install gate at runtime) |
 | Hook bodies (non-spec)             | n/a (spec leaves this open)  | `./adapters/{claude,shared}/*.cjs`         | n/a                       | n/a                        | `./plugin/adapters/{claude,shared}/*.cjs` ✓ (same shape as Clawket) |
 | Install gate                       | n/a (spec leaves this open)  | `./adapters/shared/claude-hooks.cjs::ensureInstalled` invoked from `SessionStart` shim | n/a | n/a | `./plugin/adapters/shared/sdi-hooks.cjs::ensureInstalled` invoked from `SessionStart` shim ✓ |
@@ -54,8 +54,8 @@ and conformant; `—` = N/A for that exemplar.
   Matchers (`Edit|Write|MultiEdit|Bash|NotebookEdit` for `PreToolUse`) match the
   documented event-and-matcher form.
 - `plugin/.mcp.json` ✓ — `.mcp.json` MCP wiring per spec; the `command` value
-  resolves through the `sdi` binary on PATH (after install gate) and dispatches
-  to the embedded MCP server via `sdi mcp`.
+  resolves through `scripts/sdi-mcp.cjs`, which uses the shared binary
+  resolution policy and dispatches to the embedded MCP server via `sdi mcp`.
 - `plugin/bin/` and `plugin/daemon/bin/` ✓ — spec's "Executables added to the
   Bash tool's PATH" location. Populated by `ensureInstalled` at runtime, not
   checked in (Clawket precedent).

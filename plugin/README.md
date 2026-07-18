@@ -1,8 +1,8 @@
-# SDI — Claude Code plugin shell
+# SDI — Claude Code / Codex plugin shell
 
 **English** · [한국어](./README.ko.md)
 
-This directory is the **Claude Code plugin surface** for SDI (Scenario-Driven
+This directory is the **Claude Code and Codex plugin surface** for SDI (Scenario-Driven
 Implementation). It is part of the same repository as the SDI body
 (`crates/` workspace: `cli` + `daemon` + `mcp` + `core` + `db`). The plugin
 is not a separate package — it is one of the faces of this repository.
@@ -13,15 +13,17 @@ Canonical spec: [`../docs/PRD.md`](../docs/PRD.md) (decisions D1–D29).
 
 | Path | Role |
 |---|---|
-| `.claude-plugin/plugin.json` | Plugin manifest. Declares `commands/`, `agents/`, `skills/`, and marketplace metadata. |
-| `.mcp.json` | MCP server registration. Spawns `sdi mcp` (the CLI's stdio MCP subcommand). |
-| `hooks/hooks.json` | Hook routing for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`. |
-| `adapters/claude/*.cjs` | Thin Claude-Code-specific wrappers that delegate to `shared/sdi-hooks.cjs`. |
+| `.claude-plugin/plugin.json` | Claude Code plugin manifest. Declares `commands/`, `agents/`, `skills/`, and marketplace metadata. |
+| `.codex-plugin/plugin.json` | Codex plugin manifest. Points at shared `skills/` and the inline MCP launcher. |
+| `.mcp.json` | Claude MCP server registration. Spawns the shared MCP launcher. |
+| `hooks/hooks.json` | Hook routing for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`. Codex loads this default hook file too. |
+| `adapters/claude/*.cjs` | Thin host wrappers that delegate to `shared/sdi-hooks.cjs`. Codex receives compatibility env vars for these plugin hooks. |
 | `adapters/shared/sdi-hooks.cjs` | Single source of install logic + hook bodies (idempotent `ensureInstalled`, daemon spawn, active-task / delegation / pattern / claim guards). |
 | `commands/*.md` | Slash commands (D11 + v0.5): `/plan`, `/req`, `/scenario`, `/round`, `/decide`, `/consensus`, `/autonomy`, `/agent-note`, `/pattern`, `/sdi-status`. |
 | `agents/*.md` | Specialist sub-agent definitions (see below). |
 | `skills/{sdi-overview,sdi-scenario,sdi-round,sdi-evidence}/SKILL.md` | Four task-scoped skills covering orientation, GWT conversion, round lifecycle, and evidence recording. |
 | `scripts/setup.cjs` | Manual / CI entry into `ensureInstalled` (same code path as `SessionStart`). |
+| `scripts/sdi-mcp.cjs` | Host-neutral MCP launcher. Resolves `sdi` via the shared install-gate policy, then execs `sdi mcp`. |
 | `bin/`, `daemon/bin/` | Install targets for the bundled `sdi` and `sdid` binaries (populated by `ensureInstalled` when the release-bundle layout is in use). |
 
 ## Specialist agents

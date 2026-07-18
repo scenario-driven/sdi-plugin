@@ -86,7 +86,7 @@ The full L3/L4/L5 semantics, scope matrix, circuit-breaker triggers, delegation-
 
 ## Repository shape
 
-This is a **Claude Code plugin whose body is a Rust workspace**. The plugin shell, the cli, and the daemon are all surfaces of the same repository.
+This is a **Claude Code and Codex plugin whose body is a Rust workspace**. The plugin shell, the cli, and the daemon are all surfaces of the same repository.
 
 ```
 sdi-plugin/
@@ -97,8 +97,11 @@ sdi-plugin/
 │   ├── mcp/                 # stdio MCP server library, embedded into cli.
 │   ├── core/                # Domain model: Plan / Requirement / Decision / Scenario / Round / AutonomyPolicy / CollaborationPattern + AgentNote / AgentSpec.
 │   └── db/                  # SQLite storage adapter (rusqlite + r2d2; FTS5 keyword search, vector search deferred).
-├── plugin/                  # Claude Code plugin shell
+├── .agents/plugins/marketplace.json
+│                              # Repo-scoped Codex plugin marketplace
+├── plugin/                  # Claude Code / Codex plugin shell
 │   ├── .claude-plugin/plugin.json
+│   ├── .codex-plugin/plugin.json
 │   ├── .mcp.json
 │   ├── hooks/hooks.json
 │   ├── web/                 # dashboard SPA (Vite/React 19/Tailwind 4); `sdid` serves dist/.
@@ -125,11 +128,20 @@ Two separate org repositories accompany this one:
 
 ## Install
 
-Pre-built `sdi` + `sdid` binaries (macOS + Linux × x86_64 + aarch64) ship via the Claude Code plugin marketplace — no Rust toolchain required.
+Pre-built `sdi` + `sdid` binaries (macOS + Linux × x86_64 + aarch64) ship via the plugin marketplace — no Rust toolchain required.
+
+Claude Code:
 
 ```text
 /plugin marketplace add scenario-driven/sdi-plugin
 /plugin install sdi@scenario-driven-sdi-plugin
+```
+
+Codex CLI:
+
+```sh
+codex plugin marketplace add scenario-driven/sdi-plugin
+codex plugin add sdi@scenario-driven-sdi-plugin
 ```
 
 The plugin shell lives under [`plugin/`](./plugin/); the marketplace pulls it from the `dist` branch (binaries attached to each [GitHub Release](https://github.com/scenario-driven/sdi-plugin/releases)).

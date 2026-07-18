@@ -1,8 +1,9 @@
 # Architecture
 
-Scenario-Driven Implementation (SDI) is delivered as **one repo = one Claude Code
-plugin**. The plugin shell and the Rust workspace are not separate artifacts —
-they are two views of the same source tree.
+Scenario-Driven Implementation (SDI) is delivered as **one repo = one local
+agent plugin** for Claude Code and Codex. The plugin shell and the Rust
+workspace are not separate artifacts — they are two views of the same source
+tree.
 
 ## Layout (PRD §5.2)
 
@@ -16,10 +17,14 @@ sdi-plugin/
     mcp/                        # MCP server library, embedded by cli
     core/                       # Domain model + repository traits
     db/                          # rusqlite + sqlite-vec adapter
-  plugin/                       # Claude Code plugin shell
+  .agents/plugins/
+    marketplace.json            # Repo-scoped Codex marketplace
+  plugin/                       # Claude Code / Codex plugin shell
     .claude-plugin/
-      plugin.json               # Plugin manifest (skills, commands, hooks)
-    .mcp.json                   # MCP server registration (`sdi mcp`)
+      plugin.json               # Claude Code manifest (skills, commands, hooks)
+    .codex-plugin/
+      plugin.json               # Codex manifest (skills + inline MCP)
+    .mcp.json                   # Claude MCP server registration (shared launcher)
     hooks/hooks.json            # Hook routing manifest
     commands/                   # /scenario /round /plan /req /decide /sdi-status
     skills/                     # `/sdi-overview` `/sdi-scenario` `/sdi-round`
@@ -28,11 +33,12 @@ sdi-plugin/
                                 # #skillsList ⇄ sdi-hooks.cjs::SDI_SKILLS ⇄
                                 # tests/lint.test.cjs SDI_SKILLS.
     adapters/
-      claude/                   # 6 thin hook shims (≤8 LOC each, .catch + exit 0)
+      claude/                   # 6 thin host shims (≤8 LOC each, .catch + exit 0)
       shared/sdi-hooks.cjs      # Single home for hook bodies + install gate
     bin/                        # Populated by install gate at runtime
     daemon/bin/                 # Same — sdid lives next to sdi
     scripts/setup.cjs           # Manual entry: shim → adapters/shared
+    scripts/sdi-mcp.cjs         # Host-neutral MCP launcher → `sdi mcp`
     tests/                      # node --test (lint, hooks, e2e)
   docs/                         # This directory
   README.md
@@ -44,12 +50,13 @@ sdi-plugin/
 
 PRD §5.1 fixes this. The reasoning, with market evidence:
 
-1. **Claude Code plugin cache traps the plugin dir as the only stable root.**
+1. **Plugin caches trap the plugin dir as the only stable root.**
    The official plugin spec
    ([code.claude.com/docs/en/plugins-reference](https://code.claude.com/docs/en/plugins-reference))
    states marketplace plugins are copied into `~/.claude/plugins/cache/<plugin>/`.
-   Path traversal outside that dir (`../crates`) does **not** work post-install.
-   Anything the runtime needs must live inside the plugin dir.
+   Codex also installs marketplace plugins into its own plugin cache. Path
+   traversal outside the installed plugin root (`../crates`) is not a runtime
+   contract. Anything the runtime needs must live inside the plugin dir.
 2. **`bin/` is the Claude Code standard for executables.** The plugin spec
    exposes `<pluginRoot>/bin/` on the Bash tool PATH. `plugin/bin/sdi` is the
    intended runtime location for the user binary post-install.
@@ -80,6 +87,12 @@ then PATH). The release-fetch path
 (`SDI_RELEASE_FETCH=1`) is structurally present but errors out until a
 GitHub Release exists — distribution is excluded from current scope.
 
+Both host MCP declarations call `plugin/scripts/sdi-mcp.cjs`, not `bin/sdi`
+directly. The wrapper uses the resolver above, sets `SDI_DAEMON_BIN` when it
+can resolve `sdid`, and then execs `sdi mcp`. That keeps MCP usable from local
+source checkouts (`target/debug`) and release bundles (`plugin/bin` +
+`plugin/daemon/bin`).
+
 ## Data location (LM-8 invariant)
 
 Plugin code may write **only** under `pluginRoot` (the plugin dir) and via the
@@ -100,6 +113,18 @@ re-creates that tree, which would silently destroy the SSoT.
 `SDI_HOME` env overrides the XDG root, used by the test suite to isolate
 per-test homes.
 
+## Host manifests
+
+The host-specific manifests are intentionally thin:
+
+- `plugin/.claude-plugin/plugin.json` keeps the Claude Code `skillsList`
+  surface and the legacy command/agent discovery conventions.
+- `plugin/.codex-plugin/plugin.json` points at the same `skills/` tree and
+  registers the shared MCP launcher inline with `${PLUGIN_ROOT}/scripts/sdi-mcp.cjs`.
+- `.agents/plugins/marketplace.json` exposes the existing `plugin/` directory
+  as the repo-local Codex marketplace entry; there is no duplicated
+  `plugins/sdi/` copy.
+
 ## Hook surface
 
 Six events wired in `plugin/hooks/hooks.json`:
@@ -114,9 +139,11 @@ Six events wired in `plugin/hooks/hooks.json`:
 | `SubagentStop`    | `subagent-stop.cjs`               | Append sub-agent result to Task evidence          |
 
 Each shim is ≤8 LOC, wraps the shared call with `.catch()`, exits 0 on failure.
-Hook crash safety is a structural property of the shim layer, not a runtime
-choice. See [HOOK_ENFORCEMENT.md](./HOOK_ENFORCEMENT.md) for the enforcement
-semantics.
+Codex loads the same `hooks/hooks.json` default hook file and provides
+compatibility env vars for existing plugin hooks; `sdi-hooks.cjs` also prefers
+`PLUGIN_ROOT` when present. Hook crash safety is a structural property of the
+shim layer, not a runtime choice. See [HOOK_ENFORCEMENT.md](./HOOK_ENFORCEMENT.md)
+for the enforcement semantics.
 
 ## Surfaces inside this repo
 

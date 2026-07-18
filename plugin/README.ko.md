@@ -1,8 +1,8 @@
-# SDI — Claude Code 플러그인 셸
+# SDI — Claude Code / Codex 플러그인 셸
 
 [English](./README.md) · **한국어**
 
-이 디렉터리는 SDI(Scenario-Driven Implementation) 의 **Claude Code 플러그인 표면**이다. SDI 본체(`crates/` 워크스페이스: `cli` + `daemon` + `mcp` + `core` + `db`) 와 동일한 저장소의 일부다. 플러그인은 별도 패키지가 아니라 — 이 저장소의 여러 얼굴 중 하나다.
+이 디렉터리는 SDI(Scenario-Driven Implementation) 의 **Claude Code 및 Codex 플러그인 표면**이다. SDI 본체(`crates/` 워크스페이스: `cli` + `daemon` + `mcp` + `core` + `db`) 와 동일한 저장소의 일부다. 플러그인은 별도 패키지가 아니라 — 이 저장소의 여러 얼굴 중 하나다.
 
 정본 명세: [`../docs/PRD.md`](../docs/PRD.md) (결정 사항 D1–D29).
 
@@ -10,15 +10,17 @@
 
 | 경로 | 역할 |
 |---|---|
-| `.claude-plugin/plugin.json` | 플러그인 매니페스트. `commands/`, `agents/`, `skills/`, 마켓플레이스 메타데이터를 선언. |
-| `.mcp.json` | MCP 서버 등록. `sdi mcp` (CLI 의 stdio MCP 서브명령) 를 스폰. |
-| `hooks/hooks.json` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop` 에 대한 훅 라우팅. |
-| `adapters/claude/*.cjs` | `shared/sdi-hooks.cjs` 에 위임하는 얇은 Claude Code 전용 래퍼. |
+| `.claude-plugin/plugin.json` | Claude Code 플러그인 매니페스트. `commands/`, `agents/`, `skills/`, 마켓플레이스 메타데이터를 선언. |
+| `.codex-plugin/plugin.json` | Codex 플러그인 매니페스트. 공유 `skills/`와 인라인 MCP 런처를 가리킨다. |
+| `.mcp.json` | Claude MCP 서버 등록. 공유 MCP 런처를 스폰한다. |
+| `hooks/hooks.json` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop` 에 대한 훅 라우팅. Codex도 이 기본 hook 파일을 로드한다. |
+| `adapters/claude/*.cjs` | `shared/sdi-hooks.cjs` 에 위임하는 얇은 host 래퍼. Codex는 기존 plugin hook 호환 env를 제공한다. |
 | `adapters/shared/sdi-hooks.cjs` | 설치 로직 + 훅 본문의 단일 진실 공급원 (멱등 `ensureInstalled`, 데몬 스폰, 활성 태스크 / 위임 / 패턴 / 클레임 가드). |
 | `commands/*.md` | 슬래시 명령어 (D11 + v0.5): `/plan`, `/req`, `/scenario`, `/round`, `/decide`, `/consensus`, `/autonomy`, `/agent-note`, `/pattern`, `/sdi-status`. |
 | `agents/*.md` | 전문가 서브에이전트 정의 (아래 참조). |
 | `skills/{sdi-overview,sdi-scenario,sdi-round,sdi-evidence}/SKILL.md` | 오리엔테이션, GWT 변환, 라운드 라이프사이클, 증거 기록을 다루는 4개의 태스크 스코프 스킬. |
 | `scripts/setup.cjs` | `ensureInstalled` 로의 수동 / CI 진입 (`SessionStart` 와 동일 코드 경로). |
+| `scripts/sdi-mcp.cjs` | host 중립 MCP 런처. 공유 설치 게이트 해석 정책으로 `sdi`를 찾은 뒤 `sdi mcp`를 실행한다. |
 | `bin/`, `daemon/bin/` | 번들된 `sdi` 및 `sdid` 바이너리의 설치 대상 (릴리스 번들 레이아웃 사용 시 `ensureInstalled` 가 채움). |
 
 ## 전문가 에이전트
@@ -41,7 +43,7 @@
 
 ## 훅과 게이트
 
-Claude Code 위에 얹힌 훅 체인:
+Claude Code / Codex 위에 얹힌 훅 체인:
 
 | 훅 | 동작 |
 |---|---|
@@ -64,7 +66,7 @@ D29 멀티세션 클레임: `Edit` / `Write` / `NotebookEdit` 에 대해 훅이 
 
 비상 우회: `sdi bypass arm --reason "<짧은 사유>"` 가 `~/.cache/sdi/bypass-once` (XDG 캐시) 에 마커를 남기고, 다음 한 번의 변경성 도구 호출에 대해 모든 변경 게이트(D21 / 활성 태스크 / D29) 를 해제한 뒤 자동 소비한다. TTL 기본값은 60초 (`--ttl <초>` 로 변경). `sdi` 는 D21 의 읽기 전용 Bash 화이트리스트에 들어 있으므로 메인 세션이 직접 마커를 무장(arm)할 수 있다 — 우회 자체에는 전문가 위임이 필요 없다. `sdi bypass status` 로 상태와 TTL 잔여를 확인하고, `sdi bypass disarm` 으로 마커를 제거한다. 매 무장 + 소비는 훅 감사 로그에 적재되며, 일상적 사용은 프로토콜 위반이다.
 
-기동 시점 폴백 (Claude Code 를 띄우는 셸에서 export 한 경우에만 유효): `SDI_DELEGATION_BYPASS=1` 은 D21 만 해제하고, `SDI_BYPASS_HOOKS=1` 은 `PreToolUse` 체인 전체를 단락시키며, `SDI_HOOK_V05_DISABLE=1` 은 D26 권고 + D29 클레임 차단을 끈다. 인라인 `VAR=1 cmd` 프리픽스는 Claude Code 가 셸 expand 전에 훅을 spawn 하므로 닿지 않는다.
+기동 시점 폴백 (host를 띄우는 셸에서 export 한 경우에만 유효): `SDI_DELEGATION_BYPASS=1` 은 D21 만 해제하고, `SDI_BYPASS_HOOKS=1` 은 `PreToolUse` 체인 전체를 단락시키며, `SDI_HOOK_V05_DISABLE=1` 은 D26 권고 + D29 클레임 차단을 끈다. 인라인 `VAR=1 cmd` 프리픽스는 host가 셸 expand 전에 훅을 spawn 하므로 닿지 않는다.
 
 활성 시나리오는 데몬이 `AgentRun ↔ Scenario` 엣지를 갖기 전까지 현재 `SDI_ACTIVE_SCENARIO` 환경 변수를 통해 흐른다.
 
