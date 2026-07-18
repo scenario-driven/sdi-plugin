@@ -2,8 +2,7 @@
   "mcpServers": {
     "sdi": {
       "type": "stdio",
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/sdi",
-      "args": ["mcp"]
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/sdi-mcp.cjs"
     }
   }
 }

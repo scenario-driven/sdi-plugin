@@ -6,7 +6,7 @@ const path = require('path');
 const { ensureInstalled } = require('../adapters/shared/sdi-hooks.cjs');
 
 (async () => {
-  const root = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
+  const root = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
   const ok = await ensureInstalled(root).catch((err) => {
     process.stderr.write(`[sdi] setup failed: ${err && err.message ? err.message : err}\n`);
     return false;

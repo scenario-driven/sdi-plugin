@@ -1,8 +1,8 @@
-// Shared hook bodies for the SDI Claude Code plugin shell.
+// Shared hook bodies for the SDI Claude Code / Codex plugin shell.
 //
-// Adapters in adapters/claude/*.cjs delegate to functions exported here via
-// 2-line shims. This module is the single home for install-gate logic, daemon
-// HTTP calls, and hook semantics. Zero runtime deps (Node 20+ only).
+// Host adapters delegate to functions exported here via tiny shims. This
+// module is the single home for install-gate logic, daemon HTTP calls, and hook
+// semantics. Zero runtime deps (Node 20+ only).
 //
 // LM-8 invariant: plugin code may only write under `pluginRoot`. User data —
 // SQLite, sockets, port file, logs — lives under XDG paths owned by the
@@ -115,6 +115,7 @@ const SDI_SKILLS = ['sdi-overview', 'sdi-scenario', 'sdi-round', 'sdi-evidence',
 // Plugin root resolution
 
 function pluginRoot() {
+  if (process.env.PLUGIN_ROOT) return process.env.PLUGIN_ROOT;
   if (process.env.CLAUDE_PLUGIN_ROOT) return process.env.CLAUDE_PLUGIN_ROOT;
   // adapters/shared/sdi-hooks.cjs → plugin/
   return path.resolve(__dirname, '..', '..');
@@ -566,17 +567,24 @@ async function daemonHealth() {
   }
 }
 
-// The plugin's own version, from `.claude-plugin/plugin.json`. This is the
-// version of the binaries the install gate just resolved; comparing it to the
-// live daemon's `/health` version detects a daemon left running on an older
-// plugin build (#17).
-function pluginVersion(root) {
+function readManifestVersion(root, relPath) {
   try {
-    const manifest = path.join(root || pluginRoot(), '.claude-plugin', 'plugin.json');
-    return JSON.parse(fs.readFileSync(manifest, 'utf8')).version || null;
+    return JSON.parse(fs.readFileSync(path.join(root || pluginRoot(), relPath), 'utf8')).version || null;
   } catch {
     return null;
   }
+}
+
+// The plugin's own version, from the host manifest. This is the version of the
+// binaries the install gate just resolved; comparing it to the live daemon's
+// `/health` version detects a daemon left running on an older plugin build
+// (#17).
+function pluginVersion(root) {
+  const base = root || pluginRoot();
+  return (
+    readManifestVersion(base, path.join('.codex-plugin', 'plugin.json')) ||
+    readManifestVersion(base, path.join('.claude-plugin', 'plugin.json'))
+  );
 }
 
 // Stop the running daemon (SIGTERM, then SIGKILL if it overstays the bounded
@@ -1981,6 +1989,7 @@ module.exports = {
   _internals: {
     isReadOnlyBash,
     pluginVersion,
+    readManifestVersion,
     parseRoundDecomposeIntent,
     decomposePatternAdvisory,
     buildSessionSummary,
