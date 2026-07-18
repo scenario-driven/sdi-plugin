@@ -179,12 +179,37 @@ test('shared module: SDI_SKILLS is in lock-step with skills/ and plugin.json#ski
   const manifest = JSON.parse(
     fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin/plugin.json'), 'utf8'),
   );
+  const codexManifest = JSON.parse(
+    fs.readFileSync(path.join(PLUGIN_ROOT, '.codex-plugin/plugin.json'), 'utf8'),
+  );
   const names = (manifest.skillsList || []).map((s) => s.name);
   for (const name of _internals.SDI_SKILLS) {
     assert.ok(
       names.includes(name),
       `plugin.json#skillsList must include "${name}"`,
     );
+  }
+  assert.equal(codexManifest.skills, './skills/');
+  assert.equal(codexManifest.version, manifest.version);
+});
+
+test('shared module: pluginRoot prefers PLUGIN_ROOT and falls back to CLAUDE_PLUGIN_ROOT', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { pluginRoot } = require(SHARED);
+  const prevPluginRoot = process.env.PLUGIN_ROOT;
+  const prevClaudePluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  try {
+    process.env.PLUGIN_ROOT = '/tmp/sdi-codex-root';
+    process.env.CLAUDE_PLUGIN_ROOT = '/tmp/sdi-claude-root';
+    assert.equal(pluginRoot(), '/tmp/sdi-codex-root');
+
+    delete process.env.PLUGIN_ROOT;
+    assert.equal(pluginRoot(), '/tmp/sdi-claude-root');
+  } finally {
+    if (prevPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
+    else process.env.PLUGIN_ROOT = prevPluginRoot;
+    if (prevClaudePluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+    else process.env.CLAUDE_PLUGIN_ROOT = prevClaudePluginRoot;
   }
 });
 
@@ -616,12 +641,13 @@ test('D21 (#18): git global flags (-C / -c / --no-pager) reach the real subcomma
   assert.equal(isReadOnlyBash('git status'), true);
 });
 
-test('install gate (#17): pluginVersion reads .claude-plugin/plugin.json', () => {
+test('install gate (#17): pluginVersion reads the host plugin manifest', () => {
   delete require.cache[require.resolve(SHARED)];
-  const { pluginVersion } = require(SHARED)._internals;
+  const { pluginVersion, readManifestVersion } = require(SHARED)._internals;
   // Against this repo's own plugin/ root, returns the manifest version string.
   const v = pluginVersion(PLUGIN_ROOT);
   assert.match(v, /^\d+\.\d+\.\d+$/, `expected semver, got ${v}`);
+  assert.equal(v, readManifestVersion(PLUGIN_ROOT, '.codex-plugin/plugin.json'));
   // Unknown root → null (graceful, never throws).
   assert.equal(pluginVersion('/nonexistent/path'), null);
 });

@@ -5,10 +5,12 @@
 //   - hooks/hooks.json command paths resolve to existing .cjs files
 //   - every .cjs in adapters/ + scripts/ parses with `node --check`
 //   - every commands/*.md has a YAML frontmatter block with a description
-//   - every skill in plugin.json#skillsList exists on disk AND in
+//   - every skill in Claude plugin.json#skillsList exists on disk AND in
 //     adapters/shared/sdi-hooks.cjs `SDI_SKILLS`
-//   - .mcp.json invokes the `sdi` binary (the install gate is the single
-//     trust boundary for finding it)
+//   - the Codex plugin manifest points at the shared skills/ tree and inline
+//     MCP launcher
+//   - .mcp.json invokes the shared MCP launcher (the install gate resolver is
+//     the single trust boundary for finding `sdi`)
 //
 // Run: `node --test plugin/tests/lint.test.cjs`
 
@@ -21,9 +23,13 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
+const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..');
 const HOOKS_JSON = path.join(PLUGIN_ROOT, 'hooks/hooks.json');
-const MANIFEST = path.join(PLUGIN_ROOT, '.claude-plugin/plugin.json');
+const CLAUDE_MANIFEST = path.join(PLUGIN_ROOT, '.claude-plugin/plugin.json');
+const CODEX_MANIFEST = path.join(PLUGIN_ROOT, '.codex-plugin/plugin.json');
+const MARKETPLACE_JSON = path.join(REPO_ROOT, '.agents/plugins/marketplace.json');
 const MCP_JSON = path.join(PLUGIN_ROOT, '.mcp.json');
+const MCP_LAUNCHER = path.join(PLUGIN_ROOT, 'scripts/sdi-mcp.cjs');
 const SHARED = path.join(PLUGIN_ROOT, 'adapters/shared/sdi-hooks.cjs');
 const COMMANDS_DIR = path.join(PLUGIN_ROOT, 'commands');
 const SKILLS_DIR = path.join(PLUGIN_ROOT, 'skills');
@@ -74,6 +80,14 @@ test('lint: hooks.json wires all six expected events', () => {
   ];
   for (const evt of expected) {
     assert.ok(manifest.hooks[evt], `missing event: ${evt}`);
+  }
+});
+
+test('lint: SessionStart matcher covers Codex start sources', () => {
+  const manifest = readJson(HOOKS_JSON);
+  const matcher = manifest.hooks.SessionStart?.[0]?.matcher || '';
+  for (const source of ['startup', 'resume', 'clear', 'compact']) {
+    assert.match(source, new RegExp(matcher), `SessionStart must match ${source}`);
   }
 });
 
@@ -166,7 +180,7 @@ test('lint: SDI_SKILLS array, plugin.json#skillsList, and skills/ dirs are in lo
   const { _internals } = require(SHARED);
   const sdiSkillsArr = _internals.SDI_SKILLS;
 
-  const manifest = readJson(MANIFEST);
+  const manifest = readJson(CLAUDE_MANIFEST);
   const manifestList = (manifest.skillsList || []).map((s) => s.name);
 
   const onDisk = fs.existsSync(SKILLS_DIR)
@@ -183,10 +197,38 @@ test('lint: SDI_SKILLS array, plugin.json#skillsList, and skills/ dirs are in lo
   assert.deepEqual(sortedB, sortedC, `plugin.json#skillsList vs on-disk skills/ mismatch`);
 });
 
+test('lint: Codex plugin manifest points at shared skills and inline MCP server', () => {
+  const claudeManifest = readJson(CLAUDE_MANIFEST);
+  const manifest = readJson(CODEX_MANIFEST);
+  assert.equal(manifest.name, 'sdi');
+  assert.equal(manifest.version, claudeManifest.version);
+  assert.equal(manifest.license, 'MIT');
+  assert.equal(manifest.skills, './skills/');
+  assert.ok(manifest.interface && typeof manifest.interface === 'object');
+  assert.equal(manifest.interface.displayName, 'SDI');
+  assert.ok(Array.isArray(manifest.interface.capabilities));
+
+  assert.ok(manifest.mcpServers && manifest.mcpServers.sdi, 'Codex manifest must register `sdi` MCP server');
+  const server = manifest.mcpServers.sdi;
+  assert.equal(server.type, 'stdio');
+  assert.equal(server.command, '${PLUGIN_ROOT}/scripts/sdi-mcp.cjs');
+  assert.equal(server.args, undefined);
+});
+
+test('lint: repo marketplace exposes the existing plugin/ root to Codex', () => {
+  const marketplace = readJson(MARKETPLACE_JSON);
+  assert.equal(marketplace.name, 'scenario-driven-sdi-plugin');
+  const entry = (marketplace.plugins || []).find((p) => p && p.name === 'sdi');
+  assert.ok(entry, 'marketplace must expose sdi');
+  assert.deepEqual(entry.source, { source: 'local', path: './plugin' });
+  assert.deepEqual(entry.policy, { installation: 'AVAILABLE', authentication: 'ON_INSTALL' });
+  assert.equal(entry.category, 'Productivity');
+});
+
 // ────────────────────────────────────────────────────────────────────────────
 // MCP wiring
 
-test('lint: .mcp.json invokes the bundled `sdi` binary with the `mcp` subcommand', () => {
+test('lint: .mcp.json invokes the shared MCP launcher', () => {
   const cfg = readJson(MCP_JSON);
   assert.ok(cfg.mcpServers && cfg.mcpServers.sdi, '.mcp.json must register `sdi` server');
   const cmd = cfg.mcpServers.sdi.command || '';
@@ -194,20 +236,26 @@ test('lint: .mcp.json invokes the bundled `sdi` binary with the `mcp` subcommand
   // subprocess PATH (unlike the hook adapters, which resolve `sdi` specially),
   // so a bare `command: "sdi"` fails with `Executable not found in $PATH`. The
   // command MUST be an absolute, version-pinned path via ${CLAUDE_PLUGIN_ROOT}
-  // — the same rule the hooks already follow (see the hooks.json test above).
+  // and route through the shared resolver so source checkouts and release
+  // bundles both work.
   assert.match(
     cmd,
-    /^\$\{CLAUDE_PLUGIN_ROOT\}\/bin\/sdi$/,
-    `MCP command must be \${CLAUDE_PLUGIN_ROOT}/bin/sdi, got: ${cmd}`,
+    /^\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/sdi-mcp\.cjs$/,
+    `MCP command must be \${CLAUDE_PLUGIN_ROOT}/scripts/sdi-mcp.cjs, got: ${cmd}`,
   );
-  assert.deepEqual(cfg.mcpServers.sdi.args, ['mcp']);
+  assert.equal(cfg.mcpServers.sdi.args, undefined);
+});
+
+test('lint: shared MCP launcher is executable', () => {
+  const st = fs.statSync(MCP_LAUNCHER);
+  assert.notEqual(st.mode & 0o111, 0, 'scripts/sdi-mcp.cjs must be directly executable');
 });
 
 // ────────────────────────────────────────────────────────────────────────────
 // plugin.json sanity
 
 test('lint: plugin.json has name, version, and license', () => {
-  const manifest = readJson(MANIFEST);
+  const manifest = readJson(CLAUDE_MANIFEST);
   assert.equal(manifest.name, 'sdi');
   assert.match(manifest.version, /^\d+\.\d+\.\d+/);
   assert.equal(manifest.license, 'MIT');

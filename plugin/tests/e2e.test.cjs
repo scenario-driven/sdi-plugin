@@ -27,11 +27,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
 const WORKSPACE_ROOT = path.resolve(PLUGIN_ROOT, '..');
 const SHIM_DIR = path.join(PLUGIN_ROOT, 'adapters/claude');
+const MCP_LAUNCHER = path.join(PLUGIN_ROOT, 'scripts/sdi-mcp.cjs');
 const SDI_BIN = path.join(WORKSPACE_ROOT, 'target/debug/sdi');
 
 function mkTempHome() {
@@ -404,3 +405,69 @@ test(
     }
   },
 );
+
+test('plugin-shell e2e: shared MCP launcher advertises SDI tools', { timeout: 30000 }, async () => {
+  if (!fs.existsSync(SDI_BIN)) {
+    console.error(`[e2e] skip: ${SDI_BIN} not built — run \`cargo build -p sdi\` first`);
+    return;
+  }
+
+  const home = mkTempHome();
+  const child = spawn('node', [MCP_LAUNCHER], {
+    env: {
+      ...process.env,
+      SDI_HOME: home,
+      PLUGIN_ROOT,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  const lines = [];
+  child.stdout.on('data', (buf) => {
+    stdout += buf.toString('utf8');
+    let idx;
+    while ((idx = stdout.indexOf('\n')) >= 0) {
+      lines.push(stdout.slice(0, idx));
+      stdout = stdout.slice(idx + 1);
+    }
+  });
+  child.stderr.on('data', (buf) => {
+    stderr += buf.toString('utf8');
+  });
+  const waitForLines = async (count) => {
+    const got = await waitFor(() => (lines.length >= count ? true : null), {
+      tries: 100,
+      intervalMs: 50,
+    });
+    assert.ok(got, `timed out waiting for ${count} MCP response lines; stderr=${stderr}`);
+  };
+
+  try {
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
+    await waitForLines(1);
+    const init = JSON.parse(lines[0]);
+    assert.equal(init.id, 1);
+    assert.equal(init.result.serverInfo.name, 'sdi-mcp');
+
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
+    await waitForLines(2);
+    const listed = JSON.parse(lines[1]);
+    const names = listed.result.tools.map((t) => t.name);
+    for (const expected of ['search_knowledge', 'add_scenario', 'start_round']) {
+      assert.ok(names.includes(expected), `missing MCP tool ${expected}`);
+    }
+
+    child.stdin.end();
+    const code = await new Promise((resolve) => child.on('close', resolve));
+    assert.equal(code, 0, `MCP launcher exited ${code}; stderr=${stderr}`);
+  } finally {
+    try {
+      child.kill('SIGTERM');
+    } catch {}
+    killDaemon(home);
+    try {
+      fs.rmSync(home, { recursive: true, force: true });
+    } catch {}
+  }
+});
