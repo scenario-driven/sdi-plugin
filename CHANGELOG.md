@@ -8,7 +8,7 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
-## [0.9.4] - 2026-07-18
+## [0.9.5] - 2026-07-18
 
 ### Fixed
 - **Daemon restart is now never-downgrade (semver-aware).** The install gate
