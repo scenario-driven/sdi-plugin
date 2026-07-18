@@ -19,8 +19,11 @@
   "skills": "./skills/",
   "mcpServers": {
     "sdi": {
-      "type": "stdio",
-      "command": "${PLUGIN_ROOT}/scripts/sdi-mcp.cjs"
+      "command": "node",
+      "args": [
+        "./scripts/sdi-mcp.cjs"
+      ],
+      "cwd": "."
     }
   },
   "interface": {

@@ -11,7 +11,7 @@
 | 경로 | 역할 |
 |---|---|
 | `.claude-plugin/plugin.json` | Claude Code 플러그인 매니페스트. `commands/`, `agents/`, `skills/`, 마켓플레이스 메타데이터를 선언. |
-| `.codex-plugin/plugin.json` | Codex 플러그인 매니페스트. 공유 `skills/`와 인라인 MCP 런처를 가리킨다. |
+| `.codex-plugin/plugin.json` | Codex 플러그인 매니페스트. 공유 `skills/`와 공유 런처용 인라인 MCP 설정을 가리킨다. |
 | `.mcp.json` | Claude MCP 서버 등록. 공유 MCP 런처를 스폰한다. |
 | `hooks/hooks.json` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop` 에 대한 훅 라우팅. Codex도 이 기본 hook 파일을 로드한다. |
 | `adapters/claude/*.cjs` | `shared/sdi-hooks.cjs` 에 위임하는 얇은 host 래퍼. Codex는 기존 plugin hook 호환 env를 제공한다. |

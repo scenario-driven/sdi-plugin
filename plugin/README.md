@@ -14,7 +14,7 @@ Canonical spec: [`../docs/PRD.md`](../docs/PRD.md) (decisions D1–D29).
 | Path | Role |
 |---|---|
 | `.claude-plugin/plugin.json` | Claude Code plugin manifest. Declares `commands/`, `agents/`, `skills/`, and marketplace metadata. |
-| `.codex-plugin/plugin.json` | Codex plugin manifest. Points at shared `skills/` and the inline MCP launcher. |
+| `.codex-plugin/plugin.json` | Codex plugin manifest. Points at shared `skills/` and inline MCP config for the shared launcher. |
 | `.mcp.json` | Claude MCP server registration. Spawns the shared MCP launcher. |
 | `hooks/hooks.json` | Hook routing for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`. Codex loads this default hook file too. |
 | `adapters/claude/*.cjs` | Thin host wrappers that delegate to `shared/sdi-hooks.cjs`. Codex receives compatibility env vars for these plugin hooks. |

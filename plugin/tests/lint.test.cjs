@@ -8,7 +8,7 @@
 //   - every skill in Claude plugin.json#skillsList exists on disk AND in
 //     adapters/shared/sdi-hooks.cjs `SDI_SKILLS`
 //   - the Codex plugin manifest points at the shared skills/ tree and inline
-//     MCP launcher
+//     MCP config
 //   - .mcp.json invokes the shared MCP launcher (the install gate resolver is
 //     the single trust boundary for finding `sdi`)
 //
@@ -197,7 +197,7 @@ test('lint: SDI_SKILLS array, plugin.json#skillsList, and skills/ dirs are in lo
   assert.deepEqual(sortedB, sortedC, `plugin.json#skillsList vs on-disk skills/ mismatch`);
 });
 
-test('lint: Codex plugin manifest points at shared skills and inline MCP server', () => {
+test('lint: Codex plugin manifest points at shared skills and inline MCP config', () => {
   const claudeManifest = readJson(CLAUDE_MANIFEST);
   const manifest = readJson(CODEX_MANIFEST);
   assert.equal(manifest.name, 'sdi');
@@ -210,9 +210,9 @@ test('lint: Codex plugin manifest points at shared skills and inline MCP server'
 
   assert.ok(manifest.mcpServers && manifest.mcpServers.sdi, 'Codex manifest must register `sdi` MCP server');
   const server = manifest.mcpServers.sdi;
-  assert.equal(server.type, 'stdio');
-  assert.equal(server.command, '${PLUGIN_ROOT}/scripts/sdi-mcp.cjs');
-  assert.equal(server.args, undefined);
+  assert.equal(server.command, 'node');
+  assert.deepEqual(server.args, ['./scripts/sdi-mcp.cjs']);
+  assert.equal(server.cwd, '.');
 });
 
 test('lint: repo marketplace exposes the existing plugin/ root to Codex', () => {
