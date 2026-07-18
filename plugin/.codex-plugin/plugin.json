@@ -1,0 +1,48 @@
+{
+  "name": "sdi",
+  "version": "0.9.4",
+  "description": "Scenario-Driven Implementation engine for Codex and Claude Code. Natural-language GWT scenarios as first-class citizens; LLM implements, verifies, and auto-regresses.",
+  "author": {
+    "name": "SDI contributors",
+    "url": "https://github.com/scenario-driven"
+  },
+  "homepage": "https://github.com/scenario-driven/sdi-plugin",
+  "repository": "https://github.com/scenario-driven/sdi-plugin",
+  "license": "MIT",
+  "keywords": [
+    "sdi",
+    "scenario-driven-implementation",
+    "codex",
+    "mcp",
+    "multi-agent"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "sdi": {
+      "command": "node",
+      "args": [
+        "./scripts/sdi-mcp.cjs"
+      ],
+      "cwd": "."
+    }
+  },
+  "interface": {
+    "displayName": "SDI",
+    "shortDescription": "Scenario-driven implementation for Codex.",
+    "longDescription": "Use natural-language Given/When/Then scenarios as verifiable contracts, then coordinate plans, rounds, evidence, and agent work through the local SDI daemon.",
+    "developerName": "SDI contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write",
+      "MCP",
+      "Hooks"
+    ],
+    "brandColor": "#10A37F",
+    "defaultPrompt": [
+      "Use SDI to orient this project.",
+      "Use SDI to turn this request into GWT scenarios.",
+      "Use SDI to run the next implementation round."
+    ]
+  }
+}

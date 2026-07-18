@@ -1,0 +1,48 @@
+{
+  "name": "sdi",
+  "version": "0.9.4",
+  "description": "Scenario-Driven Implementation engine for Claude Code. Natural-language GWT scenarios as first-class citizens; LLM implements + verifies + auto-regresses.",
+  "author": {
+    "name": "SDI contributors"
+  },
+  "homepage": "https://github.com/scenario-driven/sdi-plugin",
+  "repository": "https://github.com/scenario-driven/sdi-plugin",
+  "license": "MIT",
+  "skillsList": [
+    {
+      "name": "sdi-overview",
+      "path": "./skills/sdi-overview/SKILL.md",
+      "description": "SDI orientation — entities, lifecycle, GWT discipline, regression model, evidence rules, MCP tool map, failure-code recovery"
+    },
+    {
+      "name": "sdi-scenario",
+      "path": "./skills/sdi-scenario/SKILL.md",
+      "description": "Natural-language → Given/When/Then converter for SDI scenarios; daemon enforces non-empty clauses"
+    },
+    {
+      "name": "sdi-round",
+      "path": "./skills/sdi-round/SKILL.md",
+      "description": "Create and activate SDI rounds; strict-regression default, in-flight task policy, disruption review, task auto-decomposition"
+    },
+    {
+      "name": "sdi-evidence",
+      "path": "./skills/sdi-evidence/SKILL.md",
+      "description": "Record structured TaskEvidence (code / test / ci / external / transcript) at task done"
+    },
+    {
+      "name": "sdi-init",
+      "path": "./skills/sdi-init/SKILL.md",
+      "description": "Cold-start the spec for a new/empty project — requirement prompt → first product-definition documents (oracle backbone) via oracle-author, then hand off to sdi-converge. Front half of the planning loop; detects the vacuous empty-oracle complete verdict"
+    },
+    {
+      "name": "sdi-converge",
+      "path": "./skills/sdi-converge/SKILL.md",
+      "description": "Outer loop — spec convergence to the completeness oracle (D31/D34/D35): scan oracle/verify, §2a-eliminate decision-points, auto-decide facts / ask preferences, loop until uncovered=0 & unanswered=0 & unasked=0, then approve"
+    },
+    {
+      "name": "sdi-impl-loop",
+      "path": "./skills/sdi-impl-loop/SKILL.md",
+      "description": "Inner loop — implementation convergence over rounds (D30/D31): decompose → impl → test → bounded-N retry / escalate, complete on all-pass, auto-open next round on regression, loop until regressions=0"
+    }
+  ]
+}
