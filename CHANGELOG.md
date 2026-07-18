@@ -8,6 +8,20 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.9.4] - 2026-07-18
+
+### Fixed
+- **Daemon restart is now never-downgrade (semver-aware).** The install gate
+  previously restarted the shared daemon on any `/health` version mismatch — a
+  symmetric rule, so an older config dir (a second Claude profile) would restart
+  a newer running daemon back down, only for the newer profile to restart it up
+  again. That version ping-pong churned the singleton daemon and produced
+  port-bind failures. The gate now restarts ONLY when the running daemon is
+  strictly older than the plugin (a genuine upgrade); a same-or-newer daemon is
+  accepted as-is. Relies on the forward-compat invariant that a newer daemon
+  stays backward-compatible for an older CLI (additive schema migrations today);
+  a future breaking schema change must ship its own compat/epoch guard.
+
 ## [0.9.3] - 2026-06-28
 
 ### Fixed

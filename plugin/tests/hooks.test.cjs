@@ -652,6 +652,54 @@ test('install gate (#17): pluginVersion reads the host plugin manifest', () => {
   assert.equal(pluginVersion('/nonexistent/path'), null);
 });
 
+test('install gate (#17): semverCompare orders release cores + tolerates v-prefix', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { semverCompare } = require(SHARED)._internals;
+
+  // older < newer at each level.
+  assert.equal(semverCompare('0.9.3', '0.9.4'), -1);
+  assert.equal(semverCompare('0.9.4', '0.10.0'), -1);
+  assert.equal(semverCompare('0.9.4', '1.0.0'), -1);
+  // newer > older (asymmetry that never-downgrade depends on).
+  assert.equal(semverCompare('0.9.4', '0.9.3'), 1);
+  assert.equal(semverCompare('1.0.0', '0.9.9'), 1);
+  // equal.
+  assert.equal(semverCompare('0.9.4', '0.9.4'), 0);
+  // leading `v` tolerated on either side.
+  assert.equal(semverCompare('v0.9.3', '0.9.4'), -1);
+  assert.equal(semverCompare('0.9.4', 'v0.9.4'), 0);
+  // pre-release / build suffix ignored — numeric core compared.
+  assert.equal(semverCompare('0.9.4-rc.1', '0.9.4'), 0);
+  assert.equal(semverCompare('0.9.4+build.7', '0.9.5'), -1);
+  // unparseable on either side → null (caller falls back to strict inequality).
+  assert.equal(semverCompare('garbage', '0.9.4'), null);
+  assert.equal(semverCompare('0.9.4', ''), null);
+  assert.equal(semverCompare('0.9', '0.9.4'), null);
+});
+
+test('install gate (#17): shouldUpgradeDaemon is never-downgrade (restart iff running is strictly older)', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { shouldUpgradeDaemon } = require(SHARED)._internals;
+
+  // Running older than wanted → genuine upgrade → restart.
+  assert.equal(shouldUpgradeDaemon('0.9.3', '0.9.4'), true);
+  assert.equal(shouldUpgradeDaemon('0.9.4', '1.0.0'), true);
+  // Running == wanted → accept, no restart.
+  assert.equal(shouldUpgradeDaemon('0.9.4', '0.9.4'), false);
+  // Running NEWER than wanted → accept, no restart (the ping-pong fix: an older
+  // config dir must not restart a newer running daemon back down).
+  assert.equal(shouldUpgradeDaemon('0.9.5', '0.9.4'), false);
+  assert.equal(shouldUpgradeDaemon('1.0.0', '0.9.4'), false);
+  // v-prefix tolerated in the decision path too.
+  assert.equal(shouldUpgradeDaemon('v0.9.3', '0.9.4'), true);
+  assert.equal(shouldUpgradeDaemon('v0.9.5', '0.9.4'), false);
+  // Unparseable → fall back to strict-inequality (restart on any difference).
+  assert.equal(shouldUpgradeDaemon('garbage', '0.9.4'), true);
+  assert.equal(shouldUpgradeDaemon('0.9.4', 'garbage'), true);
+  // Unparseable but textually equal → no difference → no restart.
+  assert.equal(shouldUpgradeDaemon('garbage', 'garbage'), false);
+});
+
 test('D13: parseRoundDecomposeIntent — round activate / task create seams', () => {
   delete require.cache[require.resolve(SHARED)];
   const { _internals } = require(SHARED);

@@ -532,6 +532,57 @@ function resolveWebDist(root) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Semver comparison for the daemon version gate (#17 → never-downgrade)
+//
+// Dependency-free MAJOR.MINOR.PATCH comparison. Tolerates a leading `v` and
+// ignores any pre-release / build suffix (`-rc.1`, `+build`) by comparing only
+// the numeric release core. Returns -1 / 0 / 1, or null when EITHER side lacks
+// a parseable numeric core — callers treat null as "cannot reason; fall back to
+// strict inequality" to stay safe.
+
+function parseSemverCore(v) {
+  if (typeof v !== 'string') return null;
+  const m = v.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+function semverCompare(a, b) {
+  const pa = parseSemverCore(a);
+  const pb = parseSemverCore(b);
+  if (!pa || !pb) return null;
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] < pb[i]) return -1;
+    if (pa[i] > pb[i]) return 1;
+  }
+  return 0;
+}
+
+// Restart DECISION for the install gate: should this plugin replace the running
+// daemon? TRUE only for a genuine UPGRADE — the running daemon is STRICTLY
+// OLDER than `want`. A same-or-newer running daemon returns FALSE: accept it,
+// never downgrade. That asymmetry is the whole fix — an older config dir (a
+// second Claude profile) must TOLERATE a newer running daemon instead of
+// restarting it back down, which is what caused the multi-account version
+// ping-pong and the resulting port-bind failures. An unparseable version on
+// either side falls back to the old strict-inequality behaviour (restart on any
+// difference) so a malformed /health string can never silently pin a stale
+// daemon.
+//
+// Forward-compat invariant this relies on: a NEWER daemon must remain
+// BACKWARD-COMPATIBLE for an OLDER CLI sharing the same SQLite data dir. That
+// holds today — schema migrations are additive (`CREATE TABLE IF NOT EXISTS`,
+// nullable-column adds), so an older CLI reads a newer daemon's database fine.
+// A future BREAKING schema change MUST ship its own compat/epoch guard (e.g. a
+// schema-version handshake that refuses a cross-epoch attach); "never-downgrade"
+// must NOT be read as "any newer daemon is always safe to keep".
+function shouldUpgradeDaemon(running, want) {
+  const cmp = semverCompare(running, want);
+  if (cmp === null) return running !== want; // unparseable → safe fallback
+  return cmp < 0;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Install gate
 //
 // Fast-path 3-step:
@@ -556,22 +607,27 @@ async function ensureInstalled(rootArg) {
     const health = await daemonHealth().catch(() => null);
     if (health) {
       const want = pluginVersion(root);
-      if (!want || !health.version || health.version === want) {
-        return true; // healthy and on the current plugin version (or unknown)
+      if (!want || !health.version || !shouldUpgradeDaemon(health.version, want)) {
+        // Accept the running daemon when the wanted/running version is unknown,
+        // OR — the never-downgrade rule — when it is the SAME or NEWER than this
+        // plugin. An older config dir must tolerate a newer running daemon
+        // rather than restart it back down; that is what kills the multi-account
+        // version ping-pong and the port-bind churn it produced.
+        return true;
       }
-      // #17 — the plugin updated but the daemon is still running the old binary:
-      // it serves a stale dashboard bundle and reports an old /health version,
-      // diverging silently from the CLI. Restart it so the new daemon + SPA take
-      // over. State lives in SQLite and survives the restart.
+      // #17 — genuine UPGRADE only: the running daemon is STRICTLY OLDER than
+      // this plugin, so it serves a stale dashboard bundle and reports an old
+      // /health version, diverging silently from the CLI. Restart it so the new
+      // daemon + SPA take over. State lives in SQLite and survives the restart.
       process.stderr.write(
-        `[sdi] daemon is ${health.version} but plugin is ${want} — restarting to match ` +
+        `[sdi] daemon ${health.version} is older than plugin ${want} — upgrading ` +
           `(SQLite data preserved)…\n`,
       );
       appendHookLog('daemon_version_restart', { from: health.version, to: want });
       await stopDaemon();
       // fall through to setup, which spawns the new daemon.
     }
-    // health unreachable OR version mismatch (now stopped) → run setup.
+    // health unreachable OR older daemon (now stopped) → run setup.
   }
 
   return await runSetup({ sdiBin, sdidBin });
@@ -2230,6 +2286,8 @@ module.exports = {
     isReadOnlyBash,
     pluginVersion,
     readManifestVersion,
+    semverCompare,
+    shouldUpgradeDaemon,
     parseRoundDecomposeIntent,
     decomposePatternAdvisory,
     buildSessionSummary,
