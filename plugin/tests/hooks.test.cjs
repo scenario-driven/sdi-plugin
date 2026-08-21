@@ -230,19 +230,39 @@ test('shared module: resolveSdiBin finds the workspace target/debug/sdi binary',
 });
 
 test('shared module: SDI_BIN env override wins over workspace targets', () => {
-  // Use the sdid binary as a stand-in to prove the env override is honored.
-  const fakeSdi = path.join(WORKSPACE_ROOT, 'target/debug/sdid');
-  assert.ok(fs.existsSync(fakeSdi));
-  delete require.cache[require.resolve(SHARED)];
-  process.env.SDI_BIN = fakeSdi;
+  // Use an isolated executable stand-in so this contract does not depend on
+  // whether the daemon binary happened to be built in the working tree.
+  const home = mkTempHome('sdi-bin-override');
+  const fakeSdi = path.join(home, 'sdid-stand-in');
+  fs.writeFileSync(fakeSdi, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   try {
+    delete require.cache[require.resolve(SHARED)];
+    process.env.SDI_BIN = fakeSdi;
     const { _internals } = require(SHARED);
     const res = _internals.resolveSdiBin(PLUGIN_ROOT);
     assert.equal(res.kind, 'env');
     assert.equal(res.bin, fakeSdi);
   } finally {
     delete process.env.SDI_BIN;
+    fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+test('shared module: Codex apply_patch normalizes and extracts every target path', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { _internals } = require(SHARED);
+  assert.equal(_internals.canonicalToolName('apply_patch'), 'Edit');
+  assert.deepEqual(
+    _internals.targetPathsOf('apply_patch', {
+      patch:
+        '*** Begin Patch\n' +
+        '*** Update File: plugin/hooks/hooks.json\n' +
+        '@@\n' +
+        '*** Add File: plugin/tests/codex.test.cjs\n' +
+        '*** End Patch\n',
+    }),
+    ['plugin/hooks/hooks.json', 'plugin/tests/codex.test.cjs'],
+  );
 });
 
 test('shared module: resolveWebDist three states (ready / buildable / absent)', () => {
@@ -423,6 +443,73 @@ test('D21: PreToolUse blocks main session Edit (delegation gate)', async () => {
     assert.ok(
       entries.some((e) => e.event === 'pre_tool_use_blocked' && e.reason === 'delegation-gate'),
     );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('Codex: PreToolUse applies D21 to the native apply_patch tool', async () => {
+  const home = mkTempHome('sdi-codex-d21');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, {
+      PLUGIN_ROOT,
+      CODEX_HOME: path.join(home, 'codex'),
+      SDI_CODEX_AGENTS_DISABLE: '1',
+      SDI_BYPASS_HOOKS: '',
+    });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'apply_patch',
+        tool_input: { patch: '*** Begin Patch\n*** End Patch\n' },
+      }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    assert.match(r.stdout, /permissionDecision.*deny/);
+    assert.match(r.stdout, /D21 delegation gate/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('Codex: L3 autonomy emits supported deny instead of unsupported ask', async () => {
+  const home = mkTempHome('sdi-codex-l3');
+  const { server, port } = await startMockSdiDaemon({
+    plan: { id: 'PLAN-codex', title: 'p', status: 'active' },
+    inFlight: [{ id: 'TASK-codex', status: 'in_progress' }],
+    policy: { mode: 'L3' },
+  });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, {
+      PLUGIN_ROOT,
+      CODEX_HOME: path.join(home, 'codex'),
+      SDI_CODEX_AGENTS_DISABLE: '1',
+      SDI_BYPASS_HOOKS: '',
+      SDI_ACTIVE_TASK: 'TASK-codex',
+    });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'apply_patch',
+        tool_input: { patch: '*** Begin Patch\n*** Update File: src/example.js\n*** End Patch\n' },
+        agent_id: '00000000-0000-0000-0000-0000000000c3',
+        agent_type: 'impl-coder',
+      }),
+    );
+    assert.equal(r.status, 0, `stderr=${r.stderr}`);
+    const payload = JSON.parse(r.stdout);
+    assert.equal(payload.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(payload.hookSpecificOutput.permissionDecisionReason, /Codex.*deny, not interactive ask/);
+    assert.doesNotMatch(r.stdout, /permissionDecision["']?\s*:\s*["']ask/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });
@@ -1281,6 +1368,52 @@ test('D29: PreToolUse blocks Edit when another scenario claims the target path',
       entries.some((e) => e.event === 'pre_tool_use_blocked' && e.reason === 'claim-overlap'),
       `audit log missing claim-overlap entry:\n${JSON.stringify(entries, null, 2)}`,
     );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('D29: Codex apply_patch is checked against the target-path claim ledger', async () => {
+  const home = mkTempHome('sdi-codex-d29-overlap');
+  const { server, port } = await startMockSdiDaemon({
+    scenarios: [
+      {
+        id: 'SCN-OTHER',
+        claimed_resources_json: JSON.stringify(['plugin/hooks/*.json']),
+      },
+    ],
+  });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, {
+      PLUGIN_ROOT,
+      CODEX_HOME: path.join(home, 'codex'),
+      SDI_CODEX_AGENTS_DISABLE: '1',
+      SDI_BYPASS_HOOKS: '',
+      SDI_ACTIVE_TASK: 'TASK-CODEX-D29',
+      SDI_ACTIVE_SCENARIO: 'SCN-MINE',
+    });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({
+        cwd: PROJECT_CWD,
+        tool_name: 'apply_patch',
+        tool_input: {
+          patch:
+            '*** Begin Patch\n' +
+            '*** Update File: plugin/hooks/hooks.json\n' +
+            '@@\n' +
+            '*** End Patch\n',
+        },
+        agent_id: '00000000-0000-0000-0000-0000000000d5',
+        agent_type: 'impl-coder',
+      }),
+    );
+    assert.equal(r.status, 2, `expected exit 2 from claim block, got ${r.status} stderr=${r.stderr}`);
+    assert.match(r.stdout, /sdi_claim_overlap/);
+    assert.match(r.stdout, /plugin\/hooks\/hooks\.json/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });

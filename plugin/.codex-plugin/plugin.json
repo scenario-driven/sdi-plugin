@@ -1,6 +1,6 @@
 {
   "name": "sdi",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "Scenario-Driven Implementation engine for Codex and Claude Code. Natural-language GWT scenarios as first-class citizens; LLM implements, verifies, and auto-regresses.",
   "author": {
     "name": "SDI contributors",

@@ -8,6 +8,15 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.9.6] - 2026-08-21
+
+### Fixed
+- **Codex hook contract is now supported.** L3 autonomy no longer emits the
+  unsupported interactive `ask` decision to Codex; it returns a supported
+  `deny` with the explicit autonomy-upgrade command. Codex's native
+  `apply_patch` tool now passes through the same delegation, active-task,
+  claim-overlap, and file-activity paths as Claude's file tools.
+
 ## [0.9.5] - 2026-07-18
 
 ### Fixed

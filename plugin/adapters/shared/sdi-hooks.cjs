@@ -239,11 +239,22 @@ function verifySdiSkills(root) {
 // specs remain the source of truth, and user TOML files are never overwritten
 // unless they carry SDI's generated-file sentinel.
 
-function isCodexPluginHost(rootArg) {
-  if (process.env[CODEX_AGENTS_DISABLE_ENV] === '1') return false;
+function isCodexHost(rootArg) {
   if (process.env.PLUGIN_ROOT) return true;
   const root = path.resolve(rootArg || pluginRoot());
   return root.includes(`${path.sep}.codex${path.sep}plugins${path.sep}cache${path.sep}`);
+}
+
+function isCodexPluginHost(rootArg) {
+  if (process.env[CODEX_AGENTS_DISABLE_ENV] === '1') return false;
+  return isCodexHost(rootArg);
+}
+
+// Codex calls its native patch tool `apply_patch`; Claude Code exposes the
+// equivalent operation as Edit. Keep the internal gate vocabulary stable while
+// preserving the raw name for payload-specific path extraction and audit data.
+function canonicalToolName(toolName) {
+  return toolName === 'apply_patch' ? 'Edit' : toolName;
 }
 
 function parseScalarYamlValue(value) {
@@ -992,7 +1003,7 @@ async function hasActiveTaskContext(project) {
 // in plugin/agents/. PRD §2 D21 + §5 Layer 1.5.
 
 function isExecutionTool(toolName) {
-  return /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(toolName);
+  return /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(canonicalToolName(toolName));
 }
 
 // Read-only Bash whitelist. Conservative on purpose, but quote-aware: the
@@ -1492,7 +1503,7 @@ async function decomposePatternAdvisory(toolName, toolInput) {
 // ────────────────────────────────────────────────────────────────────────────
 // D29 — Resource claim gate (PRD §5 Layer 2.8)
 //
-// Edit/Write/NotebookEdit calls compute target_path then query the daemon's
+// Edit/Write/NotebookEdit/apply_patch calls compute target_path(s) then query the daemon's
 // `/scenarios/active-claims` ledger. If any holding scenario_id differs from
 // the agent's own active scenario, BLOCK with a structured JSON payload
 // (`block: 'sdi_claim_overlap'`).
@@ -1502,10 +1513,27 @@ async function decomposePatternAdvisory(toolName, toolInput) {
 // - no active claim on the calling agent → warn, allow (D26 advisory regime)
 // - no overlap detected → audit "allow", allow
 
+function targetPathsOf(toolName, toolInput) {
+  if (!toolInput || typeof toolInput !== 'object') return [];
+  if (toolName === 'apply_patch') {
+    const patch = ['patch', 'command', 'input', 'diff']
+      .map((key) => toolInput[key])
+      .find((value) => typeof value === 'string');
+    if (!patch) return [];
+    const paths = [];
+    const pathPattern = /^\*\*\* (?:Update|Add|Delete|Move to) File: (.+?)\s*$/gm;
+    for (const match of patch.matchAll(pathPattern)) {
+      const target = match[1].trim();
+      if (target && !paths.includes(target)) paths.push(target);
+    }
+    return paths;
+  }
+  const target = toolName === 'NotebookEdit' ? toolInput.notebook_path : toolInput.file_path;
+  return typeof target === 'string' && target ? [target] : [];
+}
+
 function targetPathOf(toolName, toolInput) {
-  if (!toolInput || typeof toolInput !== 'object') return null;
-  if (toolName === 'NotebookEdit') return toolInput.notebook_path || null;
-  return toolInput.file_path || null;
+  return targetPathsOf(toolName, toolInput)[0] || null;
 }
 
 async function resolveAgentScenarioId(agentId) {
@@ -1551,9 +1579,10 @@ function pathOverlaps(targetPath, claimedResourcesJson) {
 }
 
 async function claimOverlapGate(toolName, toolInput, agentId) {
-  if (!/^(Edit|Write|NotebookEdit)$/.test(toolName)) return { block: false };
-  const targetPath = targetPathOf(toolName, toolInput);
-  if (!targetPath) return { block: false };
+  const normalizedToolName = canonicalToolName(toolName);
+  if (!/^(Edit|Write|NotebookEdit)$/.test(normalizedToolName)) return { block: false };
+  const targetPaths = targetPathsOf(toolName, toolInput);
+  if (targetPaths.length === 0) return { block: false };
 
   const mine = await resolveAgentScenarioId(agentId);
   const ledger = await getJson('/scenarios/active-claims').catch(() => 'unreachable');
@@ -1571,19 +1600,27 @@ async function claimOverlapGate(toolName, toolInput, agentId) {
     if (!sid) continue;
     if (mine && sid === mine) continue;
     const cj = s.claimed_resources_json || (s.claimed_resources ? JSON.stringify(s.claimed_resources) : '[]');
-    if (pathOverlaps(targetPath, cj)) {
-      holders.push({ scenario_id: sid, claimed_resources_json: cj });
+    for (const targetPath of targetPaths) {
+      if (pathOverlaps(targetPath, cj)) {
+        holders.push({ scenario_id: sid, claimed_resources_json: cj, target_path: targetPath });
+        break;
+      }
     }
   }
   if (holders.length === 0) {
-    appendHookLog('pre_tool_use_claim_allow', { tool: toolName, file: targetPath });
+    appendHookLog('pre_tool_use_claim_allow', {
+      tool: normalizedToolName,
+      raw_tool: toolName,
+      files: targetPaths,
+    });
     return { block: false };
   }
   return {
     block: true,
     payload: {
       block: 'sdi_claim_overlap',
-      target_path: targetPath,
+      target_path: holders[0].target_path,
+      target_paths: targetPaths,
       my_scenario: mine,
       holders,
       hint: 'Wait or coordinate via /note handoff',
@@ -1898,8 +1935,9 @@ function emitBypassWarning(gate, toolName, bypass, extra) {
 //      agent_type registered in plugin/agents/ (rogue-specialist guard).
 //   2. Active-task gate — block Edit/Write/Bash without a task in_progress.
 //   3. Autonomy gate (D14/D17/D18) — consult `/autonomy_policies/resolve`
-//      for the active plan and downgrade to `permissionDecision: 'ask'`
-//      when the effective mode is L3. The communication substrate (M1~M5)
+//      for the active plan and request confirmation at L3. Claude Code uses
+//      `ask`; Codex receives a supported `deny` because Codex PreToolUse does
+//      not implement interactive hook confirmation. The communication substrate (M1~M5)
 //      stays mode-independent (D19); only the user-gate position moves.
 //
 // The bypass marker (armed via `sdi bypass arm`) unlocks every blocking gate
@@ -1908,7 +1946,8 @@ function emitBypassWarning(gate, toolName, bypass, extra) {
 async function runPreToolUse(input) {
   if (process.env[BYPASS_ENV] === '1') return;
   ensureCodexAgentsForHost(pluginRoot());
-  const toolName = (input && input.tool_name) || '';
+  const rawToolName = (input && input.tool_name) || '';
+  const toolName = canonicalToolName(rawToolName);
   const watched = /^(Edit|Write|MultiEdit|Bash|Monitor|NotebookEdit|Agent|Task|TeamCreate|SendMessage)$/.test(toolName);
   if (!watched) return;
 
@@ -2077,7 +2116,7 @@ async function runPreToolUse(input) {
   // different scenario's active claim covers the target file path. Daemon
   // unreachable / no claim / no overlap → proceed.
   if (!v05Disabled) {
-    const gate = await claimOverlapGate(toolName, (input && input.tool_input) || {}, agentId).catch(
+    const gate = await claimOverlapGate(rawToolName, (input && input.tool_input) || {}, agentId).catch(
       () => ({ block: false }),
     );
     if (gate && gate.block) {
@@ -2138,23 +2177,40 @@ async function runPreToolUse(input) {
     ).catch(() => null);
     const mode = resolved && resolved.policy && resolved.policy.mode;
     if (mode === 'L3') {
-      process.stdout.write(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'ask',
-            permissionDecisionReason:
-              `[sdi] autonomy=L3 on plan ${plan.id} — confirm before applying ${toolName}. ` +
-              `Lift with \`/autonomy set ${project.id} --scope plan --mode L4 --plan-id ${plan.id}\`.`,
-          },
-        }) + '\n',
-      );
-      appendHookLog('pre_tool_use_ask', {
-        tool: toolName,
-        task_id: activeTaskId,
-        mode,
-        plan_id: plan.id,
-      });
+      const reason =
+        `[sdi] autonomy=L3 on plan ${plan.id} — confirm before applying ${toolName}. ` +
+        `Lift with \`/autonomy set ${project.id} --scope plan --mode L4 --plan-id ${plan.id}\`.`;
+      if (isCodexHost(pluginRoot())) {
+        emitDeny(
+          `${reason} Codex PreToolUse supports deny, not interactive ask; raise the autonomy mode explicitly.`,
+        );
+        appendHookLog('pre_tool_use_denied', {
+          tool: toolName,
+          raw_tool: rawToolName,
+          task_id: activeTaskId,
+          mode,
+          plan_id: plan.id,
+          host: 'codex',
+          reason: 'unsupported-interactive-ask',
+        });
+      } else {
+        process.stdout.write(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'ask',
+              permissionDecisionReason: reason,
+            },
+          }) + '\n',
+        );
+        appendHookLog('pre_tool_use_ask', {
+          tool: toolName,
+          raw_tool: rawToolName,
+          task_id: activeTaskId,
+          mode,
+          plan_id: plan.id,
+        });
+      }
       return;
     }
     appendHookLog('pre_tool_use_allow', {
@@ -2168,31 +2224,36 @@ async function runPreToolUse(input) {
   appendHookLog('pre_tool_use_allow', { tool: toolName, task_id: activeTaskId });
 }
 
-// PostToolUse: record file paths touched by Edit/Write as evidence
+// PostToolUse: record file paths touched by Edit/Write/apply_patch as evidence
 // candidates on the active task (PRD §5.4 "변경을 Task 의 evidence 후보로
 // 자동 기록"). The durable record is the daemon's append-only `/activity`
 // feed (Phase A collab::record_activity). We mirror to the XDG-state audit
 // log too — if the daemon round-trip fails, the audit log keeps the signal.
 async function runPostToolUse(input) {
-  const toolName = (input && input.tool_name) || '';
+  const rawToolName = (input && input.tool_name) || '';
+  const toolName = canonicalToolName(rawToolName);
   if (!/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(toolName)) return;
   const activeTaskId = readActiveTaskHint();
   if (!activeTaskId) return;
   const params = (input && input.tool_input) || {};
-  const file = params.file_path || params.notebook_path || null;
-  if (!file) return;
-  appendHookLog('post_tool_use', { tool: toolName, task_id: activeTaskId, file });
+  const files = targetPathsOf(rawToolName, params);
+  if (files.length === 0) return;
+  for (const file of files) {
+    appendHookLog('post_tool_use', { tool: toolName, raw_tool: rawToolName, task_id: activeTaskId, file });
+  }
   const cwd = (input && input.cwd) || process.cwd();
   const project = await projectByCwd(cwd).catch(() => null);
   if (!project) return;
   if (projectDisabled(project)) return; // governance off — don't record activity (#20)
-  await recordActivity({
-    projectId: project.id,
-    kind: 'task.file_touched',
-    summary: `${toolName} ${file}`,
-    entityId: activeTaskId,
-    payload: { tool: toolName, file },
-  });
+  for (const file of files) {
+    await recordActivity({
+      projectId: project.id,
+      kind: 'task.file_touched',
+      summary: `${toolName} ${file}`,
+      entityId: activeTaskId,
+      payload: { tool: toolName, raw_tool: rawToolName, file },
+    });
+  }
 }
 
 // SubagentStart: bind the sub-agent run to the active task (PRD §5.4
@@ -2312,6 +2373,10 @@ module.exports = {
     installCodexAgents,
     loadAgentNamesFromDir,
     isRegisteredAgent,
+    isCodexHost,
+    canonicalToolName,
+    targetPathOf,
+    targetPathsOf,
     SDI_SKILLS,
   },
 };
