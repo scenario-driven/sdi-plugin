@@ -62,7 +62,7 @@ fn cli() -> reqwest::Client {
 async fn bootstrap(base: &str, suffix: &str) -> (String, String) {
     let c = cli();
     let key = format!("P{}", &suffix[..4]);
-    let slug = format!("p-{}", &suffix[..6].to_lowercase());
+    let slug = format!("p-{}", suffix[..6].to_lowercase());
     let proj: serde_json::Value = c
         .post(format!("{}/projects", base))
         .json(&serde_json::json!({"key": key, "name": "PT", "slug": slug}))

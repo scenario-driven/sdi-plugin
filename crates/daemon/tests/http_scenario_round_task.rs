@@ -56,7 +56,7 @@ fn c() -> reqwest::Client {
 async fn mk_plan(base: &str, suffix: &str) -> (String, String) {
     let cli = c();
     let key = format!("F{}", &suffix[..4]);
-    let slug = format!("f-{}", &suffix[..6].to_lowercase());
+    let slug = format!("f-{}", suffix[..6].to_lowercase());
     let project: serde_json::Value = cli
         .post(format!("{}/projects", base))
         .json(&serde_json::json!({"key": key, "name": "Flow", "slug": slug}))
