@@ -71,7 +71,7 @@ async fn project_crud_happy_path() {
     let c = client();
     let suffix = ulid::Ulid::new().to_string();
     let key = format!("SDI{}", &suffix[..4]);
-    let slug = format!("sdi-{}", &suffix[..6].to_lowercase());
+    let slug = format!("sdi-{}", suffix[..6].to_lowercase());
 
     // create
     let r = c
@@ -141,7 +141,7 @@ async fn plan_approve_requires_scenarios_d8() {
 
     let suffix = ulid::Ulid::new().to_string();
     let key = format!("DG{}", &suffix[..4]);
-    let slug = format!("dg-{}", &suffix[..6].to_lowercase());
+    let slug = format!("dg-{}", suffix[..6].to_lowercase());
 
     // create project
     let r = c
@@ -188,7 +188,7 @@ async fn requirement_snapshot_overwrite() {
 
     let suffix = ulid::Ulid::new().to_string();
     let key = format!("RQ{}", &suffix[..4]);
-    let slug = format!("rq-{}", &suffix[..6].to_lowercase());
+    let slug = format!("rq-{}", suffix[..6].to_lowercase());
 
     let project: serde_json::Value = c
         .post(format!("{}/projects", base))
@@ -260,7 +260,7 @@ async fn requirement_rejects_history_traces() {
 
     let suffix = ulid::Ulid::new().to_string();
     let key = format!("RS{}", &suffix[..4]);
-    let slug = format!("rs-{}", &suffix[..6].to_lowercase());
+    let slug = format!("rs-{}", suffix[..6].to_lowercase());
 
     let project: serde_json::Value = c
         .post(format!("{}/projects", base))

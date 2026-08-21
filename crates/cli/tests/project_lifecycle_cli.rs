@@ -60,7 +60,7 @@ impl Drop for Harness {
 fn make_project(h: &Harness, prefix: &str) -> String {
     let suffix = ulid::Ulid::new().to_string();
     let key = format!("{prefix}{}", &suffix[..4]);
-    let slug = format!("{}-{}", prefix.to_lowercase(), &suffix[..6].to_lowercase());
+    let slug = format!("{}-{}", prefix.to_lowercase(), suffix[..6].to_lowercase());
     let p = h.run_ok(&["project", "create", &key, "Lifecycle Test", "--slug", &slug]);
     p["id"].as_str().unwrap().to_string()
 }

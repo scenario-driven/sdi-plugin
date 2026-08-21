@@ -52,7 +52,7 @@ fn client() -> reqwest::Client {
 
 async fn create_project(base: &str, c: &reqwest::Client, key: &str) -> Value {
     let suffix = ulid::Ulid::new().to_string();
-    let slug = format!("{}-{}", key.to_lowercase(), &suffix[..6].to_lowercase());
+    let slug = format!("{}-{}", key.to_lowercase(), suffix[..6].to_lowercase());
     let r = c
         .post(format!("{base}/projects"))
         .json(&json!({

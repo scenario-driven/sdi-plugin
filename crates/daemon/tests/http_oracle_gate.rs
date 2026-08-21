@@ -73,7 +73,7 @@ async fn d34_gate_blocks_until_flow_steps_covered() {
             serde_json::json!({
                 "key": format!("O{}", &sfx[..3]),
                 "name": "Oracle",
-                "slug": format!("o-{}", &sfx[..6].to_lowercase()),
+                "slug": format!("o-{}", sfx[..6].to_lowercase()),
             }),
         )
         .await,
@@ -239,7 +239,7 @@ async fn answer_compiles_into_oracle_closing_open_marker() {
             serde_json::json!({
                 "key": format!("Q{}", &sfx[..3]),
                 "name": "QEngine",
-                "slug": format!("q-{}", &sfx[..6].to_lowercase()),
+                "slug": format!("q-{}", sfx[..6].to_lowercase()),
             }),
         )
         .await,
@@ -338,7 +338,7 @@ async fn verify_empty_oracle_is_not_vacuously_complete() {
             serde_json::json!({
                 "key": format!("E{}", &sfx[..3]),
                 "name": "Empty",
-                "slug": format!("e-{}", &sfx[..6].to_lowercase()),
+                "slug": format!("e-{}", sfx[..6].to_lowercase()),
             }),
         )
         .await,

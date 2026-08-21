@@ -8,6 +8,12 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.9.8] - 2026-08-21
+
+### Fixed
+- **CI lint compatibility.** Removed the remaining redundant `format!` argument
+  borrow in the daemon project lifecycle integration test.
+
 ## [0.9.7] - 2026-08-21
 
 ### Fixed

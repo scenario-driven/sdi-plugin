@@ -62,7 +62,7 @@ async fn mk_project(base: &str) -> String {
         .json(&serde_json::json!({
             "key": format!("C{}", &suffix[..3]),
             "name": "Chore",
-            "slug": format!("c-{}", &suffix[..6].to_lowercase()),
+            "slug": format!("c-{}", suffix[..6].to_lowercase()),
         }))
         .send()
         .await

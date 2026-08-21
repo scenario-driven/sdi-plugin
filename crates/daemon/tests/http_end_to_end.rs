@@ -71,7 +71,7 @@ async fn full_sdi_flow_end_to_end() {
     let c = cli();
     let suffix = ulid::Ulid::new().to_string();
     let key = format!("E{}", &suffix[..4]);
-    let slug = format!("e2e-{}", &suffix[..6].to_lowercase());
+    let slug = format!("e2e-{}", suffix[..6].to_lowercase());
 
     // 1. project
     let project: serde_json::Value = c
