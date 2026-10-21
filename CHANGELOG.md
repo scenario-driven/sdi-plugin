@@ -8,6 +8,53 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.10.0] - 2026-10-21
+
+### Added
+- **Verification runs.** `sdi run verify --scenario <SCN> [--input <glob>…]
+  [--tool-version name=ver…] -- <cmd…>` executes a verification command,
+  fingerprints its inputs (scenario GWT, command, tool versions, input file
+  contents), captures the report with a digest, and classifies a failure as
+  product, harness, environment or spec with a normalized failure signature.
+- **Result reuse.** `sdi run status` reports whether a passing run is still
+  `fresh` for the current workspace, `stale`, or `none`.
+- **Retry budgets keyed by failure signature.** `sdi run budget` shows the
+  counters, independent of task id or title; `sdi run release-budget` releases
+  an exhausted budget on the authority of a decision in the same plan. The
+  per-plan cap is `retry_budget_cap` (default 3) in the autonomy policy.
+- **Run-backed evidence.** `sdi task complete --evidence
+  "<SCN>=passing@run:<RUN-ID>"` is validated: the run must exist, be linked to
+  the scenario, have exited 0, and still match its input fingerprint.
+- **Fixed round baseline.** Round activation records the HEAD commit and every
+  confirmed scenario's verdict. `sdi round results` reports baseline progress
+  separately from scenarios added after activation.
+- New error codes: `RETRY_BUDGET_EXHAUSTED`, `EVIDENCE_RUN_INVALID`,
+  `EVIDENCE_STALE`, `BASELINE_LOCKED`, `HARNESS_FAILURE_UNRESOLVED`.
+- The dashboard renders the `needs_verification` verdict on round results and
+  offers only submittable verdicts in task evidence forms.
+
+### Changed
+- **Carried verdicts are revalidated.** Under strict-regression, a carried pass
+  whose run fingerprint no longer matches becomes the daemon-assigned
+  `needs_verification` verdict instead of carrying as passing.
+- **Baseline is locked once a round is active.** `sdi round baseline --set`
+  is refused with `BASELINE_LOCKED` unless `--decision <DEC-ID>` names a
+  superseding decision; `--rebase --decision <DEC-ID>` re-captures it.
+- **Delegation gate classifies shell commands by parsing them.** Read-only
+  commands (inspection, `--help`, pipelines of read-only tools) are no longer
+  denied; denies name the classifier reason and the failing segment and no
+  longer advertise an override. The autonomy confirmation gate applies only to
+  edits and mutating shell commands.
+- Agent definitions and skills use `sdi run verify` evidence, allow direct
+  execution for a single leaf task, and group gaps of one feature into one
+  task.
+
+### Migration
+- `018_verification_integrity` rebuilds `runs` (task link becomes optional;
+  plan, round, scenario, fingerprint and failure fields are added) and
+  `scenario_results` (admits `needs_verification`), and adds `retry_budgets`.
+  Existing rows are preserved.
+
 ## [0.9.8] - 2026-08-21
 
 ### Fixed
