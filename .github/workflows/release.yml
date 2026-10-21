@@ -201,9 +201,9 @@ jobs:
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          # dist branch carries the full plugin shell so Claude Code's
-          # marketplace cache resolves hooks, commands, skills, agents from
-          # the same checkout that holds the binaries. The exclude patterns
+          # dist branch carries the full plugin shell plus both marketplace
+          # manifests, so Claude Code and Codex install hooks, commands, skills,
+          # agents, binaries and the web bundle from the same checkout. The exclude patterns
           # are relative to the rsync source (plugin/), so `bin/` / `daemon/bin/`
           # (binaries come from artifacts) and `web/node_modules/` (rebuilt on
           # demand; multi-hundred-MB) are kept out. `web/dist/` IS included —
@@ -216,6 +216,7 @@ jobs:
             --exclude='web/.vite/' \
             plugin/ stage/plugin/
           cp -R .claude-plugin stage/.claude-plugin
+          cp -R .agents stage/.agents
           cp README.md LICENSE stage/ 2>/dev/null || true
           # Record exactly which tag this dist tree corresponds to.
           echo "$TAG" > stage/plugin/.sdi-version
@@ -225,6 +226,8 @@ jobs:
           find stage -name '.gitignore' -type f -delete
           # Sanity: built SPA must be present after this step.
           test -f stage/plugin/web/dist/index.html
+          test -f stage/.claude-plugin/marketplace.json
+          test -f stage/.agents/plugins/marketplace.json
           test -x stage/plugin/bin/sdi
           test -x stage/plugin/daemon/bin/sdid
 

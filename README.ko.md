@@ -132,7 +132,14 @@ sdi-plugin/
 /plugin install sdi@scenario-driven-sdi-plugin
 ```
 
-플러그인 셸은 [`plugin/`](./plugin/) 아래에 있다; 마켓플레이스는 이를 `dist` 브랜치에서 가져온다 (바이너리는 각 [GitHub Release](https://github.com/scenario-driven/sdi-plugin/releases) 에 첨부됨).
+Codex CLI:
+
+```sh
+codex plugin marketplace add scenario-driven/sdi-plugin --ref dist --sparse .agents/plugins --sparse plugin
+codex plugin add sdi@scenario-driven-sdi-plugin
+```
+
+플러그인 셸은 [`plugin/`](./plugin/) 아래에 있다. 두 마켓플레이스 모두 빌드된 바이너리와 대시보드 번들을 담은 `dist` 브랜치에서 설치한다 (바이너리는 각 [GitHub Release](https://github.com/scenario-driven/sdi-plugin/releases) 에도 첨부됨). Codex 는 마켓플레이스를 `--ref dist` 로 추가해야 `dist` 브랜치를 읽는다 — `main` 에는 소스만 있다.
 
 ---
 

@@ -72,7 +72,8 @@ exec "$dir/sdid-$triple" "$@"
 EOSH
 chmod +x "$STAGE/plugin/daemon/bin/sdid"
 
-# Copy plugin shell + marketplace manifest (source-tree, excluding binaries).
+# Copy plugin shell + Claude Code and Codex marketplace manifests (source-tree,
+# excluding binaries).
 # Exclude patterns are relative to the rsync source (plugin/). web/dist/ IS
 # included if you built it locally (the daemon's ServeDir picks it up); to
 # build it run `pnpm --dir plugin/web install && pnpm --dir plugin/web build`
@@ -85,6 +86,7 @@ rsync -a \
   --exclude='web/.vite/' \
   plugin/ "$STAGE/plugin/"
 cp -R .claude-plugin "$STAGE/.claude-plugin"
+cp -R .agents "$STAGE/.agents"
 cp README.md LICENSE "$STAGE/" 2>/dev/null || true
 echo "$TAG" > "$STAGE/plugin/.sdi-version"
 

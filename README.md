@@ -140,11 +140,11 @@ Claude Code:
 Codex CLI:
 
 ```sh
-codex plugin marketplace add scenario-driven/sdi-plugin
+codex plugin marketplace add scenario-driven/sdi-plugin --ref dist --sparse .agents/plugins --sparse plugin
 codex plugin add sdi@scenario-driven-sdi-plugin
 ```
 
-The plugin shell lives under [`plugin/`](./plugin/); the marketplace pulls it from the `dist` branch (binaries attached to each [GitHub Release](https://github.com/scenario-driven/sdi-plugin/releases)).
+The plugin shell lives under [`plugin/`](./plugin/). Both marketplaces install it from the `dist` branch, which carries the built binaries and dashboard bundle (binaries are also attached to each [GitHub Release](https://github.com/scenario-driven/sdi-plugin/releases)). Codex reads the `dist` branch only when the marketplace is added with `--ref dist`; `main` holds source only.
 
 ---
 
