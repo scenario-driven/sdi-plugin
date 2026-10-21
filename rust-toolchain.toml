@@ -1,0 +1,6 @@
+# Local builds and CI use this exact toolchain. An unpinned `stable` lets a new
+# Clippy release fail CI on code that passes locally.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
