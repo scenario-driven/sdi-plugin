@@ -23,13 +23,22 @@ lifecycle** of every SDI decision.
 
 ## Workflow
 
+The M3 stage fields (`kind`, `proposal_id`, `agent_name`) live on the daemon
+HTTP seam — `sdi decision create` records only plain accepted ADRs and has no
+flags for them:
+
+```bash
+SDI="http://127.0.0.1:$(cat ~/.cache/sdi/sdid.port)"
+```
+
+Missing port file ⇒ daemon down ⇒ stop and report `daemon-down`.
+
 1. Open the negotiation:
 
 ```bash
-sdi decision create <PLAN-ID> <SHORT-CODE> "<title>" \
-  --body "<rationale>" \
-  --kind proposal \
-  --agent-name decision-resolver
+curl -s "$SDI/decisions" -H 'content-type: application/json' -d '{
+  "plan_id":"<PLAN-ID>", "short_code":"<SHORT-CODE>", "title":"<title>",
+  "body":"<rationale>", "kind":"proposal", "agent_name":"decision-resolver"}'
 ```
 
 2. Hand off to a critic (typically `schema-architect` for architecture /
@@ -38,19 +47,19 @@ sdi decision create <PLAN-ID> <SHORT-CODE> "<title>" \
 
 ```bash
 # consensus path
-sdi decision create <PLAN-ID> <CON-SHORT-CODE> "<title>" \
-  --body "<reconciled rationale>" \
-  --kind consensus \
-  --proposal-id <PROPOSAL-DEC-ID>
+curl -s "$SDI/decisions" -H 'content-type: application/json' -d '{
+  "plan_id":"<PLAN-ID>", "short_code":"<CON-SHORT-CODE>", "title":"<title>",
+  "body":"<reconciled rationale>", "kind":"consensus",
+  "proposal_id":"<PROPOSAL-DEC-ID>", "agent_name":"decision-resolver"}'
 
 # dissensus path (escalation)
-sdi decision create <PLAN-ID> <DIS-SHORT-CODE> "<title>" \
-  --body "<unreconciled positions>" \
-  --kind dissensus \
-  --proposal-id <PROPOSAL-DEC-ID>
+curl -s "$SDI/decisions" -H 'content-type: application/json' -d '{
+  "plan_id":"<PLAN-ID>", "short_code":"<DIS-SHORT-CODE>", "title":"<title>",
+  "body":"<unreconciled positions>", "kind":"dissensus",
+  "proposal_id":"<PROPOSAL-DEC-ID>", "agent_name":"decision-resolver"}'
 ```
 
-4. Check progress with `/consensus status <PLAN-ID> --proposal-id <DEC-ID>`.
+4. Check progress with `sdi consensus status <PLAN-ID> --proposal-id <DEC-ID>`.
 
 ## Hand-offs
 

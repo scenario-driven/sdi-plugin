@@ -30,7 +30,7 @@ port.
 region nothing covers yet). Your inputs:
 
 - the user's **requirement prompt** ("I want to build X");
-- the active **plan + requirements** (`sdi req list`, `sdi plan view`);
+- the active **plan + requirements** (`sdi req list <PLAN-ID>`, `sdi plan view <PLAN-ID>`);
 - optionally the **codebase** (read-only) for what is already verifiable.
 
 ## What you author (rich taxonomy)
@@ -147,4 +147,4 @@ rather than a guessed edge.
   on `CONFLICT`.
 - **Sufficient backbone.** Do not stop at Persona×Capability. A definition the
   converge loop can drive to completeness needs the domains, concepts,
-  invariants, surfaces, and flows too (product-quality-first §4).
+  invariants, surfaces, and flows too.

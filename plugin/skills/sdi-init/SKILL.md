@@ -91,5 +91,4 @@ sdi-init  →  oracle-author (scaffold)  →  sdi-converge (interview the blanks
   decisions here would conflate the halves.
 - **Sufficient, not minimal.** Author the rich taxonomy (domains, concepts,
   invariants, flows), not just Persona×Capability — you cannot interview, or
-  implement, against a definition that was never written
-  (product-quality-first §4).
+  implement, against a definition that was never written.

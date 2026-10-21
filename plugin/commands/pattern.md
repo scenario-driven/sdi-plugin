@@ -10,7 +10,10 @@ CollaborationPattern is the **seventh first-class entity** (D22). Every work
 entity (`plan` / `requirement` / `scenario` / `task` / `decision` / `round`)
 carries `produced_via_pattern_id` so the daemon can reason about *how* a
 decision was made, not just *what* was decided. `direct` is the explicit
-solo-flow marker (D23 anti-pattern badge), **not** an escape hatch.
+marker for a single leaf task — one task, one specialist, no fan-out or
+consensus need — and the correct kind for that work. Multi-agent kinds are for
+work with ≥ 2 independent steps or perspectives; a fake shape (1-step
+workflow, 1-instance swarm) never substitutes for `direct`.
 
 ## Kinds and their D26 shape gates
 
@@ -60,7 +63,7 @@ sdi pattern create \
   --kind agents-as-tools --applies-to task --scope-id <TASK-ID> \
   --peers-json '[{"caller":"impl-coder","callee":"schema-architect"}]'
 
-# Direct — explicit solo-flow marker. Anti-pattern badge.
+# Direct — a single leaf task (one task, one specialist). L3 cap.
 sdi pattern create \
   --plan <PLAN-ID> --short-code PAT-DIRECT \
   --kind direct --applies-to task --scope-id <TASK-ID>
@@ -127,9 +130,13 @@ sdi pattern tree --plan <PLAN-ID>            # parent→child indented tree
   Add the second step or switch to `direct` (and accept the L3 cap).
 - `graph shape gate: distinct (name, stance) tuples ≥ 2 required` — sybil
   attempt (two agents with identical `(name, stance)`). Vary the stance.
-- `pattern depth N exceeds cap M` — D24 cap hit; lift via
-  `sdi autonomy set <PRJ> --scope pattern_kind --pattern-kind <K> --mode L5`
-  if the project policy allows, otherwise rethink the nesting.
+- `pattern depth N exceeds cap M` — D24 cap hit. Rethink the nesting first.
+  If the project policy allows a deeper DAG, raise `pattern_depth_cap` on a
+  `pattern_kind`-scoped autonomy policy — the `sdi autonomy set` CLI covers
+  only `global` / `plan` / `decision_kind`, so this goes through the daemon:
+  `curl -s "http://127.0.0.1:$(cat ~/.cache/sdi/sdid.port)/autonomy_policies"
+  -H 'content-type: application/json' -d '{"project_id":"<PRJ-ID>",
+  "scope_kind":"pattern_kind","pattern_kind":"<K>","mode":"L5","pattern_depth_cap":4}'`.
 - `pattern <ID> is terminal` — converged / dissensus / aborted are absorbing;
   create a new pattern row instead.
 

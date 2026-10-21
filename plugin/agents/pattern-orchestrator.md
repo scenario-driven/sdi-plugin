@@ -24,10 +24,22 @@ Decision / Round is about to be created and an active pattern with matching
 | Review-heavy decision that needs ≥ 2 distinct (name, stance) reviewers | `graph` |
 | Fan-out execution where N specialists run in parallel | `swarm` |
 | Caller agent needs unidirectional access to a specific callee specialist | `agents-as-tools` |
-| Truly solo work (one specialist, no peer review) | `direct` — explicit anti-pattern badge |
+| Single leaf task — one task, one specialist, no fan-out or consensus need | `direct` |
 
-Never pick `direct` as the default. `direct` is the marker for "I am
-knowingly accepting the L3 cap"; it should be a written choice.
+Pick by the real shape of the work, not by the autonomy ceiling you want:
+
+- `direct` is the **correct** kind for a single leaf task. One task executed by
+  one specialist, with no independent second step, no parallel fan-out and no
+  decision that needs ≥ 2 distinct reviewers, *is* direct work. Choose it
+  explicitly and accept the L3 cap that comes with it.
+- Multi-agent kinds (`workflow` / `graph` / `swarm` / `agents-as-tools`) are for
+  work that actually has **≥ 2 independent steps or perspectives** — distinct
+  hand-offs, distinct reviewer stances, or genuinely parallel units.
+- Never manufacture a shape to dodge `direct`: a 1-step workflow, a
+  1-instance swarm, a graph whose second reviewer adds no independent
+  perspective, or a peer registration nobody calls is a fake pattern. It
+  misreports how the work was produced and unlocks autonomy the work did not
+  earn; `pattern-critic` blocks it.
 
 ## Nesting (D24)
 
@@ -53,6 +65,7 @@ fighting the cap.
    - `swarm` → `--fan-out-json '["agent", …]'` with `len ≥ 2`.
    - `agents-as-tools` → `--peers-json '[{caller, callee}, …]'` with
      `len ≥ 1`.
+   - `direct` → no manifest.
 4. Materialise the pattern:
 
 ```bash
@@ -60,7 +73,7 @@ sdi pattern create \
   --plan <PLAN-ID> --short-code <PAT-CODE> \
   --kind <KIND> --applies-to <ENTITY> --scope-id <ENTITY-ID> \
   [--parent <PARENT-PAT-ID>] \
-  [--steps-from-file ./steps.json | --reviewers-from-file …]
+  [--steps-from-file ./steps.json | --reviewers-from-file … | --fan-out-from-file … | --peers-from-file …]
 ```
 
 5. Hand off to `pattern-critic` for a shape audit *before* requesting
@@ -98,6 +111,10 @@ pattern id for step 7's binding.
 
 ## Invariants
 
+- **Read once.** Read your handoff (comment, agent-note, or brief) once at step
+  start and work from the reference it gives; take CLI signatures from the
+  injected session context or `sdi task brief`, with `--help` at most once per
+  session (read-once rule: `sdi-overview` → "Read once: handoffs and CLI signatures").
 - Every new work entity creation must carry `produced_via_pattern_id` or
   accept the daemon's auto-`direct` fallback. Propose patterns *before* the
   work entity is materialised so the orchestrator can pass the id.

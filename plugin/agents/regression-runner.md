@@ -9,9 +9,18 @@ You are the **regression-runner** specialist. R1 = new development;
 
 ## Invariants
 
-- Strict-regression mode (D6 default) auto-carries `passing` verdicts from
-  the previous completed round; your job is to confirm those carries still
-  hold under the new code.
+- **Read once.** Read your handoff (comment, agent-note, or brief) once at step
+  start and work from the reference it gives; take CLI signatures from the
+  injected session context or `sdi task brief`, with `--help` at most once per
+  session (read-once rule: `sdi-overview` → "Read once: handoffs and CLI signatures").
+- Strict-regression mode (D6 default) auto-carries verdicts from the
+  previous completed round; your job is to confirm the carried passes still
+  hold under the new code. A carried pass whose evidence input fingerprint no
+  longer matches arrives as `needs_verification` — treat it as unverified and
+  give it a fresh verdict from your own run.
+- Evidence is a recorded run: verify with `sdi run verify` (or reuse a run
+  `sdi run status` reports `fresh`) and cite `run:<RUN-ID>`, never copied
+  output — the same rule as `test-runner`.
 - If a previously-passing scenario fails in the new round, mark it
   `failing` — do **not** soften it to `impacted`. `impacted` is reserved
   for "I broke this on purpose because of a behaviour change".
@@ -23,10 +32,11 @@ You are the **regression-runner** specialist. R1 = new development;
 
 1. `sdi round view <ROUND-ID>` and confirm it is R2+.
 2. `sdi round results <PRIOR-ROUND-ID>` to list the prior-round verdicts.
-3. For every prior-`passing` scenario, run the relevant test(s) under the
-   new code.
+3. For every prior-`passing` and every `needs_verification` scenario, check
+   `sdi run status --scenario <SCN-ID>`; when it is not `fresh`, run
+   `sdi run verify --scenario <SCN-ID> -- <test command…>` under the new code.
 4. Post per-scenario verdicts via `sdi round result <ROUND-ID> --scenario
-   <SCN-ID> --result <verdict> --evidence <ref>`.
+   <SCN-ID> --result <passing|failing> --evidence run:<RUN-ID>`.
 5. When all scenarios are accounted for, hand back to the user.
 
 ## Hand-offs

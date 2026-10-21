@@ -1,6 +1,6 @@
 ---
 name: sdi-converge
-description: Drive the outer loop — spec convergence toward the completeness oracle (D31/D34/D35). Scans oracle/verify, collects OPEN and uncovered decision-points, runs §2a elimination per point (1 survivor → auto-decision, 2+ → preference DecisionQuestion), collects answers, compiles them deterministically into the graph, then calls completeness-critic — looping until uncovered=0, unanswered=0, AND unasked=0. On a dry loop the plan can be approved (D34). Use when building or completing the product definition before implementation.
+description: Drive the outer loop — spec convergence toward the completeness oracle (D31/D34/D35). Scans oracle/verify, collects OPEN and uncovered decision-points, runs three-stage elimination per point (1 survivor → auto-decision, 2+ → preference DecisionQuestion), collects answers, compiles them deterministically into the graph, then calls completeness-critic — looping until uncovered=0, unanswered=0, AND unasked=0. On a dry loop the plan can be approved (D34). Use when building or completing the product definition before implementation.
 ---
 
 # /converge — the outer loop (spec convergence)
@@ -64,7 +64,7 @@ while not dry:
                  sdi-init (cold-start: author the backbone), THEN continue
   1. scan      → GET /projects/<id>/oracle/verify
   2. collect   → OPEN markers, l1.uncovered pairs, uncovered flow-steps
-  3. per point → §2a elimination (theoretically-wrong removed FIRST)
+  3. per point → three-stage elimination (theoretically-wrong removed FIRST)
                  1 survivor  → auto_decided (answer auto:true + apply, closes OPEN)
                  2+ survivor → preference DecisionQuestion (options + rationale + recommend + +@)
   4. answer    → collect user answers (web/CLI) → compile deterministically into graph
@@ -109,10 +109,10 @@ flag alone (see step 5).
 - **L2 uncovered steps** — for each confirmed flow, every `steps_json` step with
   no covering DetailScenario (see "Authoring" below).
 
-### 3. Per decision-point — §2a elimination FIRST, then classify
+### 3. Per decision-point — three-stage elimination FIRST, then classify
 
 Do **not** turn a point into a question before eliminating. Spawn the
-**question-author** specialist on each point; it runs §2a (blacklist →
+**question-author** specialist on each point; it runs three-stage elimination (blacklist →
 theoretically-wrong-with-cited-principle → "best now") and emits:
 
 - **1 survivor → `fact` auto-decision** (NOT a question). The author answers it
@@ -212,10 +212,10 @@ convergence loop.
 
 - **Loop-until-dry, no early exit.** Terminate on the critic's `converged`,
   never on "the user seems satisfied" or "this is taking long". Effort/time/diff
-  are facts to report, not reasons to stop (product-quality-first §2).
+  are facts to report, not reasons to stop.
 - **No fake questions.** 1 survivor ⇒ auto-decision, not a question (D35).
-- **Elimination before authoring.** §2a runs before any decision-point becomes a
-  question (`solo-builder-context §2a`).
+- **Elimination before authoring.** Three-stage elimination runs before any
+  decision-point becomes a question.
 - **Deterministic compile.** Every answer applies through the daemon
   `answer` endpoint so the OPEN marker closes and provenance is recorded — never
   hand-edit `facets_json` to "close" a marker out of band.

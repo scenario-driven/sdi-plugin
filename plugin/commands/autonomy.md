@@ -34,6 +34,19 @@ sdi autonomy set <PRJ-ID> --scope decision_kind --mode L4 --decision-kind archit
 D17 invariant: `decision_kind` ∈ {architecture, schema, naming-canonical}
 **must** be at most L4. L5 on a forced kind is rejected with HTTP 403.
 
+### Retry budget cap
+
+```bash
+sdi autonomy set <PRJ-ID> --scope plan --mode L4 --plan-id <PLAN-ID> --retry-budget-cap 5
+```
+
+`--retry-budget-cap <N>` (1–100, default 3) is the number of failures per
+scenario + failure signature before the daemon refuses further starts and
+completions (`RETRY_BUDGET_EXHAUSTED`). It is stored on the policy row being
+set, and an omitted flag leaves the current cap unchanged. How the budget is
+counted and released: `sdi-impl-loop` → "Fan out, verdict, classify, retry
+budget, escalate".
+
 ## Inspect
 
 ```bash

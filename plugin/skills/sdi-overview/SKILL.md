@@ -52,9 +52,13 @@ register project
       └─ … verify new + regression
 ```
 
-**Tasks** require **evidence** on the `done` transition. The evidence is the
-durable artifact that proves the scenario passed — file:line, test transcript,
-run id, anything checkable. Use the `sdi-evidence` skill at done-time.
+**Tasks** require **evidence** to complete (`sdi task complete <TASK-ID>
+--evidence <SCN-ID>=<verdict>@<ref>`, one row per linked scenario). Test
+evidence is a recorded run: `sdi run verify --scenario <SCN-ID> -- <cmd…>`,
+then `<SCN-ID>=passing@run:<RUN-ID>`, which the daemon validates (run exists,
+linked, exited 0, fingerprint fresh). Free-text refs (file:line, URL, decision
+id) are only for non-test evidence. Use the `sdi-evidence` skill at completion
+time.
 
 ---
 
@@ -94,17 +98,27 @@ Full normalisation procedure lives in the `sdi-scenario` skill.
 
 ## Strict-regression default (R2+)
 
-Round R2 and later default to `mode=strict-regression`. Under this mode, every
-prior verdict carries into the new round automatically; failing scenarios stay
-failed until you re-record a passing verdict. This is the auto-regression
-property that distinguishes SDI from TDD/BDD.
+Round R2 and later default to `mode=strict-regression`. Under this mode, the
+latest completed round's verdicts carry into the new round automatically;
+failing scenarios stay failed until you re-record a passing verdict. This is
+the auto-regression property that distinguishes SDI from TDD/BDD.
 
-Two alternative modes exist:
-- `additive` — skips carry-over (only new scenarios verify in this round).
-  Surface the consequence: prior regressions go untracked this round.
-- `disruption` — used after a confirmed change to existing scenarios; requires
-  human review before activation (the daemon flips the plan to needs-review
-  and returns `DISRUPTION_PENDING` until the review is resolved).
+A carried `passing` is only as good as its run: the daemon recomputes the
+evidencing run's input fingerprint against the workspace at carry time, and a
+pass whose run is stale becomes `needs_verification` (daemon-assigned, never
+submittable) —
+it is neither kept as `passing` nor turned into `failing`; it joins the
+needs-verification set and a fresh run decides it.
+
+The one alternative mode:
+- `forward-only` (alias `additive`) — skips carry-over (only new scenarios
+  verify in this round). Surface the consequence: prior regressions go
+  untracked this round.
+
+Disruption review is not a mode. A change that impacts existing scenarios
+opens a disruption review; the daemon returns `DISRUPTION_PENDING` on round
+activation until a human resolves it, under any mode and any `--disruption`
+policy.
 
 Default to strict-regression. Switch only on explicit user request. Round
 lifecycle, in-flight-task policy, and task auto-decomposition at activation
@@ -150,36 +164,54 @@ place, no version history in the body. The history surface is the
 
 ✓ Correct pattern:
 ```
-/decide supersede <OLD-DECISION-ID> <NEW-CODE> "Switch from X to Y"
+sdi decision supersede <OLD-DECISION-ID> \
+  --plan-id <PLAN-ID> --short-code <NEW-CODE> --title "Switch from X to Y" \
   --body "Context… Decision: Y. Consequences: …"
 ```
 
 ---
 
-## MCP tools (rag-scope only)
+## Read once: handoffs and CLI signatures
 
-The MCP server (`sdi mcp`) exposes 9 tools. The 4 **read** tools force
+This is the canonical rule; every other skill and agent points here.
+
+- **Handoffs.** Read the handoff payload (comment, agent-note, or
+  `sdi task brief`) once, when the step starts, then work from the reference it
+  gave you (receipt or run reference). Do not poll or re-read it each step;
+  re-read only when the referenced artifact changes, for example when a new
+  receipt id is announced.
+- **CLI signatures.** Take command signatures from the context the
+  SessionStart hook injects, or from `sdi task brief <TASK-ID>`, which already
+  carries the evidence format. If a signature is still unknown, read its
+  `--help` at most once per session and reuse the result — never run `--help`
+  again before each command.
+
+---
+
+## MCP tools
+
+The MCP server (`sdi mcp`) exposes 11 tools. Knowledge reads force
 `scope=rag` at the URL layer — they never leak `reference` or `archive`
-content to the LLM. Use them when planning, never for current task state
-(that lives behind HTTP + slash commands):
+content to the LLM. The 6 **read** tools are for planning and orientation:
 
 | Tool | Use it for |
 |---|---|
 | `search_knowledge` | Search rag-scoped knowledge entries. |
-| `search_scenarios` | Find scenarios by keyword across the active plan. |
+| `search_scenarios` | Find scenarios by keyword within one plan. |
 | `get_plan_context` | Composite snapshot: plan + scenarios + tasks-in-flight + decisions. |
 | `get_recent_decisions` | Tail the ADR log. |
+| `get_autonomy_state` | Autonomy policy rows + circuit-breaker state for a project. |
+| `list_agent_notes` | Agent-note blackboard: pending hand-offs or notes at an anchor. |
 
-The 5 **write** tools are LLM-callable mutations that mirror the slash
-commands:
+The 5 **write** tools are LLM-callable mutations that mirror the CLI:
 
 | Tool | Mirrors |
 |---|---|
-| `add_scenario` | `/scenario create` |
-| `add_requirement` | `/req create` |
-| `add_decision` | `/decide create` |
-| `update_task_evidence` | task `done` evidence record (see `sdi-evidence`) |
-| `start_round` | `/round activate` |
+| `add_scenario` | `sdi scenario create` |
+| `add_requirement` | `sdi req create` |
+| `add_decision` | `sdi decision create` |
+| `update_task_evidence` | `sdi task complete --evidence …` (completes the task; see `sdi-evidence`) |
+| `start_round` | `sdi round activate` |
 
 Tools appear in the MCP client under the server name `sdi` (some clients
 display them as `sdi__search_knowledge`, others namespace differently — match
@@ -194,9 +226,14 @@ prefer MCP when you are driving (decompose, verify, record).
 |---|---|---|
 | `GWT_EMPTY` | A scenario clause was empty. | Fill the missing clause; resubmit. See `sdi-scenario`. |
 | `SCENARIOS_REQUIRED` | Plan has zero confirmed scenarios. | `/scenario create … --confirmed`. |
-| `EVIDENCE_REQUIRED` | Task `done` transition arrived without evidence. | Re-send with a checkable evidence ref. See `sdi-evidence`. |
-| `DISRUPTION_PENDING` | A disruption review is open on the plan. | Resolve via `/disruption resolve` before activating a round. See `sdi-round`. |
+| `EVIDENCE_REQUIRED` | `sdi task complete` arrived without evidence. | Re-send with a checkable evidence ref per linked scenario. See `sdi-evidence`. |
+| `DISRUPTION_PENDING` | A disruption review is pending on the plan. | A human resolves it on the daemon HTTP seam before the round activates. See `sdi-round` → "Disruption review gate". |
+| `RETRY_BUDGET_EXHAUSTED` | The same failure signature hit the retry cap for a scenario (task renames / re-creates do not reset it). | Stop retrying and escalate; release only with `sdi run release-budget --scenario <SCN-ID> --decision <DEC-ID>`. See `sdi-impl-loop`. |
+| `HARNESS_FAILURE_UNRESOLVED` | Round complete refused: a scenario's latest run failed for harness/environment reasons (runner crash, missing toolchain, timeout, signal, OOM). | Repair and record a passing `sdi run verify`; harness failures never consume the product retry budget. See `sdi-impl-loop`. |
+| `EVIDENCE_RUN_INVALID` | A `run:` evidence ref does not exist, is not linked to the scenario, has not finished, or its outcome contradicts the verdict. | Cite the run that verified the scenario with the verdict it supports. See `sdi-evidence`. |
+| `EVIDENCE_STALE` | The cited run's input fingerprint no longer matches the workspace. | Re-run `sdi run verify` against the current inputs and cite the new run. See `sdi-evidence`. |
+| `BASELINE_LOCKED` | The active round's baseline was overwritten or rebased without a superseding decision. | `sdi round baseline <ROUND-ID> … --decision <DEC-ID>` after recording that decision. See `sdi-round`. |
 | `INVALID_TRANSITION` | Lifecycle rule violated (e.g. only one active round per plan). | Complete the predecessor first. |
-| `MODE_REJECTED_AT_R1` | `strict-regression` is rejected at R1 (nothing to carry). | Use `additive` or omit `--mode` at R1. |
+| `INVALID_ROUND_MODE` | `--mode` was not `strict-regression` / `forward-only` (alias `additive`). | Use a valid mode; omit `--mode` at R1, where there is nothing to carry. |
 | `NOT_FOUND` | Entity does not exist. | Verify the id; register the cwd via `sdi project create <KEY> "<name>" --cwd "$(pwd)"` if it's a project lookup. |
 | `PATH_INVARIANT_VIOLATION` | User data resolves under `~/.claude/plugins/`. | Fix XDG paths; see `sdi doctor`. |
