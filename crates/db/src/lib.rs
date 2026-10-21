@@ -13,6 +13,7 @@ pub mod paths;
 pub mod pool;
 pub mod repo;
 pub mod schema;
+pub mod workspace;
 
 pub use paths::{Paths, ENV_ALLOW_OVERLAP, ENV_HOME_OVERRIDE};
 pub use pool::{open_pool, tx, Pool, PooledConn};

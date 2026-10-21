@@ -244,10 +244,17 @@ impl Tool for UpdateTaskEvidence {
             name: "update_task_evidence",
             description: "Complete a task with evidence (PRD §6.6 EVIDENCE_REQUIRED). Each \
                  evidence entry maps one scenario to a verdict (`passing` / `failing` \
-                 / `impacted` / `retired`) and an evidence reference (file:line, URL, \
-                 log path). Verdict vocab matches the daemon's ScenarioResult — no \
+                 / `impacted` / `retired`) and an evidence reference. Prefer \
+                 `run:<RUN-ID>` from `sdi run verify --scenario <SCN> -- <cmd>`: the \
+                 daemon validates the run exists, is linked to the scenario, exited 0 \
+                 for `passing`, and that its input fingerprint is still current \
+                 (EVIDENCE_RUN_INVALID / EVIDENCE_STALE otherwise). Free text (file:line, \
+                 URL, log path) is accepted but unverified and is refused when the \
+                 scenario's retry budget is exhausted (RETRY_BUDGET_EXHAUSTED → open a \
+                 decision). Verdict vocab matches the daemon's ScenarioResult — no \
                  `skipped`; use `impacted` for a scenario the change broke or \
-                 `retired` for one superseded by a new flow.",
+                 `retired` for one superseded by a new flow (`needs_verification` is \
+                 daemon-assigned and cannot be submitted).",
             input_schema: json!({
                 "type": "object",
                 "required": ["task_id", "scenarios"],

@@ -21,7 +21,7 @@ use sdi_core::ids::Id;
 const COLS: &str = "id, project_id, plan_id, scope_kind, decision_kind, pattern_kind, mode, \
                     l5_threshold, pattern_depth_cap, plan_single_session_lock, \
                     external_surface, timeout_ms, forced, \
-                    set_at, set_by, reason, created_at, updated_at";
+                    set_at, set_by, reason, created_at, updated_at, retry_budget_cap";
 
 fn row_to_policy(row: &Row<'_>) -> rusqlite::Result<AutonomyPolicy> {
     let bool_col = |idx: usize| -> rusqlite::Result<bool> {
@@ -47,6 +47,7 @@ fn row_to_policy(row: &Row<'_>) -> rusqlite::Result<AutonomyPolicy> {
         reason: s_opt(row, 15)?,
         created_at: ts(row, 16)?,
         updated_at: ts(row, 17)?,
+        retry_budget_cap: row.get::<_, i64>(18)? as i32,
     })
 }
 
@@ -68,10 +69,16 @@ pub fn upsert(conn: &Connection, policy: &AutonomyPolicy) -> DomainResult<()> {
         policy.decision_kind.as_deref(),
         policy.mode,
     )?;
+    if !(1..=100).contains(&policy.retry_budget_cap) {
+        return Err(DomainError::Validation(format!(
+            "retry_budget_cap must be within 1..=100, got {}",
+            policy.retry_budget_cap
+        )));
+    }
     conn.execute(
         &format!(
             "INSERT INTO autonomy_policies({COLS}) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19) \
              ON CONFLICT(project_id, scope_kind, \
                          COALESCE(plan_id,''), \
                          COALESCE(decision_kind,''), \
@@ -79,6 +86,7 @@ pub fn upsert(conn: &Connection, policy: &AutonomyPolicy) -> DomainResult<()> {
              DO UPDATE SET mode = excluded.mode, \
                            l5_threshold = excluded.l5_threshold, \
                            pattern_depth_cap = excluded.pattern_depth_cap, \
+                           retry_budget_cap = excluded.retry_budget_cap, \
                            plan_single_session_lock = excluded.plan_single_session_lock, \
                            external_surface = excluded.external_surface, \
                            timeout_ms = excluded.timeout_ms, \
@@ -107,6 +115,7 @@ pub fn upsert(conn: &Connection, policy: &AutonomyPolicy) -> DomainResult<()> {
             policy.reason,
             fmt_ts(policy.created_at),
             fmt_ts(policy.updated_at),
+            policy.retry_budget_cap as i64,
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -291,6 +300,7 @@ mod tests {
             mode,
             l5_threshold: 5,
             pattern_depth_cap: 3,
+            retry_budget_cap: 3,
             plan_single_session_lock: false,
             external_surface: false,
             timeout_ms: None,
@@ -352,6 +362,7 @@ mod tests {
             mode: AutonomyMode::L5,
             l5_threshold: 5,
             pattern_depth_cap: 3,
+            retry_budget_cap: 3,
             plan_single_session_lock: false,
             external_surface: false,
             timeout_ms: None,
@@ -380,6 +391,7 @@ mod tests {
             mode: AutonomyMode::L4,
             l5_threshold: 7,
             pattern_depth_cap: 5,
+            retry_budget_cap: 3,
             plan_single_session_lock: true,
             external_surface: true,
             timeout_ms: Some(30_000),
@@ -422,6 +434,7 @@ mod tests {
                 mode: AutonomyMode::L5,
                 l5_threshold: 5,
                 pattern_depth_cap: 3,
+                retry_budget_cap: 3,
                 plan_single_session_lock: false,
                 external_surface: false,
                 timeout_ms: None,
@@ -447,6 +460,7 @@ mod tests {
                 mode: AutonomyMode::L4,
                 l5_threshold: 5,
                 pattern_depth_cap: 3,
+                retry_budget_cap: 3,
                 plan_single_session_lock: false,
                 external_surface: false,
                 timeout_ms: None,

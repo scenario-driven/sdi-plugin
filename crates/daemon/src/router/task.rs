@@ -2,8 +2,11 @@
 //! bound to a round and (optionally) parent scenarios/requirements. The
 //! `done` transition is the only one that requires evidence (PRD §6.6) and is
 //! double-gated: domain `Task::check_transition` + repo `complete_with_evidence`.
+//! Evidence of the form `SCN=verdict@run:<RUN-ID>` is validated strictly
+//! against the recorded run; starts and completions respect the scenario's
+//! retry budget (`RETRY_BUDGET_EXHAUSTED`).
 
-use crate::router::provenance;
+use crate::router::{provenance, verification};
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
 use axum::{
@@ -15,6 +18,7 @@ use sdi_core::error::DomainError;
 use sdi_core::ids::{now, Id, IdKind};
 use sdi_core::task::{Task, TaskEvidence, TaskStatus};
 use sdi_db::map_sqlite_err;
+use sdi_db::repo::retry_budget as budget_repo;
 use sdi_db::repo::round as round_repo;
 use sdi_db::repo::scenario as scenario_repo;
 use sdi_db::repo::task as repo;
@@ -131,6 +135,12 @@ async fn set_status(
     let tid = Id::from(id);
     let task = repo::get(&conn, &tid)?;
     task.check_transition(target, None)?;
+    // Retry budget: starting work on a scenario whose failure budget is
+    // exhausted is the retry loop the budget stops. Keyed by scenario +
+    // signature, so a freshly created / renamed task is refused just the same.
+    if target == TaskStatus::InProgress {
+        budget_repo::ensure_available(&conn, &task.plan_id, &task.parent_scenario_ids)?;
+    }
     repo::set_status(&conn, &tid, target)?;
     let fresh = repo::get(&conn, &tid)?;
     state.publish(EventEnvelope {
@@ -191,6 +201,27 @@ async fn complete(
             .into());
         }
         se.scenario_id = resolved;
+    }
+
+    // Run-ref evidence (`run:<RUN-ID>`) is validated strictly — existence,
+    // scenario + plan link, exit status vs verdict, fingerprint freshness.
+    // Free-text refs keep their legacy meaning. Then the retry budget: on an
+    // exhausted scenario only a fresh, run-proven pass may complete.
+    for se in &evidence.scenarios {
+        let proven = verification::check_evidence_ref(
+            &conn,
+            &task.plan_id,
+            &se.scenario_id,
+            se.result,
+            Some(se.evidence_ref.as_str()),
+        )?;
+        verification::ensure_completion_budget(
+            &conn,
+            &task.plan_id,
+            &se.scenario_id,
+            se.result,
+            proven,
+        )?;
     }
 
     // #13 — atomic completion. The done transition, the evidence write, and the

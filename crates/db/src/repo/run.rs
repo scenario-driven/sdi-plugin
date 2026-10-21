@@ -3,10 +3,12 @@
 
 use crate::map_sqlite_err;
 use crate::repo::{fmt_ts, parsed, s, s_opt, ts, ts_opt};
+use crate::workspace;
 use rusqlite::{params, Connection, Row};
 use sdi_core::error::{DomainError, DomainResult};
 use sdi_core::ids::{now, Id};
 use sdi_core::run::{RelationKind, Run, RunResult, TaskLease, TaskRelation};
+use sdi_core::verification::{contract_hash, FailureClass, SpawnError};
 use std::collections::{HashSet, VecDeque};
 
 // ---------------------------------------------------------------------------
@@ -14,38 +16,79 @@ use std::collections::{HashSet, VecDeque};
 // ---------------------------------------------------------------------------
 
 const RUN_COLS: &str =
-    "id, task_id, actor, session_id, started_at, finished_at, result, notes, payload";
+    "id, task_id, actor, session_id, started_at, finished_at, result, notes, payload, \
+     plan_id, round_id, scenario_id, command_json, cwd, input_globs_json, tool_versions_json, \
+     input_fingerprint, exit_code, signal, timed_out, spawn_error, report_path, report_sha256, \
+     failure_class, failure_signature, error_class, failing_test, duration_ms";
+
+fn conv_err(idx: usize, e: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
+}
+
+fn parse_opt<T>(row: &Row<'_>, idx: usize) -> rusqlite::Result<Option<T>>
+where
+    T: std::str::FromStr,
+    T::Err: std::error::Error + Send + Sync + 'static,
+{
+    s_opt(row, idx)?
+        .map(|raw| raw.parse::<T>())
+        .transpose()
+        .map_err(|e| conv_err(idx, e))
+}
 
 fn row_to_run(row: &Row<'_>) -> rusqlite::Result<Run> {
     let payload_raw: String = row.get(8)?;
+    let command: Option<Vec<String>> = s_opt(row, 12)?
+        .map(|raw| serde_json::from_str(&raw))
+        .transpose()
+        .map_err(|e| conv_err(12, e))?;
+    let globs_raw: String = row.get(14)?;
+    let tools_raw: String = row.get(15)?;
     Ok(Run {
         id: Id::from(s(row, 0)?),
-        task_id: Id::from(s(row, 1)?),
+        task_id: s_opt(row, 1)?.map(Id::from),
         actor: s(row, 2)?,
         session_id: s_opt(row, 3)?,
         started_at: ts(row, 4)?,
         finished_at: ts_opt(row, 5)?,
-        result: s_opt(row, 6)?
-            .map(|raw| raw.parse::<RunResult>())
-            .transpose()
-            .map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    6,
-                    rusqlite::types::Type::Text,
-                    Box::new(e),
-                )
-            })?,
+        result: parse_opt::<RunResult>(row, 6)?,
         notes: s_opt(row, 7)?,
         payload: serde_json::from_str(&payload_raw).unwrap_or(serde_json::Value::Null),
+        plan_id: s_opt(row, 9)?.map(Id::from),
+        round_id: s_opt(row, 10)?.map(Id::from),
+        scenario_id: s_opt(row, 11)?.map(Id::from),
+        command,
+        cwd: s_opt(row, 13)?,
+        input_globs: serde_json::from_str(&globs_raw).map_err(|e| conv_err(14, e))?,
+        tool_versions: serde_json::from_str(&tools_raw).map_err(|e| conv_err(15, e))?,
+        input_fingerprint: s_opt(row, 16)?,
+        exit_code: row.get::<_, Option<i64>>(17)?.map(|v| v as i32),
+        signal: row.get::<_, Option<i64>>(18)?.map(|v| v as i32),
+        timed_out: row.get::<_, i64>(19)? != 0,
+        spawn_error: parse_opt::<SpawnError>(row, 20)?,
+        report_path: s_opt(row, 21)?,
+        report_sha256: s_opt(row, 22)?,
+        failure_class: parse_opt::<FailureClass>(row, 23)?,
+        failure_signature: s_opt(row, 24)?,
+        error_class: s_opt(row, 25)?,
+        failing_test: s_opt(row, 26)?,
+        duration_ms: row.get::<_, Option<i64>>(27)?,
     })
 }
 
 pub fn insert_run(conn: &Connection, run: &Run) -> DomainResult<()> {
+    let command = run
+        .command
+        .as_ref()
+        .map(|c| serde_json::to_string(c).unwrap_or_else(|_| "[]".into()));
     conn.execute(
-        &format!("INSERT INTO runs({RUN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+        &format!(
+            "INSERT INTO runs({RUN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,\
+             ?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)"
+        ),
         params![
             run.id.as_str(),
-            run.task_id.as_str(),
+            run.task_id.as_ref().map(|i| i.as_str().to_string()),
             run.actor,
             run.session_id,
             fmt_ts(run.started_at),
@@ -53,6 +96,25 @@ pub fn insert_run(conn: &Connection, run: &Run) -> DomainResult<()> {
             run.result.map(|r| r.to_string()),
             run.notes,
             serde_json::to_string(&run.payload).unwrap_or_else(|_| "{}".into()),
+            run.plan_id.as_ref().map(|i| i.as_str().to_string()),
+            run.round_id.as_ref().map(|i| i.as_str().to_string()),
+            run.scenario_id.as_ref().map(|i| i.as_str().to_string()),
+            command,
+            run.cwd,
+            serde_json::to_string(&run.input_globs).unwrap_or_else(|_| "[]".into()),
+            serde_json::to_string(&run.tool_versions).unwrap_or_else(|_| "{}".into()),
+            run.input_fingerprint,
+            run.exit_code.map(i64::from),
+            run.signal.map(i64::from),
+            run.timed_out as i64,
+            run.spawn_error.map(|e| e.to_string()),
+            run.report_path,
+            run.report_sha256,
+            run.failure_class.map(|c| c.to_string()),
+            run.failure_signature,
+            run.error_class,
+            run.failing_test,
+            run.duration_ms,
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -71,15 +133,13 @@ pub fn get_run(conn: &Connection, id: &Id) -> DomainResult<Run> {
     })
 }
 
-pub fn list_runs_by_task(conn: &Connection, task_id: &Id) -> DomainResult<Vec<Run>> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {RUN_COLS} FROM runs WHERE task_id = ?1 ORDER BY started_at"
-        ))
-        .map_err(map_sqlite_err)?;
-    let rows = stmt
-        .query_map([task_id.as_str()], row_to_run)
-        .map_err(map_sqlite_err)?;
+fn query_runs(
+    conn: &Connection,
+    sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> DomainResult<Vec<Run>> {
+    let mut stmt = conn.prepare(sql).map_err(map_sqlite_err)?;
+    let rows = stmt.query_map(params, row_to_run).map_err(map_sqlite_err)?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r.map_err(map_sqlite_err)?);
@@ -87,20 +147,60 @@ pub fn list_runs_by_task(conn: &Connection, task_id: &Id) -> DomainResult<Vec<Ru
     Ok(out)
 }
 
+pub fn list_runs_by_task(conn: &Connection, task_id: &Id) -> DomainResult<Vec<Run>> {
+    query_runs(
+        conn,
+        &format!("SELECT {RUN_COLS} FROM runs WHERE task_id = ?1 ORDER BY started_at"),
+        &[&task_id.as_str()],
+    )
+}
+
 pub fn list_runs_by_session(conn: &Connection, session_id: &str) -> DomainResult<Vec<Run>> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {RUN_COLS} FROM runs WHERE session_id = ?1 ORDER BY started_at"
-        ))
-        .map_err(map_sqlite_err)?;
-    let rows = stmt
-        .query_map([session_id], row_to_run)
-        .map_err(map_sqlite_err)?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(map_sqlite_err)?);
-    }
-    Ok(out)
+    query_runs(
+        conn,
+        &format!("SELECT {RUN_COLS} FROM runs WHERE session_id = ?1 ORDER BY started_at"),
+        &[&session_id],
+    )
+}
+
+pub fn list_runs_by_scenario(conn: &Connection, scenario_id: &Id) -> DomainResult<Vec<Run>> {
+    query_runs(
+        conn,
+        &format!("SELECT {RUN_COLS} FROM runs WHERE scenario_id = ?1 ORDER BY started_at"),
+        &[&scenario_id.as_str()],
+    )
+}
+
+/// Finished clean passes for a scenario, newest first.
+pub fn passing_runs_for_scenario(conn: &Connection, scenario_id: &Id) -> DomainResult<Vec<Run>> {
+    query_runs(
+        conn,
+        &format!(
+            "SELECT {RUN_COLS} FROM runs WHERE scenario_id = ?1 AND finished_at IS NOT NULL \
+             AND result = 'success' AND exit_code = 0 AND input_fingerprint IS NOT NULL \
+             ORDER BY finished_at DESC"
+        ),
+        &[&scenario_id.as_str()],
+    )
+}
+
+/// The most recent finished run per scenario within a round.
+pub fn latest_finished_per_scenario_in_round(
+    conn: &Connection,
+    round_id: &Id,
+) -> DomainResult<Vec<Run>> {
+    query_runs(
+        conn,
+        &format!(
+            "SELECT {RUN_COLS} FROM runs r WHERE r.round_id = ?1 AND r.scenario_id IS NOT NULL \
+               AND r.finished_at IS NOT NULL \
+               AND r.finished_at = (SELECT MAX(r2.finished_at) FROM runs r2 \
+                                    WHERE r2.round_id = r.round_id AND r2.scenario_id = r.scenario_id \
+                                      AND r2.finished_at IS NOT NULL) \
+             ORDER BY r.scenario_id"
+        ),
+        &[&round_id.as_str()],
+    )
 }
 
 pub fn finish_run(
@@ -122,6 +222,131 @@ pub fn finish_run(
         )));
     }
     Ok(())
+}
+
+/// Terminal state of a structured (verification) run.
+#[derive(Debug, Clone, Default)]
+pub struct RunFinish {
+    pub result: Option<RunResult>,
+    pub notes: Option<String>,
+    pub exit_code: Option<i32>,
+    pub signal: Option<i32>,
+    pub timed_out: bool,
+    pub spawn_error: Option<SpawnError>,
+    pub report_sha256: Option<String>,
+    pub failure_class: Option<FailureClass>,
+    pub failure_signature: Option<String>,
+    pub error_class: Option<String>,
+    pub failing_test: Option<String>,
+    pub duration_ms: Option<i64>,
+}
+
+pub fn finish_structured(conn: &Connection, id: &Id, f: &RunFinish) -> DomainResult<()> {
+    let result = f
+        .result
+        .ok_or_else(|| DomainError::Validation("run finish requires a result".into()))?;
+    let n = conn
+        .execute(
+            "UPDATE runs SET finished_at = ?1, result = ?2, notes = COALESCE(?3, notes), \
+                 exit_code = ?4, signal = ?5, timed_out = ?6, spawn_error = ?7, \
+                 report_sha256 = ?8, failure_class = ?9, failure_signature = ?10, \
+                 error_class = ?11, failing_test = ?12, duration_ms = ?13 \
+             WHERE id = ?14 AND finished_at IS NULL",
+            params![
+                fmt_ts(now()),
+                result.to_string(),
+                f.notes,
+                f.exit_code.map(i64::from),
+                f.signal.map(i64::from),
+                f.timed_out as i64,
+                f.spawn_error.map(|e| e.to_string()),
+                f.report_sha256,
+                f.failure_class.map(|c| c.to_string()),
+                f.failure_signature,
+                f.error_class,
+                f.failing_test,
+                f.duration_ms,
+                id.as_str(),
+            ],
+        )
+        .map_err(map_sqlite_err)?;
+    if n == 0 {
+        return Err(DomainError::Validation(format!(
+            "run {id} not found or already finished"
+        )));
+    }
+    Ok(())
+}
+
+/// The scenario contract digest a run's fingerprint is computed against.
+/// A run without a scenario binds to the empty contract.
+pub fn contract_for_scenario(conn: &Connection, scenario_id: Option<&Id>) -> DomainResult<String> {
+    match scenario_id {
+        Some(sid) => {
+            let scn = crate::repo::scenario::get(conn, sid)?;
+            Ok(contract_hash(
+                &scn.given,
+                &scn.when_clause,
+                &scn.then_clause,
+            ))
+        }
+        None => Ok(String::new()),
+    }
+}
+
+/// Recompute a run's input fingerprint against the workspace as it is now.
+/// Errors (cwd gone, no longer a git work tree, scenario deleted) mean the
+/// recorded fingerprint cannot be confirmed — callers treat that as stale.
+pub fn current_fingerprint(conn: &Connection, run: &Run) -> DomainResult<String> {
+    let cwd = run
+        .cwd
+        .as_deref()
+        .ok_or_else(|| DomainError::Validation(format!("run {} recorded no cwd", run.id)))?;
+    let command = run.command.clone().unwrap_or_default();
+    let contract = contract_for_scenario(conn, run.scenario_id.as_ref())?;
+    workspace::fingerprint(
+        std::path::Path::new(cwd),
+        &run.input_globs,
+        &command,
+        &run.tool_versions,
+        &contract,
+    )
+}
+
+/// Freshness of a recorded fingerprint against the current workspace.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Freshness {
+    pub recorded: Option<String>,
+    pub current: Option<String>,
+    pub fresh: bool,
+    /// Why freshness could not be confirmed (recompute error / no fingerprint).
+    pub reason: Option<String>,
+}
+
+pub fn freshness(conn: &Connection, run: &Run) -> Freshness {
+    let Some(recorded) = run.input_fingerprint.clone() else {
+        return Freshness {
+            recorded: None,
+            current: None,
+            fresh: false,
+            reason: Some("run recorded no input fingerprint".into()),
+        };
+    };
+    match current_fingerprint(conn, run) {
+        Ok(current) => Freshness {
+            fresh: current == recorded,
+            reason: (current != recorded)
+                .then(|| "inputs changed since the run (fingerprint mismatch)".to_string()),
+            recorded: Some(recorded),
+            current: Some(current),
+        },
+        Err(e) => Freshness {
+            recorded: Some(recorded),
+            current: None,
+            fresh: false,
+            reason: Some(e.to_string()),
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------

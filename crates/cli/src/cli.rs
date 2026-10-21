@@ -85,7 +85,9 @@ pub enum Cmd {
     /// Question: open / answered Q&A, anchored to a plan.
     #[command(subcommand)]
     Question(QuestionCmd),
-    /// Run: a single execution attempt of a task (`start` → `finish`).
+    /// Run: one execution attempt (`start` → `finish`), and scenario
+    /// verification runs (`verify` / `status`) with input fingerprints,
+    /// failure classification and the retry budget.
     #[command(subcommand)]
     Run(RunCmd),
     /// Token and tool-call accounting plus preflight cost estimate.
@@ -643,7 +645,11 @@ pub enum RoundCmd {
         /// Round id.
         id: String,
     },
-    /// Activate a round. From R2 onwards, prior verdicts auto-carry under strict-regression mode.
+    /// Activate a round. From R2 onwards, prior verdicts auto-carry under
+    /// strict-regression mode; a carried pass evidenced by `run:<RUN-ID>` whose
+    /// input fingerprint no longer matches becomes `needs_verification`.
+    /// Records the fixed baseline: the current HEAD commit + every confirmed
+    /// scenario's verdict.
     Activate {
         /// Round id.
         id: String,
@@ -653,19 +659,29 @@ pub enum RoundCmd {
         /// Round id.
         id: String,
     },
-    /// Get or set the round's verification baseline (#15). With `--set`, store
-    /// the JSON blob; without it, print the current baseline. Surfaced in
-    /// `sdi task brief` so a regression shows as a count delta.
+    /// Get or set the round's verification baseline. Without flags, print it
+    /// (caller blob + activation commit/snapshot). `--set` stores the caller
+    /// blob (surfaced in `sdi task brief`); once the round is active an existing
+    /// baseline is locked (`BASELINE_LOCKED`) and only `--decision <DEC-ID>`
+    /// (a superseding decision of the plan) may replace it. `--rebase
+    /// --decision <DEC-ID>` re-captures the activation snapshot.
     Baseline {
         /// Round id.
         id: String,
         /// JSON baseline to store (e.g. '{"green_tests":412}'). Omit to read.
         #[arg(long)]
         set: Option<String>,
+        /// Superseding decision id authorizing an overwrite / rebase.
+        #[arg(long)]
+        decision: Option<String>,
+        /// Re-capture the activation snapshot (commit + verdicts); needs --decision.
+        #[arg(long, default_value_t = false)]
+        rebase: bool,
     },
     /// Record a per-scenario verdict.
     Result(RoundResultArgs),
-    /// List all results for a round.
+    /// List all results for a round, with fixed-baseline progress: baseline
+    /// scenarios and scenarios added after activation are reported separately.
     Results {
         /// Round id.
         id: String,
@@ -707,7 +723,8 @@ pub struct RoundResultArgs {
     /// Result: `passing` | `failing` | `impacted` | `retired`.
     #[arg(long)]
     pub result: String,
-    /// Evidence reference (file:line, log path, etc.).
+    /// Evidence reference: `run:<RUN-ID>` (validated strictly) or free text
+    /// (file:line, log path, etc.).
     #[arg(long)]
     pub evidence: Option<String>,
 }
@@ -733,7 +750,8 @@ pub enum TaskCmd {
         /// Task id.
         id: String,
     },
-    /// Pick up a task (`todo` → `in_progress`).
+    /// Pick up a task (`todo` → `in_progress`). Refused with
+    /// `RETRY_BUDGET_EXHAUSTED` when a parent scenario's retry budget is spent.
     Start {
         /// Task id.
         id: String,
@@ -877,7 +895,12 @@ pub struct TaskCreateArgs {
 pub struct TaskCompleteArgs {
     /// Task id.
     pub id: String,
-    /// Per-scenario verdict (repeatable). Format: `SCN-…=passing@file:line`.
+    /// Per-scenario verdict (repeatable). Format: `SCN=verdict@ref`. Prefer
+    /// `SCN=passing@run:<RUN-ID>` (from `sdi run verify`): the daemon checks the
+    /// run exists, is linked to the scenario, exited 0 for a pass, and its
+    /// input fingerprint is still current (`EVIDENCE_RUN_INVALID` /
+    /// `EVIDENCE_STALE` otherwise). Free text (`SCN=passing@file:line`) is
+    /// accepted but unverified, and is refused on an exhausted retry budget.
     #[arg(long = "evidence", required = true)]
     pub evidence: Vec<String>,
     /// Optional summary line.
@@ -1179,7 +1202,32 @@ pub struct QuestionAnswerArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum RunCmd {
-    /// Start a run against a task.
+    /// Execute a verification command for a scenario and record the run.
+    ///
+    /// The daemon fingerprints the inputs (scenario GWT + command + declared
+    /// tool versions + content of every input path), the command's combined
+    /// output is captured to a report under the daemon state dir (and echoed
+    /// to stderr), and the exit status is classified: exit 126/127, missing
+    /// binary, timeout, signal or OOM → harness/environment; a nonzero exit
+    /// with test assertions → product. Failures are counted against the retry
+    /// budget of their failure signature. Prints the run JSON on stdout and
+    /// exits with the command's status. Evidence it with
+    /// `sdi task complete <TASK> --evidence "<SCN>=passing@run:<RUN-ID>"`.
+    ///
+    /// Example: `sdi run verify --scenario SC-3 --input 'src/**' --tool-version node=20.11 -- npm test`
+    Verify(RunVerifyArgs),
+    /// Reuse check: is there a passing run whose input fingerprint matches the
+    /// workspace now? `status` = fresh (reuse allowed) | stale | none. With a
+    /// trailing `-- <cmd…>`, checks that exact command + inputs instead of the
+    /// latest passing run.
+    Status(RunStatusArgs),
+    /// Show retry budgets (failure counters keyed by scenario + failure
+    /// signature, independent of task id/title) for a plan or scenario.
+    Budget(RunBudgetArgs),
+    /// Release an exhausted retry budget on the authority of a decision in
+    /// the same plan (the escalation `RETRY_BUDGET_EXHAUSTED` asks for).
+    ReleaseBudget(RunReleaseBudgetArgs),
+    /// Start a run against a task (and optionally bind it to a scenario).
     Start(RunStartArgs),
     /// Mark a run terminal.
     Finish(RunFinishArgs),
@@ -1188,14 +1236,107 @@ pub enum RunCmd {
         /// Run id.
         id: String,
     },
-    /// List runs by task or session.
+    /// List runs by task, session or scenario.
     List(RunListArgs),
 }
 
 #[derive(Debug, Args)]
+pub struct RunVerifyArgs {
+    /// Scenario id or plan-scoped short code the run verifies.
+    #[arg(long)]
+    pub scenario: String,
+    /// Plan id (needed to resolve a short code outside the project cwd).
+    #[arg(long)]
+    pub plan: Option<String>,
+    /// Task the run executes under (default: the single in-progress task that
+    /// owns the scenario, if any).
+    #[arg(long)]
+    pub task: Option<String>,
+    /// Input path glob relative to the cwd (repeatable). Default: the whole
+    /// repository — any tracked or untracked change makes a pass stale.
+    #[arg(long = "input")]
+    pub inputs: Vec<String>,
+    /// Tool version that is part of the fingerprint, `name=version` (repeatable).
+    #[arg(long = "tool-version")]
+    pub tool_versions: Vec<String>,
+    /// Kill the command after this many seconds (classified as harness/timeout).
+    #[arg(long)]
+    pub timeout: Option<u64>,
+    /// Override the classified failure class: product | harness | environment | spec.
+    #[arg(long)]
+    pub failure_class: Option<String>,
+    /// Caller-provided failure signature (stored as `caller:<value>`).
+    #[arg(long)]
+    pub signature: Option<String>,
+    /// Working directory to run in (default: current directory).
+    #[arg(long)]
+    pub cwd: Option<String>,
+    /// Actor label (default: `agent`).
+    #[arg(long, default_value = "agent")]
+    pub actor: String,
+    /// Optional session id to group related runs.
+    #[arg(long)]
+    pub session_id: Option<String>,
+    /// The command to execute, after `--`.
+    #[arg(last = true, required = true, num_args = 1..)]
+    pub command: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RunStatusArgs {
+    /// Scenario id or plan-scoped short code.
+    #[arg(long)]
+    pub scenario: String,
+    /// Plan id (needed to resolve a short code outside the project cwd).
+    #[arg(long)]
+    pub plan: Option<String>,
+    /// Input glob (repeatable) — used with a trailing command.
+    #[arg(long = "input")]
+    pub inputs: Vec<String>,
+    /// Tool version `name=version` (repeatable) — used with a trailing command.
+    #[arg(long = "tool-version")]
+    pub tool_versions: Vec<String>,
+    /// Working directory (default: current directory).
+    #[arg(long)]
+    pub cwd: Option<String>,
+    /// Optional candidate command after `--`.
+    #[arg(last = true)]
+    pub command: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RunBudgetArgs {
+    /// Scenario id or short code (default: every scenario of the plan).
+    #[arg(long)]
+    pub scenario: Option<String>,
+    /// Plan id (default: the active plan of the current directory's project).
+    #[arg(long)]
+    pub plan: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RunReleaseBudgetArgs {
+    /// Scenario id or short code.
+    #[arg(long)]
+    pub scenario: String,
+    /// Decision (same plan, not superseded) that authorizes the release.
+    #[arg(long)]
+    pub decision: String,
+    /// Release only this failure signature (default: all of the scenario's).
+    #[arg(long)]
+    pub signature: Option<String>,
+    /// Plan id (needed to resolve a short code outside the project cwd).
+    #[arg(long)]
+    pub plan: Option<String>,
+}
+
+#[derive(Debug, Args)]
 pub struct RunStartArgs {
-    /// Task id this run targets.
-    pub task_id: String,
+    /// Task id this run targets (optional with `--scenario`).
+    pub task_id: Option<String>,
+    /// Scenario id or short code this run verifies.
+    #[arg(long)]
+    pub scenario: Option<String>,
     /// Actor label (default: `agent`).
     #[arg(long, default_value = "agent")]
     pub actor: String,
@@ -1208,9 +1349,22 @@ pub struct RunStartArgs {
 pub struct RunFinishArgs {
     /// Run id.
     pub id: String,
-    /// Terminal result: `success` | `failure` | `aborted`.
+    /// Terminal result: `success` | `failure` | `aborted`. Optional with
+    /// `--exit-code` (derived from it).
     #[arg(long)]
-    pub result: String,
+    pub result: Option<String>,
+    /// Process exit code; enables classification + retry-budget booking.
+    #[arg(long)]
+    pub exit_code: Option<i32>,
+    /// Terminating signal number.
+    #[arg(long)]
+    pub signal: Option<i32>,
+    /// Failure class override: product | harness | environment | spec.
+    #[arg(long)]
+    pub failure_class: Option<String>,
+    /// Caller-provided failure signature.
+    #[arg(long)]
+    pub signature: Option<String>,
     /// Optional free-form notes.
     #[arg(long)]
     pub notes: Option<String>,
@@ -1224,6 +1378,9 @@ pub struct RunListArgs {
     /// Filter by session id.
     #[arg(long)]
     pub session_id: Option<String>,
+    /// Filter by scenario id.
+    #[arg(long)]
+    pub scenario_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1461,6 +1618,10 @@ pub struct AutonomySetArgs {
     /// Free-form rationale recorded with the policy.
     #[arg(long)]
     pub reason: Option<String>,
+    /// Retry budget cap (1..=100, default 3): failures per scenario + failure
+    /// signature before starts/completions are refused. Omitted → unchanged.
+    #[arg(long)]
+    pub retry_budget_cap: Option<i32>,
 }
 
 #[derive(Debug, Args)]

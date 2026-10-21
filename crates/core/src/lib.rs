@@ -21,6 +21,7 @@ pub mod ssot;
 pub mod task;
 pub mod usage;
 pub mod user_flow;
+pub mod verification;
 
 pub use agent_note::{AgentNote, AgentNoteId, AgentNoteKind, AgentNoteScope};
 pub use agent_spec::{AgentSpec, AgentSpecId, AgentSpecStatus, STOCK_AGENTS, STOCK_META_AGENTS};
@@ -50,3 +51,7 @@ pub use scenario::{Scenario, ScenarioId, ScenarioResult, ScenarioStatus};
 pub use ssot::{Confidence, OpenMarker, SsotEdge, SsotEdgeId, SsotNode, SsotNodeId};
 pub use task::{ScenarioEvidence, Task, TaskEvidence, TaskId, TaskStatus};
 pub use user_flow::{FlowStatus, FlowStep, UserFlow, UserFlowId};
+pub use verification::{
+    Classification, EvidenceRef, ExecOutcome, FailureClass, RetryBudget, SpawnError,
+    DEFAULT_RETRY_BUDGET_CAP,
+};

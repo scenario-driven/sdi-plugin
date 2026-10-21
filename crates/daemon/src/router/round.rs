@@ -3,11 +3,14 @@
 //! - POST `/rounds/:id/activate` — planning → active. If a prior completed
 //!   round exists and `mode = strict-regression`, auto-populates
 //!   `scenario_results` (D6).
-//! - POST `/rounds/:id/complete` — active → completed
+//! - POST `/rounds/:id/activate` also records the fixed baseline (activation
+//!   commit + verdict snapshot) and re-checks carried run-ref passes.
+//! - POST `/rounds/:id/complete` — active → completed; refused while a
+//!   scenario's latest run in the round is a harness/environment failure
 //! - POST `/rounds/:id/results` — upsert one scenario verdict
 //!   (passing|failing|impacted|retired)
 
-use crate::router::provenance;
+use crate::router::{provenance, verification};
 use crate::state::{AppState, EventEnvelope};
 use crate::ApiResult;
 use axum::{
@@ -21,8 +24,11 @@ use sdi_core::round::{DisruptionPolicy, InFlightPolicy, Round, RoundMode, RoundS
 use sdi_core::scenario::ScenarioResult;
 use sdi_core::task::TaskStatus;
 use sdi_db::repo::disruption as disruption_repo;
+use sdi_db::repo::plan as plan_repo;
+use sdi_db::repo::project as project_repo;
 use sdi_db::repo::round as repo;
 use sdi_db::repo::task as task_repo;
+use sdi_db::workspace;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::str::FromStr;
@@ -117,7 +123,28 @@ async fn get_one(State(state): State<AppState>, Path(id): Path<String>) -> ApiRe
     Ok(Json(json!(repo::get(&conn, &Id::from(id))?)))
 }
 
-async fn activate(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+#[derive(Debug, Default, Deserialize)]
+struct ActivateBody {
+    /// HEAD commit of the caller's work tree, recorded as the baseline
+    /// commit. Omitted → the daemon reads HEAD of the project's first
+    /// anchored cwd that is a git work tree.
+    #[serde(default)]
+    commit: Option<String>,
+}
+
+fn project_head_commit(conn: &rusqlite::Connection, plan_id: &Id) -> Option<String> {
+    let plan = plan_repo::get(conn, plan_id).ok()?;
+    let cwds = project_repo::list_cwds(conn, &plan.project_id).ok()?;
+    cwds.iter()
+        .find_map(|c| workspace::head_commit(std::path::Path::new(c)))
+}
+
+async fn activate(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Option<Json<ActivateBody>>,
+) -> ApiResult<Json<Value>> {
+    let body = body.map(|Json(b)| b).unwrap_or_default();
     let conn = state.conn()?;
     let rid = Id::from(id);
     let round = repo::get(&conn, &rid)?;
@@ -177,21 +204,33 @@ async fn activate(State(state): State<AppState>, Path(id): Path<String>) -> ApiR
         if let Some(prev) = repo::latest_completed_for_plan(&conn, &round.plan_id)? {
             repo::carry_over_results(&conn, &round, &prev.id)?
         } else {
-            0
+            repo::CarryOver::default()
         }
     } else {
-        0
+        repo::CarryOver::default()
     };
     let activated_at = now();
     repo::set_status(&conn, &rid, RoundStatus::Active, Some(activated_at), None)?;
     let fresh = repo::get(&conn, &rid)?;
+    // Fixed baseline: the activation commit + every confirmed scenario's
+    // verdict right after carry-over. It fixes the denominator of baseline
+    // progress; scenarios confirmed later report separately.
+    let commit = body
+        .commit
+        .filter(|c| !c.trim().is_empty())
+        .or_else(|| project_head_commit(&conn, &round.plan_id));
+    let baseline = repo::record_activation_baseline(&conn, &fresh, commit.as_deref())?;
     // #7 — the daemon emits the scenarios needing fresh verification (new +
     // carried-failing/blocked) so the LLM decomposes from a daemon-computed
     // set instead of re-deriving it from a full scenario list.
     let needs_verification = repo::scenarios_needing_verification(&conn, &rid, &round.plan_id)?;
     let payload = json!({
         "round": fresh,
-        "carried_results": carried,
+        "carried_results": carried.carried,
+        // Carried passes whose run-ref fingerprint no longer matches the
+        // workspace — demoted to needs_verification (ref + note kept).
+        "stale_carried": carried.demoted,
+        "baseline": baseline,
         "scenarios_needing_verification": needs_verification,
         "in_flight": {
             "policy": round.in_flight_policy.to_string(),
@@ -212,6 +251,7 @@ async fn complete(State(state): State<AppState>, Path(id): Path<String>) -> ApiR
     let rid = Id::from(id);
     let round = repo::get(&conn, &rid)?;
     round.check_can_complete()?;
+    verification::ensure_no_unresolved_infrastructure_failures(&conn, &rid)?;
     let completed_at = now();
     repo::set_status(
         &conn,
@@ -247,10 +287,20 @@ async fn post_result(
     let conn = state.conn()?;
     let rid = Id::from(id);
     let verdict = ScenarioResult::from_str(&b.result)?;
+    let round = repo::get(&conn, &rid)?;
+    let sid = Id::from(&b.scenario_id[..]);
+    let proven = verification::check_evidence_ref(
+        &conn,
+        &round.plan_id,
+        &sid,
+        verdict,
+        b.evidence_ref.as_deref(),
+    )?;
+    verification::ensure_completion_budget(&conn, &round.plan_id, &sid, verdict, proven)?;
     repo::upsert_result(
         &conn,
         &rid,
-        &Id::from(&b.scenario_id[..]),
+        &sid,
         verdict,
         b.note.as_deref(),
         b.evidence_ref.as_deref(),
@@ -272,7 +322,9 @@ async fn list_results(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
-    let rows = repo::list_results(&conn, &Id::from(id))?;
+    let rid = Id::from(id);
+    let round = repo::get(&conn, &rid)?;
+    let rows = repo::list_results(&conn, &rid)?;
     let payload: Vec<_> = rows
         .into_iter()
         .map(|r| {
@@ -286,7 +338,11 @@ async fn list_results(
             })
         })
         .collect();
-    Ok(Json(json!({ "results": payload })))
+    // Fixed-baseline progress: baseline scenarios and scenarios added after
+    // activation are reported separately (new scenarios never inflate the
+    // baseline completion %).
+    let progress = repo::baseline_progress(&conn, &round)?;
+    Ok(Json(json!({ "results": payload, "progress": progress })))
 }
 
 async fn active_for_plan(

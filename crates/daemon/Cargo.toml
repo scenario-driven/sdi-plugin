@@ -19,6 +19,9 @@ path = "src/lib.rs"
 [dependencies]
 sdi-core = { workspace = true }
 sdi-db = { workspace = true }
+# Named only for `&rusqlite::Connection` in shared gate signatures (the pool
+# and transactions both deref to it); queries stay in sdi-db.
+rusqlite = { workspace = true }
 
 tokio = { workspace = true }
 tokio-stream = { workspace = true }

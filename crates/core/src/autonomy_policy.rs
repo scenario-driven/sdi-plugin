@@ -173,6 +173,11 @@ pub struct AutonomyPolicy {
     /// → step swarm → swarm step agents-as-tools".
     #[serde(default = "default_pattern_depth_cap")]
     pub pattern_depth_cap: i32,
+    /// Retry budget cap per (plan, scenario, failure class, signature): the
+    /// failure count at which further task starts/completions for that
+    /// scenario are refused with `RETRY_BUDGET_EXHAUSTED` (1..=100, default 3).
+    #[serde(default = "default_retry_budget_cap")]
+    pub retry_budget_cap: i32,
     /// D29 — when true, a plan's N active scenarios may only claim from one
     /// session at a time. Default false (multi-session collaboration natural).
     #[serde(default)]
@@ -201,6 +206,10 @@ fn default_l5_threshold() -> i32 {
 
 fn default_pattern_depth_cap() -> i32 {
     3
+}
+
+fn default_retry_budget_cap() -> i32 {
+    crate::verification::DEFAULT_RETRY_BUDGET_CAP
 }
 
 impl AutonomyPolicy {

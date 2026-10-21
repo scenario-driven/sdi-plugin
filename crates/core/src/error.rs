@@ -61,6 +61,33 @@ pub enum DomainError {
 
     #[error("circuit breaker active — all autonomy modes demoted to L3; explicit user approval required")]
     CircuitBreakerActive,
+
+    // ─── verification-run integrity ──────────────────────────────────────
+    #[error(
+        "retry budget exhausted for scenario {scenario}: {count}/{cap} {class} failure(s) with signature {signature}. \
+         Stop retrying — escalate by opening a decision (`sdi decision create <PLAN> <SHORT> \"<title>\" --body …`) \
+         and release the budget with `sdi run release-budget --scenario {scenario} --decision <DEC-ID>`. \
+         Cancelling, recreating or renaming tasks does not reset it"
+    )]
+    RetryBudgetExhausted {
+        scenario: String,
+        class: String,
+        signature: String,
+        count: i64,
+        cap: i64,
+    },
+
+    #[error("run evidence rejected: {0}")]
+    EvidenceRunInvalid(String),
+
+    #[error("run evidence is stale: {0}")]
+    EvidenceStale(String),
+
+    #[error("round baseline is locked: {0}")]
+    BaselineLocked(String),
+
+    #[error("round completion blocked by unresolved harness/environment failures: {0}")]
+    HarnessFailureUnresolved(String),
 }
 
 pub type DomainResult<T> = Result<T, DomainError>;
@@ -85,6 +112,11 @@ impl DomainError {
             DomainError::DissensusEscalated => "DISSENSUS_ESCALATED",
             DomainError::AutonomyGateBlocked { .. } => "AUTONOMY_GATE_BLOCKED",
             DomainError::CircuitBreakerActive => "CIRCUIT_BREAKER_ACTIVE",
+            DomainError::RetryBudgetExhausted { .. } => "RETRY_BUDGET_EXHAUSTED",
+            DomainError::EvidenceRunInvalid(_) => "EVIDENCE_RUN_INVALID",
+            DomainError::EvidenceStale(_) => "EVIDENCE_STALE",
+            DomainError::BaselineLocked(_) => "BASELINE_LOCKED",
+            DomainError::HarnessFailureUnresolved(_) => "HARNESS_FAILURE_UNRESOLVED",
         }
     }
 
@@ -95,6 +127,10 @@ impl DomainError {
             DomainError::DissensusEscalated => 409,
             DomainError::AutonomyGateBlocked { .. } => 403,
             DomainError::CircuitBreakerActive => 423,
+            DomainError::RetryBudgetExhausted { .. } => 409,
+            DomainError::EvidenceStale(_) => 409,
+            DomainError::BaselineLocked(_) => 409,
+            DomainError::HarnessFailureUnresolved(_) => 409,
             _ => 400,
         }
     }

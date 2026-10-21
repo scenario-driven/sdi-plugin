@@ -27,6 +27,7 @@ pub mod round;
 pub mod run;
 pub mod scenario;
 pub mod task;
+pub mod verification;
 
 pub fn build(state: AppState) -> Router {
     let api = Router::new()
@@ -43,6 +44,7 @@ pub fn build(state: AppState) -> Router {
         .merge(disruption::router())
         .merge(collab::router())
         .merge(run::router())
+        .merge(verification::router())
         .merge(aggregate::router())
         .merge(autonomy_policy::router())
         .merge(agent_note::router())

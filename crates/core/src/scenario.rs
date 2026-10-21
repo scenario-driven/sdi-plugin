@@ -44,6 +44,18 @@ pub enum ScenarioResult {
     Failing,
     Impacted,
     Retired,
+    /// Daemon-assigned: a pass carried into this round whose run-ref input
+    /// fingerprint no longer matches the workspace. It counts as unverified
+    /// until a fresh run evidences it. Callers cannot submit it.
+    #[serde(rename = "needs_verification")]
+    NeedsVerification,
+}
+
+impl ScenarioResult {
+    /// Verdicts only the daemon may assign (rejected on caller write paths).
+    pub fn is_daemon_assigned(self) -> bool {
+        matches!(self, ScenarioResult::NeedsVerification)
+    }
 }
 
 impl fmt::Display for ScenarioResult {
@@ -53,6 +65,7 @@ impl fmt::Display for ScenarioResult {
             ScenarioResult::Failing => "failing",
             ScenarioResult::Impacted => "impacted",
             ScenarioResult::Retired => "retired",
+            ScenarioResult::NeedsVerification => "needs_verification",
         })
     }
 }
@@ -65,6 +78,7 @@ impl FromStr for ScenarioResult {
             "failing" => Ok(ScenarioResult::Failing),
             "impacted" => Ok(ScenarioResult::Impacted),
             "retired" => Ok(ScenarioResult::Retired),
+            "needs_verification" => Ok(ScenarioResult::NeedsVerification),
             other => Err(DomainError::Validation(format!(
                 "unknown scenario result: {other}"
             ))),

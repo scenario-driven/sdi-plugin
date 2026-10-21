@@ -63,6 +63,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         MIGRATION_016_ORACLE_LAYER,
     ),
     (17, "v2 plan↔flow targeting", MIGRATION_017_PLAN_FLOWS),
+    (
+        18,
+        "verification integrity: run fingerprints, retry budgets, fixed baseline",
+        MIGRATION_018_VERIFICATION_INTEGRITY,
+    ),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -86,6 +91,8 @@ const MIGRATION_014_ROUND_BASELINE: &str = include_str!("./migrations/014_round_
 const MIGRATION_015_TASK_KIND: &str = include_str!("./migrations/015_task_kind.sql");
 const MIGRATION_016_ORACLE_LAYER: &str = include_str!("./migrations/016_oracle_layer.sql");
 const MIGRATION_017_PLAN_FLOWS: &str = include_str!("./migrations/017_plan_flows.sql");
+const MIGRATION_018_VERIFICATION_INTEGRITY: &str =
+    include_str!("./migrations/018_verification_integrity.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {
@@ -209,6 +216,7 @@ mod tests {
             "agent_notes",
             "agent_specs",
             "collaboration_patterns",
+            "retry_budgets",
         ] {
             assert!(tables.iter().any(|t| t == must), "missing table {must}");
         }
@@ -325,6 +333,118 @@ mod tests {
                 );
             }
         }
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    // 018 upgrade path: a pre-018 database with a task run and a scenario
+    // verdict must keep both rows; legacy runs gain plan/round links through
+    // their task, and the widened verdict CHECK admits needs_verification.
+    #[test]
+    fn migration_018_preserves_runs_and_results() {
+        let tmp = std::env::temp_dir().join(format!(
+            "sdi-schema-018-{}-{}.db",
+            std::process::id(),
+            ulid::Ulid::new()
+        ));
+        let _ = std::fs::remove_file(&tmp);
+        let pool = open_pool(&tmp).unwrap();
+        let conn = pool.get().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (\
+                version    INTEGER PRIMARY KEY,\
+                label      TEXT NOT NULL,\
+                applied_at TEXT NOT NULL DEFAULT (datetime('now'))\
+            );",
+        )
+        .unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        for (version, label, sql) in MIGRATIONS.iter().filter(|(v, _, _)| *v <= 17) {
+            conn.execute_batch(sql).unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations(version, label) VALUES (?1, ?2)",
+                rusqlite::params![version, label],
+            )
+            .unwrap();
+        }
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        let ts = "2026-01-01T00:00:00.000Z";
+        conn.execute_batch(&format!(
+            "INSERT INTO projects(id, key, name, slug, created_at, updated_at)
+                 VALUES ('PROJ-A', 'TSA', 'a', 'sa', '{ts}', '{ts}');
+             INSERT INTO plans(id, project_id, short_code, title, status, created_at, updated_at)
+                 VALUES ('PLAN-A', 'PROJ-A', 'P-1', 'plan a', 'active', '{ts}', '{ts}');
+             INSERT INTO scenarios(id, plan_id, short_code, given, when_clause, then_clause, created_at, updated_at)
+                 VALUES ('SCN-A1', 'PLAN-A', 'SC-1', 'g', 'w', 't', '{ts}', '{ts}');
+             INSERT INTO rounds(id, plan_id, short_code, round_number, status, created_at, updated_at)
+                 VALUES ('ROUND-A1', 'PLAN-A', 'R-1', 1, 'active', '{ts}', '{ts}');
+             INSERT INTO tasks(id, round_id, plan_id, short_code, description, created_at, updated_at)
+                 VALUES ('TASK-A1', 'ROUND-A1', 'PLAN-A', 'T-1', 'x', '{ts}', '{ts}');
+             INSERT INTO runs(id, task_id, actor, started_at, finished_at, result, payload)
+                 VALUES ('RUN-A1', 'TASK-A1', 'agent', '{ts}', '{ts}', 'failure', '{{}}');
+             INSERT INTO usage_records(id, project_id, run_id, created_at)
+                 VALUES ('USE-A1', 'PROJ-A', 'RUN-A1', '{ts}');
+             INSERT INTO scenario_results(round_id, scenario_id, result, note, evidence_ref, updated_at)
+                 VALUES ('ROUND-A1', 'SCN-A1', 'passing', 'n', 'src/a.rs:1', '{ts}');"
+        ))
+        .unwrap();
+
+        ensure_schema(&conn).unwrap();
+
+        let (task, plan, round): (String, String, String) = conn
+            .query_row(
+                "SELECT task_id, plan_id, round_id FROM runs WHERE id = 'RUN-A1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (task.as_str(), plan.as_str(), round.as_str()),
+            ("TASK-A1", "PLAN-A", "ROUND-A1")
+        );
+        let (verdict, evidence): (String, String) = conn
+            .query_row(
+                "SELECT result, evidence_ref FROM scenario_results WHERE scenario_id = 'SCN-A1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (verdict.as_str(), evidence.as_str()),
+            ("passing", "src/a.rs:1")
+        );
+        conn.execute(
+            "UPDATE scenario_results SET result = 'needs_verification' WHERE scenario_id = 'SCN-A1'",
+            [],
+        )
+        .unwrap();
+        // usage_records still references the rebuilt runs table.
+        let usage_run: String = conn
+            .query_row(
+                "SELECT run_id FROM usage_records WHERE id = 'USE-A1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(usage_run, "RUN-A1");
+        let fk_violation = conn
+            .query_row("PRAGMA foreign_key_check", [], |r| r.get::<_, String>(0))
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })
+            .unwrap();
+        assert_eq!(fk_violation, None);
+        let cap: i64 = conn
+            .query_row(
+                "SELECT dflt_value FROM pragma_table_info('autonomy_policies') WHERE name = 'retry_budget_cap'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(cap, 3);
         let _ = std::fs::remove_file(&tmp);
     }
 

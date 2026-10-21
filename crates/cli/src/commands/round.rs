@@ -13,31 +13,58 @@ pub async fn run(cli: &Client, cmd: RoundCmd, quiet: bool) -> Result<()> {
         RoundCmd::View { id } => view(cli, &id, quiet).await,
         RoundCmd::Activate { id } => activate(cli, &id, quiet).await,
         RoundCmd::Complete { id } => transition(cli, &id, "complete", quiet).await,
-        RoundCmd::Baseline { id, set } => baseline(cli, &id, set, quiet).await,
+        RoundCmd::Baseline {
+            id,
+            set,
+            decision,
+            rebase,
+        } => baseline(cli, &id, set, decision, rebase, quiet).await,
         RoundCmd::Result(args) => post_result(cli, args).await,
         RoundCmd::Results { id } => list_results(cli, &id).await,
         RoundCmd::Active { plan_id } => active(cli, &plan_id).await,
     }
 }
 
-async fn baseline(cli: &Client, id: &str, set: Option<String>, quiet: bool) -> Result<()> {
-    match set {
-        Some(raw) => {
-            let parsed: Value = serde_json::from_str(&raw)
-                .map_err(|e| anyhow::anyhow!("--set must be valid JSON: {e}"))?;
-            let v: Value = cli
-                .post_json(
-                    &format!("/rounds/{id}/baseline"),
-                    &json!({ "baseline_json": parsed }),
-                )
-                .await?;
-            emit(&v, quiet)
+async fn baseline(
+    cli: &Client,
+    id: &str,
+    set: Option<String>,
+    decision: Option<String>,
+    rebase: bool,
+    quiet: bool,
+) -> Result<()> {
+    if set.is_none() && !rebase {
+        if decision.is_some() {
+            return Err(anyhow::anyhow!("--decision needs --set and/or --rebase"));
         }
-        None => {
-            let v: Value = cli.get_json(&format!("/rounds/{id}/baseline")).await?;
-            emit(&v, quiet)
+        let v: Value = cli.get_json(&format!("/rounds/{id}/baseline")).await?;
+        return emit(&v, quiet);
+    }
+    let mut body = json!({ "rebase": rebase });
+    if let Some(raw) = set {
+        let parsed: Value = serde_json::from_str(&raw)
+            .map_err(|e| anyhow::anyhow!("--set must be valid JSON: {e}"))?;
+        body["baseline_json"] = parsed;
+    }
+    if let Some(d) = decision {
+        body["decision_id"] = Value::String(d);
+    }
+    if rebase {
+        if let Some(c) = current_head() {
+            body["commit"] = Value::String(c);
         }
     }
+    let v: Value = cli
+        .post_json(&format!("/rounds/{id}/baseline"), &body)
+        .await?;
+    emit(&v, quiet)
+}
+
+/// HEAD of the work tree the CLI runs in — the round's baseline commit.
+fn current_head() -> Option<String> {
+    std::env::current_dir()
+        .ok()
+        .and_then(|d| sdi_db::workspace::head_commit(&d))
 }
 
 async fn create(cli: &Client, args: RoundCreateArgs, quiet: bool) -> Result<()> {
@@ -71,9 +98,15 @@ async fn view(cli: &Client, id: &str, quiet: bool) -> Result<()> {
 }
 
 async fn activate(cli: &Client, id: &str, quiet: bool) -> Result<()> {
-    // Daemon returns { round, carried_results }. We surface the wrapper as-is
-    // so scripts can observe the carry-over count.
-    let v: Value = cli.post_empty(&format!("/rounds/{}/activate", id)).await?;
+    // Daemon returns { round, carried_results, stale_carried, baseline, … }.
+    // We surface the wrapper as-is so scripts can observe the carry-over.
+    let mut body = json!({});
+    if let Some(c) = current_head() {
+        body["commit"] = Value::String(c);
+    }
+    let v: Value = cli
+        .post_json(&format!("/rounds/{}/activate", id), &body)
+        .await?;
     if quiet {
         if let Some(rid) = v["round"]["id"].as_str() {
             println!("{}", rid);

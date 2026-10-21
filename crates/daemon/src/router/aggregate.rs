@@ -33,8 +33,8 @@ use sdi_core::usage::{UsageRecord, UsageRollup, UsageTier};
 use sdi_db::repo::{
     collab as collab_repo, decision as decision_repo, event as event_repo,
     knowledge as knowledge_repo, plan as plan_repo, project as project_repo,
-    requirement as requirement_repo, round as round_repo, run as run_repo,
-    scenario as scenario_repo, task as task_repo, usage as usage_repo,
+    requirement as requirement_repo, retry_budget as budget_repo, round as round_repo,
+    run as run_repo, scenario as scenario_repo, task as task_repo, usage as usage_repo,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -227,9 +227,26 @@ async fn next_step(
                 }
                 Some(round) => {
                     let in_flight = task_repo::list_in_flight_for_plan(&conn, &plan.id)?;
-                    if let Some(t) = in_flight.first() {
+                    let exhausted: Vec<_> = budget_repo::list(&conn, &plan.id, None)?
+                        .into_iter()
+                        .filter(|b| b.exhausted)
+                        .collect();
+                    if let Some(b) = exhausted.first() {
                         (
-                            format!("sdi task brief {0} # implement, then: sdi task complete {0} --evidence \"<SCN>=passing@<ref>\"", t.id),
+                            format!(
+                                "sdi decision create {} <SHORT> \"<how to resolve {}>\" --body \"…\" && \
+                                 sdi run release-budget --scenario {} --decision <DEC-ID>",
+                                plan.id, b.scenario_id, b.scenario_id
+                            ),
+                            format!(
+                                "Retry budget exhausted for scenario {} ({}/{} {} failures, signature {}). \
+                                 Stop retrying: escalate with a decision, then release the budget.",
+                                b.scenario_id, b.count, b.cap, b.failure_class, b.failure_signature
+                            ),
+                        )
+                    } else if let Some(t) = in_flight.first() {
+                        (
+                            format!("sdi task brief {0} # implement, verify with `sdi run verify --scenario <SCN> -- <cmd>`, then: sdi task complete {0} --evidence \"<SCN>=passing@run:<RUN-ID>\"", t.id),
                             format!("Task {} is in progress — brief it, implement, and complete with evidence.", t.short_code),
                         )
                     } else {
@@ -263,6 +280,13 @@ async fn next_step(
         Some(p) => decision_repo::list_provisional(&conn, &p.id)?,
         None => Vec::new(),
     };
+    let progress = match active_plan.as_ref() {
+        Some(p) => match round_repo::find_active_for_plan(&conn, &p.id)? {
+            Some(r) => Some(round_repo::baseline_progress(&conn, &r)?),
+            None => None,
+        },
+        None => None,
+    };
 
     Ok(Json(json!({
         "project": project,
@@ -272,6 +296,8 @@ async fn next_step(
         // #16 — provisional decisions whose revisit condition the run should
         // keep in view; the daemon remembers what a weak model forgets.
         "provisional_decisions": provisional,
+        // Fixed-baseline progress of the active round (baseline vs added).
+        "progress": progress,
     })))
 }
 
@@ -287,7 +313,8 @@ async fn task_brief(
     let conn = state.conn()?;
     let task = task_repo::get(&conn, &Id::from(id))?;
     let round = round_repo::get(&conn, &task.round_id)?;
-    let baseline = round_repo::get_baseline(&conn, &task.round_id)?;
+    let baseline_rec = round_repo::get_baseline_record(&conn, &task.round_id)?;
+    let baseline = baseline_rec.blob.clone();
     let mut scenarios = Vec::new();
     for sid in &task.parent_scenario_ids {
         if let Ok(s) = scenario_repo::get(&conn, sid) {
@@ -299,9 +326,16 @@ async fn task_brief(
         "task": task,
         "round": round,
         "baseline": baseline,
+        "baseline_activation": {
+            "commit": baseline_rec.commit,
+            "recorded_at": baseline_rec.recorded_at,
+        },
         // Full GWT inline so the executing agent does not re-fetch scenarios.
         "scenarios": scenarios,
-        "evidence_format": "<SCN-id-or-short-code>=<passing|failing|blocked>@<file:line | test name | url>",
+        "evidence_format": "<SCN-id-or-short-code>=<passing|failing|impacted>@run:<RUN-ID> \
+            (preferred — the run from `sdi run verify --scenario <SCN> -- <cmd>`; validated: linked, exit status, fresh fingerprint) \
+            | <file:line | test name | url> (free text, unverified)",
+        "verify_with": "sdi run verify --scenario <SCN> [--input <glob>]… [--tool-version name=ver]… -- <test command…>",
         "report_schema": {
             "summary": "one line: what changed and whether the linked scenarios now pass",
             "evidence": "one entry per parent scenario in the evidence_format above",
@@ -310,10 +344,11 @@ async fn task_brief(
         "prohibitions": [
             "do NOT git commit or git push (the user commits via their own tooling)",
             "do NOT git reset / checkout <ref> -- <path> / restore (destructive history rewrite)",
-            "complete the task only with real evidence — a ghost or non-parent scenario id is rejected"
+            "complete the task only with real evidence — a ghost or non-parent scenario id is rejected",
+            "do NOT retry a failing scenario under a new task name — the retry budget is keyed by failure signature, not task; on RETRY_BUDGET_EXHAUSTED open a decision"
         ],
         "complete_with": format!(
-            "sdi task complete {} --evidence \"<SCN>=passing@<ref>\" [--evidence …]",
+            "sdi task complete {} --evidence \"<SCN>=passing@run:<RUN-ID>\" [--evidence …]",
             task.id
         ),
     })))
@@ -321,7 +356,39 @@ async fn task_brief(
 
 #[derive(Debug, Deserialize)]
 struct BaselineBody {
-    baseline_json: Value,
+    /// Caller baseline blob (e.g. `{"green_tests": 412}`). Optional when only
+    /// rebasing the activation snapshot.
+    #[serde(default)]
+    baseline_json: Option<Value>,
+    /// Superseding decision of the round's plan. Required to overwrite an
+    /// active/completed round's existing baseline, and for `rebase`.
+    #[serde(default)]
+    decision_id: Option<String>,
+    /// Re-capture the activation snapshot (commit + verdicts) under the
+    /// superseding decision.
+    #[serde(default)]
+    rebase: bool,
+    /// Commit recorded by a rebase (defaults to the previous baseline commit).
+    #[serde(default)]
+    commit: Option<String>,
+}
+
+fn baseline_view(rid: &Id, rec: &round_repo::BaselineRecord) -> Value {
+    let parsed = rec
+        .blob
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .unwrap_or(Value::Null);
+    json!({
+        "round_id": rid.to_string(),
+        "baseline": parsed,
+        "activation": {
+            "commit": rec.commit,
+            "recorded_at": rec.recorded_at,
+            "snapshot": rec.snapshot,
+        },
+        "superseded_by_decision_id": rec.decision_id,
+    })
 }
 
 async fn set_baseline(
@@ -331,12 +398,35 @@ async fn set_baseline(
 ) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let rid = Id::from(id);
-    let raw = serde_json::to_string(&b.baseline_json)
-        .map_err(|e| DomainError::Validation(format!("encode baseline: {e}")))?;
-    round_repo::set_baseline(&conn, &rid, &raw)?;
-    Ok(Json(
-        json!({ "round_id": rid.to_string(), "baseline": b.baseline_json }),
-    ))
+    let decision = b.decision_id.as_deref().map(Id::from);
+    if b.baseline_json.is_none() && !b.rebase {
+        return Err(DomainError::Validation("baseline_json or rebase required".into()).into());
+    }
+    if b.rebase {
+        let d = decision.as_ref().ok_or_else(|| {
+            DomainError::BaselineLocked(
+                "rebasing the activation baseline requires a superseding decision id".into(),
+            )
+        })?;
+        let commit = b
+            .commit
+            .clone()
+            .or(round_repo::get_baseline_record(&conn, &rid)?.commit);
+        round_repo::rebase_baseline(&conn, &rid, commit.as_deref(), d)?;
+    }
+    if let Some(blob) = b.baseline_json.as_ref() {
+        let raw = serde_json::to_string(blob)
+            .map_err(|e| DomainError::Validation(format!("encode baseline: {e}")))?;
+        round_repo::set_baseline(&conn, &rid, &raw, decision.as_ref())?;
+    }
+    let rec = round_repo::get_baseline_record(&conn, &rid)?;
+    let view = baseline_view(&rid, &rec);
+    state.publish(EventEnvelope {
+        kind: "round.baseline.updated".into(),
+        entity_id: Some(rid.to_string()),
+        payload: view.clone(),
+    });
+    Ok(Json(view))
 }
 
 async fn get_baseline(
@@ -345,14 +435,8 @@ async fn get_baseline(
 ) -> ApiResult<Json<Value>> {
     let conn = state.conn()?;
     let rid = Id::from(id);
-    let raw = round_repo::get_baseline(&conn, &rid)?;
-    let parsed = raw
-        .as_deref()
-        .and_then(|s| serde_json::from_str::<Value>(s).ok())
-        .unwrap_or(Value::Null);
-    Ok(Json(
-        json!({ "round_id": rid.to_string(), "baseline": parsed }),
-    ))
+    let rec = round_repo::get_baseline_record(&conn, &rid)?;
+    Ok(Json(baseline_view(&rid, &rec)))
 }
 
 // ---------------------------------------------------------------------------

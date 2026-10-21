@@ -33,6 +33,9 @@ async fn set(cli: &Client, args: AutonomySetArgs, quiet: bool) -> Result<()> {
     if let Some(r) = args.reason {
         body["reason"] = Value::String(r);
     }
+    if let Some(c) = args.retry_budget_cap {
+        body["retry_budget_cap"] = json!(c);
+    }
     let v: Value = cli.post_json("/autonomy_policies", &body).await?;
     emit(&v, quiet)
 }

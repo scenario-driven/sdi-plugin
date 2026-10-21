@@ -45,6 +45,11 @@ struct UpsertBody {
     /// D24 — pattern DAG depth cap (1..=10); defaults to 3.
     #[serde(default)]
     pattern_depth_cap: Option<i32>,
+    /// Retry budget cap per (scenario, failure class, signature), 1..=100.
+    /// Omitted → the existing row's value is kept (default 3), so changing the
+    /// mode does not silently reset a tuned cap.
+    #[serde(default)]
+    retry_budget_cap: Option<i32>,
     /// D29 — single-session lock on the plan's active scenarios.
     #[serde(default)]
     plan_single_session_lock: Option<bool>,
@@ -73,16 +78,33 @@ async fn upsert(
 ) -> ApiResult<Json<Value>> {
     let scope_kind = AutonomyScopeKind::from_str(&b.scope_kind)?;
     let mode = AutonomyMode::from_str(&b.mode)?;
+    let conn = state.conn()?;
+    let project_id = Id::from(b.project_id.clone());
+    let plan_id = b.plan_id.clone().map(Id::from);
+    let retry_budget_cap = match b.retry_budget_cap {
+        Some(c) => c,
+        None => repo::list_by_project(&conn, &project_id)?
+            .into_iter()
+            .find(|p| {
+                p.scope_kind == scope_kind
+                    && p.plan_id == plan_id
+                    && p.decision_kind == b.decision_kind
+                    && p.pattern_kind == b.pattern_kind
+            })
+            .map(|p| p.retry_budget_cap)
+            .unwrap_or(sdi_core::verification::DEFAULT_RETRY_BUDGET_CAP),
+    };
     let policy = AutonomyPolicy {
         id: Id::new(IdKind::AutonomyPolicy),
-        project_id: Id::from(b.project_id),
-        plan_id: b.plan_id.map(Id::from),
+        project_id,
+        plan_id,
         scope_kind,
         decision_kind: b.decision_kind,
         pattern_kind: b.pattern_kind.clone(),
         mode,
         l5_threshold: b.l5_threshold.unwrap_or(5),
         pattern_depth_cap: b.pattern_depth_cap.unwrap_or(3),
+        retry_budget_cap,
         plan_single_session_lock: b.plan_single_session_lock.unwrap_or(false),
         external_surface: b.external_surface.unwrap_or(false),
         timeout_ms: b.timeout_ms,
@@ -93,7 +115,6 @@ async fn upsert(
         created_at: now(),
         updated_at: now(),
     };
-    let conn = state.conn()?;
     repo::upsert(&conn, &policy)?;
     let fresh = repo::resolve(
         &conn,

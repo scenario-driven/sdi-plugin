@@ -16,6 +16,7 @@ pub mod plan;
 pub mod plan_flow;
 pub mod project;
 pub mod requirement;
+pub mod retry_budget;
 pub mod round;
 pub mod run;
 pub mod scenario;
