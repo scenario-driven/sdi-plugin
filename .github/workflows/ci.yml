@@ -40,7 +40,7 @@ jobs:
       - name: hook tests
         run: |
           if [ -d plugin/tests ] && ls plugin/tests/*.test.cjs >/dev/null 2>&1; then
-            node --test plugin/tests/
+            node --test plugin/tests/*.test.cjs
           else
             echo "no plugin/tests/*.test.cjs yet — skipping"
           fi

@@ -647,7 +647,9 @@ test('D21: isReadOnlyBash — quote-aware scan + chain handling', () => {
   assert.equal(isReadOnlyBash('echo `whoami`'), false);
   assert.equal(isReadOnlyBash('cat foo > bar'), false);
   assert.equal(isReadOnlyBash('grep x < input'), false);
-  assert.equal(isReadOnlyBash('(ls)'), false);
+  assert.equal(isReadOnlyBash('(ls)'), true); // read-only subshell
+  assert.equal(isReadOnlyBash('(rm x)'), false);
+  assert.equal(isReadOnlyBash('a=(1 2)'), false);
 
   // Background execution and unbalanced quotes disqualify.
   assert.equal(isReadOnlyBash('ls &'), false);
@@ -719,13 +721,161 @@ test('D21 (#18): git global flags (-C / -c / --no-pager) reach the real subcomma
   assert.equal(isReadOnlyBash('git -C /repo status'), true);
   assert.equal(isReadOnlyBash('git --no-pager log --oneline -5'), true);
   assert.equal(isReadOnlyBash('git -c color.ui=always diff'), true);
-  assert.equal(isReadOnlyBash('git -C /a -c x=y rev-parse HEAD'), true);
+  assert.equal(isReadOnlyBash('git -C /a -c core.quotepath=false rev-parse HEAD'), true);
+  // Only cosmetic -c keys: anything else may change what git executes.
+  assert.equal(isReadOnlyBash('git -C /a -c x=y rev-parse HEAD'), false);
+  assert.equal(isReadOnlyBash('git -c core.pager=./evil log'), false);
   // A mutating subcommand after global flags is still blocked.
   assert.equal(isReadOnlyBash('git -C /repo push'), false);
   assert.equal(isReadOnlyBash('git -C /repo checkout main -- file'), false);
   // Bare git mutations remain blocked (regression anchor).
   assert.equal(isReadOnlyBash('git commit -m x'), false);
   assert.equal(isReadOnlyBash('git status'), true);
+});
+
+// Shared corpus: every case carries its expected verdict. The same file feeds
+// the hook-log replay script, so a regression in either direction (benign
+// command blocked, mutating command allowed) fails here first.
+const BASH_CORPUS = require('./fixtures/bash-readonly-corpus.json').cases;
+
+test('D21: classifyBash matches every case in the shared read-only corpus', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { classifyBash } = require(SHARED)._internals;
+  const mismatches = [];
+  for (const { cmd, readOnly } of BASH_CORPUS) {
+    const r = classifyBash(cmd);
+    if (r.readOnly !== readOnly) mismatches.push(`${readOnly ? 'blocked' : 'allowed'}: ${JSON.stringify(cmd)} (${r.reason})`);
+  }
+  assert.deepEqual(mismatches, []);
+  assert.ok(BASH_CORPUS.filter((c) => c.readOnly).length >= 50, 'corpus keeps a broad positive set');
+  assert.ok(BASH_CORPUS.filter((c) => !c.readOnly).length >= 50, 'corpus keeps a broad negative set');
+});
+
+test('D21: classifyBash reports the reason and the failing segment', () => {
+  delete require.cache[require.resolve(SHARED)];
+  const { classifyBash } = require(SHARED)._internals;
+  const ok = classifyBash('git status && cat f');
+  assert.deepEqual([ok.readOnly, ok.failingSegment], [true, null]);
+
+  const chained = classifyBash('git status && rm -rf build');
+  assert.equal(chained.readOnly, false);
+  assert.equal(chained.failingSegment, 'rm -rf build');
+  assert.match(chained.reason, /`rm` is not a known read-only command/);
+
+  const sed = classifyBash("sed -n 'w out' f");
+  assert.match(sed.reason, /writes a file/);
+  assert.equal(sed.failingSegment, "sed -n 'w out' f");
+
+  const lexed = classifyBash('echo $(rm x)');
+  assert.match(lexed.reason, /command substitution/);
+
+  const wrapped = classifyBash('command -p rm x');
+  assert.match(wrapped.reason, /`rm`/, 'wrapper verdict names the wrapped command');
+});
+
+test('D21: deny message carries the classifier reason and failing segment', async () => {
+  const home = mkTempHome('sdi-d21-reason');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_DELEGATION_BYPASS: '' });
+    const r = await runShimAsync(
+      'pre-tool-use.cjs',
+      env,
+      JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Bash', tool_input: { command: 'ls && sort -o out in' } }),
+    );
+    const reason = JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /D21 delegation gate/);
+    assert.match(reason, /Not read-only: `-o` writes a file/);
+    assert.match(reason, /segment: "sort -o out in"/);
+    assert.doesNotMatch(reason, /sdi bypass/);
+    const log = path.join(home, '.local/state/sdi/hook.log');
+    const entries = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.ok(entries.some((e) => e.event === 'pre_tool_use_blocked' && e.failing_segment === 'sort -o out in'));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// L3 confirms changes before they are applied. Reads, read-only shell and
+// delegation must keep working on Codex, where the only supported decision is
+// deny — otherwise an L3 plan leaves the main session unable to look or delegate.
+test('Codex: L3 denies edits and mutating shell but lets reads and delegation through', async () => {
+  const home = mkTempHome('sdi-codex-l3-scope');
+  const { server, port } = await startMockSdiDaemon({
+    plan: { id: 'PLAN-codex', title: 'p', status: 'active' },
+    inFlight: [{ id: 'TASK-codex', status: 'in_progress' }],
+    policy: { mode: 'L3' },
+  });
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, {
+      PLUGIN_ROOT,
+      CODEX_HOME: path.join(home, 'codex'),
+      SDI_CODEX_AGENTS_DISABLE: '1',
+      SDI_BYPASS_HOOKS: '',
+      SDI_ACTIVE_TASK: 'TASK-codex',
+    });
+    const run = (payload) => runShimAsync('pre-tool-use.cjs', env, JSON.stringify({ cwd: PROJECT_CWD, ...payload }));
+    const sub = { agent_id: '00000000-0000-0000-0000-0000000000c4', agent_type: 'impl-coder' };
+
+    const read = await run({ tool_name: 'Bash', tool_input: { command: 'git status && cat README.md' } });
+    assert.doesNotMatch(read.stdout, /permissionDecision/, 'main-session read-only Bash passes under L3');
+
+    const delegate = await run({ tool_name: 'Agent', tool_input: { prompt: 'implement TASK-codex' } });
+    assert.doesNotMatch(delegate.stdout, /autonomy=L3/, 'delegation passes under L3');
+
+    const subRead = await run({ tool_name: 'Bash', tool_input: { command: 'rg -n foo src' }, ...sub });
+    assert.doesNotMatch(subRead.stdout, /autonomy=L3/, 'sub-agent read-only Bash passes under L3');
+
+    const subWrite = await run({ tool_name: 'Bash', tool_input: { command: 'npm install' }, ...sub });
+    assert.match(subWrite.stdout, /autonomy=L3/, 'sub-agent mutating Bash is denied under L3');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('D21: unregistered-agent note is emitted once per agent per session', async () => {
+  const home = mkTempHome('sdi-d21-note-once');
+  const { server, port } = await startMockSdiDaemon();
+  try {
+    pinDaemonPort(home, port);
+    const env = shimEnv(home, { SDI_BYPASS_HOOKS: '', SDI_ACTIVE_TASK: 'TASK-X' });
+    const call = (agentId, sessionId) =>
+      runShimAsync(
+        'pre-tool-use.cjs',
+        env,
+        JSON.stringify({
+          cwd: PROJECT_CWD,
+          tool_name: 'Bash',
+          tool_input: { command: 'ls' },
+          session_id: sessionId,
+          agent_id: agentId,
+          agent_type: 'never-registered-agent',
+        }),
+      );
+    const first = await call('agent-a', 'session-1');
+    const repeat = await call('agent-a', 'session-1');
+    const otherAgent = await call('agent-b', 'session-1');
+    const otherSession = await call('agent-a', 'session-2');
+    assert.match(first.stderr, /unregistered/);
+    assert.doesNotMatch(repeat.stderr, /unregistered/, 'same agent + session stays quiet');
+    assert.match(otherAgent.stderr, /unregistered/);
+    assert.match(otherSession.stderr, /unregistered/);
+    const log = path.join(home, '.local/state/sdi/hook.log');
+    const notes = fs
+      .readFileSync(log, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.event === 'pre_tool_use_unregistered_agent');
+    assert.equal(notes.length, 3, 'audit log records the note once per (session, agent)');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('install gate (#17): pluginVersion reads the host plugin manifest', () => {
@@ -1099,14 +1249,10 @@ test('D21: bypass-once marker file unblocks main + is consumed (one-shot)', asyn
   }
 });
 
-// D21 deny message must point users at the recommended bypass surface —
-// `sdi bypass arm`, the daemon-friendly CLI verb. `sdi` is on the D21
-// read-only Bash whitelist so the main session can call it directly,
-// breaking the self-deadlock where the only way to clear the gate was a
-// `touch` (mutating Bash, itself blocked by D21). Regression anchor for
-// "deny message must surface the CLI verb, not just a marker path users
-// can't reach without delegation."
-test('D21: deny message advertises `sdi bypass arm` override surface', async () => {
+// A routine D21 deny names the workflow fix (delegate) and, for shell
+// commands, the classifier reason and failing segment. It does not advertise
+// the emergency bypass marker.
+test('D21: deny message names delegation, not the bypass marker', async () => {
   const home = mkTempHome('sdi-d21-hint');
   const { server, port } = await startMockSdiDaemon();
   try {
@@ -1118,7 +1264,8 @@ test('D21: deny message advertises `sdi bypass arm` override surface', async () 
       JSON.stringify({ cwd: PROJECT_CWD, tool_name: 'Edit' }),
     );
     assert.match(r.stdout, /D21 delegation gate/);
-    assert.match(r.stdout, /sdi bypass arm/, 'deny message must surface the `sdi bypass arm` CLI verb');
+    assert.match(r.stdout, /Delegate to a specialist sub-agent/);
+    assert.doesNotMatch(r.stdout, /sdi bypass/, 'routine deny must not advertise the bypass marker');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(home, { recursive: true, force: true });

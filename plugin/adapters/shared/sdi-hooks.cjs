@@ -16,6 +16,9 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 const { spawn, spawnSync } = require('child_process');
+const crypto = require('crypto');
+const { classifyBash } = require('./bash-classifier.cjs');
+const cliTree = require('../../scripts/cli-tree.cjs');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -1006,236 +1009,13 @@ function isExecutionTool(toolName) {
   return /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(canonicalToolName(toolName));
 }
 
-// Read-only Bash whitelist. Conservative on purpose, but quote-aware: the
-// sdi CLI takes natural-language arguments (GWT clauses, `--reason` text) by
-// design, so metacharacters inside quoted strings must NOT read as shell
-// operators — otherwise the gate blocks its own escape hatch (`sdi bypass
-// arm --reason "(…)"`) and ordinary scenario authoring. The rules:
-//   1. Quoted spans are masked first. Single-quoted content is fully inert;
-//      double-quoted content stays live for `$` and backtick because the
-//      shell still expands those inside double quotes.
-//   2. Substitution / redirection / subshell metacharacters (`$`, backtick,
-//      `<`, `>`, `(`, `)`) outside quotes disqualify the whole command. The
-//      one exception is pure fd duplication (`2>&1`, `>&2`) — no file is
-//      touched, and agents append it to read-only commands routinely.
-//   3. Chains split on unquoted `&&` / `||` / `;` / `|`. The command is
-//      read-only iff EVERY segment's verb passes the whitelist — `ls &&
-//      grep …` passes, `sdi … && rm -rf` does not. A lone `&` (background)
-//      disqualifies.
-//   4. Unbalanced quoting disqualifies — we cannot reason about the command.
-
-// Mask quoted spans in-place (same length, so indices stay aligned with the
-// original string). Returns null on unbalanced quotes.
-function maskQuotedSpans(cmd) {
-  const out = cmd.split('');
-  let state = 'plain'; // 'plain' | 'single' | 'double'
-  let i = 0;
-  while (i < cmd.length) {
-    const c = cmd[i];
-    if (state === 'plain') {
-      if (c === '\\' && i + 1 < cmd.length) {
-        out[i] = '_';
-        out[i + 1] = '_';
-        i += 2;
-        continue;
-      }
-      if (c === "'") state = 'single';
-      else if (c === '"') state = 'double';
-    } else if (state === 'single') {
-      if (c === "'") state = 'plain';
-      else out[i] = '_';
-    } else {
-      // double-quoted: `$` and backtick keep their meta meaning, `\` escapes.
-      if (c === '\\' && i + 1 < cmd.length) {
-        out[i] = '_';
-        out[i + 1] = '_';
-        i += 2;
-        continue;
-      }
-      if (c === '"') state = 'plain';
-      else if (c !== '$' && c !== '`') out[i] = '_';
-    }
-    i += 1;
-  }
-  return state === 'plain' ? out.join('') : null;
-}
-
-// Per-segment verb whitelist. `segment` is the original (unmasked) text of
-// one chain segment — flag scans (e.g. find's -delete/-exec) must see the
-// real argument text, since find acts on its args regardless of how the
-// shell quoted them.
-function segmentIsReadOnly(segment) {
-  const trimmed = segment.trim();
-  if (!trimmed) return false;
-  const allTokens = trimmed.split(/\s+/);
-
-  // Strip leading inline env assignments (`VAR=val … cmd`) and judge the REAL
-  // verb — `FOO=bar sdi plan list` is fine, but `FOO=bar rm -rf /` is NOT, so
-  // an assignment prefix must not whitelist whatever follows it.
-  let i0 = 0;
-  while (i0 < allTokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(allTokens[i0])) i0 += 1;
-  const tokens = allTokens.slice(i0);
-  if (tokens.length === 0) return true; // pure assignment segment, no command
-  const verb = tokens[0];
-
-  // Innocuous shell-state prefixes — change cwd or env, execute no payload and
-  // touch no file. The #4 PATH-setup idiom (`cd repo; export PATH=…; sdi …`)
-  // splits into these segments plus the payload verb, each judged on its own.
-  if (verb === 'cd' || verb === 'pushd' || verb === 'popd') return true;
-  if (verb === 'export' || verb === 'set' || verb === 'unset') {
-    return tokens.slice(1).every((t) => /^[A-Za-z_][A-Za-z0-9_]*(=.*)?$/.test(t));
-  }
-
-  // SDI management CLI. Recognise the bare token AND an absolute/relative path
-  // to the bundled binary (#4: delegated agents invoke `<plugin-cache>/bin/sdi`,
-  // not bare `sdi`, because the bundle is not on a fresh shell's PATH).
-  const base = verb.includes('/') ? verb.slice(verb.lastIndexOf('/') + 1) : verb;
-  if (base === 'sdi' || base === 'sdid') {
-    const sub = tokens[1] || '';
-    const action = tokens[2] || '';
-    // Task LIFECYCLE mutation is execution work (D3 — tasks are runtime
-    // artifacts the LLM decomposes, not orchestration). The main session may
-    // only READ tasks; create/start/complete/decompose/lease/… delegate to a
-    // specialist (scenario-decomposer, impl-coder, …).
-    if (sub === 'task') {
-      return /^(list|view|stats|ancestors|descendants|subtree|relations|lease-info|preflight|--help|-h)$/.test(
-        action,
-      );
-    }
-    // Everything else is orchestration the main session owns (D2): plan /
-    // scenario / round / decide / req authoring (the spec, per D5/D8), plus
-    // reads, daemon control, and the `bypass` escape hatch. Destructive ops
-    // (`sdi project delete`) are gated by the daemon's own confirmation
-    // prompt, not this verb whitelist.
-    return true;
-  }
-
-  // Read-only GitHub CLI (#4c / D3). Context-gathering reads only; any
-  // mutation (`gh issue create`, `gh pr merge`, `gh api -X POST`) delegates.
-  if (verb === 'gh') {
-    const sub = tokens[1] || '';
-    const action = tokens[2] || '';
-    if (sub === 'auth') return /^(status|token)$/.test(action);
-    if (sub === 'api') {
-      // Default method is GET; an explicit mutating -X/--method disqualifies.
-      return !/(^|\s)(-X|--method)[\s=]+(POST|PUT|PATCH|DELETE)\b/i.test(trimmed);
-    }
-    if (sub === 'browse') return true;
-    if (/^(repo|issue|pr|run|release|search|workflow|label|gist|cache|status|org)$/.test(sub)) {
-      return /^(list|view|status|diff|checks|download|ls|--help|-h)$/.test(action);
-    }
-    return false;
-  }
-
-  if (verb === 'git') {
-    // Skip git's global options so the real subcommand is judged, not the flag:
-    // `git -C <path> remote -v` and `git --no-pager log` are read-only (#18).
-    let gi = 1;
-    while (gi < tokens.length) {
-      const t = tokens[gi];
-      if (t === '-C' || t === '-c') {
-        gi += 2; // these consume the following token
-      } else if (t === '--no-pager' || t === '-P' || t === '--paginate' || t === '--no-replace-objects') {
-        gi += 1;
-      } else if (t.startsWith('--git-dir=') || t.startsWith('--work-tree=') || t.startsWith('-C=')) {
-        gi += 1;
-      } else {
-        break;
-      }
-    }
-    return /^(status|log|diff|show|branch|remote|config|rev-parse|describe|ls-files|blame|tag)$/.test(
-      tokens[gi] || '',
-    );
-  }
-  if (verb === 'cargo') {
-    return /^(check|clippy|fmt|tree|metadata|--version|-V)$/.test(tokens[1] || '');
-  }
-  if (verb === 'pnpm' || verb === 'npm') {
-    // Only allow read-only/analysis subcommands. Script runners (run/exec/etc.)
-    // can do anything, so they must be delegated.
-    return /^(list|ls|view|outdated|--version|-v)$/.test(tokens[1] || '');
-  }
-  if (verb === 'find') {
-    return !/-(delete|exec|execdir|ok|okdir)\b/.test(trimmed);
-  }
-  if (verb === 'node') {
-    return /^(--version|-v)$/.test(tokens[1] || '');
-  }
-  return /^(ls|cat|head|tail|grep|rg|wc|file|which|pwd|echo|stat|env|printenv|date|uname|hostname|whoami|tree|jq|sort|uniq|cut|comm|column|basename|dirname|realpath|readlink|true|test)$/.test(
-    verb,
-  );
-}
-
-// Quote-aware detector for command/process substitution (`$(…)`, backtick,
-// `<(…)`, `>(…)`). These execute a nested command and are dangerous even
-// inside double quotes. A bare `$VAR` / `${VAR}` is NOT substitution and is
-// not flagged. Single-quoted spans are fully inert.
-function hasCommandSubstitution(cmd) {
-  let state = 'plain'; // 'plain' | 'single' | 'double'
-  for (let i = 0; i < cmd.length; i++) {
-    const c = cmd[i];
-    const n = cmd[i + 1];
-    if (state === 'single') {
-      if (c === "'") state = 'plain';
-      continue;
-    }
-    if (c === '\\') {
-      i += 1; // skip the escaped char (in plain and double states)
-      continue;
-    }
-    if (state === 'double') {
-      if (c === '"') state = 'plain';
-      else if (c === '`') return true;
-      else if (c === '$' && n === '(') return true;
-      continue;
-    }
-    // plain
-    if (c === "'") state = 'single';
-    else if (c === '"') state = 'double';
-    else if (c === '`') return true;
-    else if (c === '$' && n === '(') return true;
-    else if ((c === '<' || c === '>') && n === '(') return true;
-  }
-  return false;
-}
-
+// Read-only Bash classification lives in ./bash-classifier.cjs: a POSIX-ish
+// lexer plus one per-command rule table. Metacharacters inside quotes are
+// string content (the sdi CLI takes natural-language GWT / --reason text), and
+// a command name alone never whitelists anything — each command's rule states
+// which arguments keep it read-only.
 function isReadOnlyBash(cmd) {
-  if (!cmd || typeof cmd !== 'string') return false;
-  const trimmed = cmd.trim();
-  if (!trimmed) return false;
-  const masked = maskQuotedSpans(trimmed);
-  if (masked === null) return false; // unbalanced quotes
-  // Command/process substitution is dangerous even INSIDE double quotes (the
-  // shell expands `$(…)` and backticks there), and maskQuotedSpans masks the
-  // `(` of `$(` inside double quotes — so detect substitution on a separate
-  // quote-aware walk. A BARE `$VAR` / `${VAR}` expansion is NOT flagged (no
-  // execution), which lets the `export PATH="$P/bin:$PATH"` idiom survive (#4).
-  if (hasCommandSubstitution(trimmed)) return false;
-  // Same-length replacements keep indices aligned with the original.
-  let neutral = masked;
-  // Discarding redirects (`>/dev/null`, `2>/dev/null`, `&>/dev/null`,
-  // `>>/dev/null`) touch no real file — agents append them to read-only
-  // commands routinely (#10).
-  neutral = neutral.replace(/(\d*|&)>>?\s*\/dev\/null/g, (m) => '_'.repeat(m.length));
-  // Pure fd duplication (`2>&1`, `>&2`).
-  neutral = neutral.replace(/(\d*|&)>&\d+/g, (m) => '_'.repeat(m.length));
-  // Unquoted backticks / parens that survived masking are subshell grouping or
-  // substitution (quoted ones were masked away).
-  if (/[`()]/.test(neutral)) return false;
-  // Any remaining real redirect (to a file) reads/writes the filesystem.
-  if (/[<>]/.test(neutral)) return false;
-  // Split on chain operators; every segment must independently pass.
-  const segments = [];
-  let start = 0;
-  const opRe = /&&|\|\||;|\||&/g;
-  let m;
-  while ((m = opRe.exec(neutral)) !== null) {
-    if (m[0] === '&') return false; // background execution — not read-only
-    segments.push(trimmed.slice(start, m.index));
-    start = m.index + m[0].length;
-  }
-  segments.push(trimmed.slice(start));
-  return segments.every(segmentIsReadOnly);
+  return classifyBash(cmd).readOnly;
 }
 
 // Claude Code dispatches plugin-namespaced agent types as "<plugin>:<bare>"
@@ -1770,6 +1550,19 @@ function projectDisabled(project) {
   return !!project && (project.enabled === false || project.enabled === 0);
 }
 
+// The session's CLI reference: one line per `sdi` command group, generated
+// from the clap definitions (scripts/cli-tree.cjs). Agents take command
+// names from here and read a command's `--help` at most once per session,
+// instead of re-querying the help tree before every step.
+function cliReferenceBlock() {
+  const tree = cliTree.loadTree();
+  if (!tree) return '';
+  return (
+    `\n# sdi CLI reference (command groups)\n${cliTree.summarizeTree(tree)}\n` +
+    `Per-task arguments and the evidence format: \`sdi task brief <TASK-ID>\`.\n`
+  );
+}
+
 async function runSessionStart(input) {
   const root = pluginRoot();
   const installed = await ensureInstalled(root);
@@ -1804,7 +1597,7 @@ async function runSessionStart(input) {
   // Registered project → gather once, render twice: plain for the model's
   // context, coloured for the terminal banner.
   const data = await gatherSessionData(project);
-  const plain = formatSessionBanner(project, data, false) + dashboardLine(root, false);
+  const plain = formatSessionBanner(project, data, false) + dashboardLine(root, false) + cliReferenceBlock();
   const coloured = formatSessionBanner(project, data, true) + dashboardLine(root, true);
   appendHookLog('session_start', { cwd, project_id: project.id, web_state: webState(root) });
   process.stdout.write(JSON.stringify(sessionStartPayload(plain, coloured)) + '\n');
@@ -1874,7 +1667,9 @@ async function runUserPromptSubmit(input) {
   } else if (tasks.length > 0) {
     context += `In-flight tasks (${tasks.length}):\n`;
     for (const t of tasks.slice(0, 5)) context += `  - ${t.id} ${t.title} [${t.status}]\n`;
-    context += `\nNo active task pinned. Set one: \`sdi task update <TASK-ID> --status in_progress\`\n`;
+    context +=
+      `\nNo active task pinned. The delegated specialist picks one up with ` +
+      `\`sdi task start <TASK-ID>\` (todo → in_progress).\n`;
   } else {
     context += `No in-flight tasks. Decompose scenarios into tasks first.\n`;
   }
@@ -1886,17 +1681,39 @@ async function runUserPromptSubmit(input) {
   );
 }
 
-// Unified bypass surface hint — `sdi bypass arm` is the recommended path
-// because the CLI is on the D21 read-only Bash whitelist (main session can
-// call it directly, no specialist needed). One marker armed via this verb
-// unlocks every mutating gate (D21 delegation, active-task, D29 claim
-// overlap) on the next invocation.
-const BYPASS_ARM_HINT =
-  "One-shot override (audited): `sdi bypass arm --reason '<short reason>'`. " +
-  'Quote the reason (single quotes keep $, backticks, and parens inert); ' +
-  'run it as a single command — chained segments must each be read-only. ' +
-  'Marker auto-expires in 60s (configurable via `--ttl`). ' +
-  '`sdi bypass status` to inspect, `sdi bypass disarm` to clear.';
+// Deny messages name the workflow step that resolves the block (delegate,
+// pick up a task, wait for the claim holder). They do not advertise the
+// emergency bypass marker: a routine deny means the action is outside the
+// workflow, and pointing at the override turns that signal into noise.
+
+// Once-per-(session, agent) advisory notes. Every PreToolUse runs in a fresh
+// process, so "already said it" is persisted as an empty marker file under
+// the XDG cache; `wx` makes the first writer win without a read-modify-write
+// race. Markers older than a day are swept when a new one is written.
+const NOTE_MARKER_TTL_MS = 24 * 60 * 60 * 1000;
+function noteMarkerDir() {
+  return path.join(xdgHome(), '.cache', 'sdi', 'agent-notes');
+}
+function firstNoteForKey(key) {
+  const dir = noteMarkerDir();
+  const file = path.join(dir, crypto.createHash('sha256').update(key).digest('hex').slice(0, 32));
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, '', { flag: 'wx' });
+  } catch (e) {
+    // EEXIST → already noted. Any other error → emit (an extra note is
+    // harmless; a lost one hides the L3 cap).
+    return !(e && e.code === 'EEXIST');
+  }
+  try {
+    const now = Date.now();
+    for (const entry of fs.readdirSync(dir)) {
+      const p = path.join(dir, entry);
+      if (now - fs.statSync(p).mtimeMs > NOTE_MARKER_TTL_MS) fs.rmSync(p, { force: true });
+    }
+  } catch {}
+  return true;
+}
 
 // Lazy marker consumer: at most one marker consumption per PreToolUse
 // invocation, shared across all three mutating gates. The first gate that
@@ -1989,12 +1806,16 @@ async function runPreToolUse(input) {
   // same read-only check — otherwise it is a silent hole in the gate (#11: the
   // paradox where the gate blocked honest work but left Monitor wide open).
   const isShellTool = toolName === 'Bash' || toolName === 'Monitor';
+  const bashCmd = isShellTool ? String((input && input.tool_input && input.tool_input.command) || '') : null;
+  const shellVerdict = isShellTool ? classifyBash(bashCmd) : null;
+  // File edits and non-read-only shell are the only actions that APPLY a
+  // change; Agent/Task/SendMessage are the communication substrate (D19) and
+  // read-only shell changes nothing.
+  const appliesChange = isExecutionTool(toolName) || (isShellTool && !shellVerdict.readOnly);
   if (isMain && (isExecutionTool(toolName) || isShellTool)) {
-    let bashCmd = null;
     let blocked = true;
     if (isShellTool) {
-      bashCmd = String((input && input.tool_input && input.tool_input.command) || '');
-      if (isReadOnlyBash(bashCmd)) {
+      if (shellVerdict.readOnly) {
         blocked = false;
         appendHookLog('pre_tool_use_delegation_allow', {
           tool: toolName,
@@ -2021,17 +1842,18 @@ async function runPreToolUse(input) {
       } else {
         const reason = bashCmd != null
           ? `[sdi] D21 delegation gate: main session may not run a mutating ${toolName} command. ` +
-            `Delegate to a specialist sub-agent via the Agent tool. ` +
-            `cmd preview: "${bashCmd.slice(0, 80)}". ` +
-            BYPASS_ARM_HINT
+            `Not read-only: ${shellVerdict.reason}` +
+            (shellVerdict.failingSegment ? ` (segment: "${shellVerdict.failingSegment.slice(0, 120)}")` : '') +
+            `. Delegate it to a specialist sub-agent via the Agent tool, or split the read-only part into its own command.`
           : `[sdi] D21 delegation gate: main session may not call ${toolName}. ` +
-            `Delegate to a specialist sub-agent via the Agent tool. ` +
-            BYPASS_ARM_HINT;
+            `Delegate to a specialist sub-agent via the Agent tool.`;
         emitDeny(reason);
         appendHookLog('pre_tool_use_blocked', {
           tool: toolName,
           reason: 'delegation-gate',
           bash_cmd: bashCmd ? bashCmd.slice(0, 200) : null,
+          classifier_reason: shellVerdict ? shellVerdict.reason : null,
+          failing_segment: shellVerdict && shellVerdict.failingSegment ? shellVerdict.failingSegment.slice(0, 200) : null,
         });
         return;
       }
@@ -2048,7 +1870,8 @@ async function runPreToolUse(input) {
   // plugin) so a user-defined specialist counts without living in the plugin.
   if (!isMain && agentType) {
     const bareType = normalizeAgentType(agentType);
-    if (!isRegisteredAgent(bareType, cwd)) {
+    const sessionId = (input && input.session_id) || '';
+    if (!isRegisteredAgent(bareType, cwd) && firstNoteForKey(`${sessionId}\u0000${agentId}`)) {
       appendHookLog('pre_tool_use_unregistered_agent', {
         tool: toolName,
         reason: 'l3-autonomy-cap',
@@ -2103,8 +1926,8 @@ async function runPreToolUse(input) {
         emitDeny(
           `[sdi] no active task — pick one up before mutating files. ` +
             `Run \`sdi task list\` then \`sdi task start <TASK-ID>\` (todo → in_progress); ` +
-            `the daemon then reports it as active work. ` +
-            BYPASS_ARM_HINT,
+            `the daemon then reports it as active work. With no active plan, ` +
+            `\`sdi chore "<desc>"\` opens the maintenance lane.`,
         );
         appendHookLog('pre_tool_use_blocked', { tool: toolName, reason: 'no-active-task' });
         return;
@@ -2146,8 +1969,7 @@ async function runPreToolUse(input) {
               permissionDecisionReason:
                 `[sdi] D29 claim overlap on ${gate.payload.target_path}. ` +
                 `Holders: ${gate.payload.holders.map((h) => h.scenario_id).join(', ')}. ` +
-                `${gate.payload.hint}. ` +
-                BYPASS_ARM_HINT,
+                `${gate.payload.hint}.`,
             },
             sdiBlock: gate.payload,
           }) + '\n',
@@ -2176,10 +1998,13 @@ async function runPreToolUse(input) {
         `&plan_id=${encodeURIComponent(plan.id)}`,
     ).catch(() => null);
     const mode = resolved && resolved.policy && resolved.policy.mode;
-    if (mode === 'L3') {
+    // L3 asks for confirmation before a change is APPLIED. Reads, read-only
+    // shell, and agent delegation/communication pass untouched (D19), so the
+    // main session can still inspect and delegate under L3.
+    if (mode === 'L3' && appliesChange) {
       const reason =
         `[sdi] autonomy=L3 on plan ${plan.id} — confirm before applying ${toolName}. ` +
-        `Lift with \`/autonomy set ${project.id} --scope plan --mode L4 --plan-id ${plan.id}\`.`;
+        `Lift with \`sdi autonomy set ${project.id} --scope plan --mode L4 --plan-id ${plan.id}\`.`;
       if (isCodexHost(pluginRoot())) {
         emitDeny(
           `${reason} Codex PreToolUse supports deny, not interactive ask; raise the autonomy mode explicitly.`,
@@ -2345,6 +2170,7 @@ module.exports = {
   // Internals exposed for tests
   _internals: {
     isReadOnlyBash,
+    classifyBash,
     pluginVersion,
     readManifestVersion,
     semverCompare,
