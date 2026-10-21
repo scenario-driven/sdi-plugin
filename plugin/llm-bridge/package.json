@@ -1,0 +1,21 @@
+{
+  "name": "@scenario-driven/sdi-llm-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SDI llm-bridge sidecar — subscription (OAuth) LLM transport over ACP + SDK providers, proxied by sdid. (PRD-v2 D37)",
+  "license": "MIT",
+  "bin": {
+    "sdi-llm-bridge": "./src/index.mjs"
+  },
+  "main": "./src/index.mjs",
+  "scripts": {
+    "start": "node ./src/index.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@agent-devtools/core": "^1.3.0"
+  }
+}
