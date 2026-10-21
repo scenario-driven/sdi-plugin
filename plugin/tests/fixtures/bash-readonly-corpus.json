@@ -1,0 +1,1009 @@
+{
+  "description": "Shared corpus for the D21 read-only Bash classifier. readOnly=true cases must pass the gate; readOnly=false cases must be denied.",
+  "cases": [
+    {
+      "cmd": "command -v jq",
+      "readOnly": true
+    },
+    {
+      "cmd": "command -V jq",
+      "readOnly": true
+    },
+    {
+      "cmd": "command -v cmux || command -v sdi",
+      "readOnly": true
+    },
+    {
+      "cmd": "type jq",
+      "readOnly": true
+    },
+    {
+      "cmd": "type -P jq",
+      "readOnly": true
+    },
+    {
+      "cmd": "which jq",
+      "readOnly": true
+    },
+    {
+      "cmd": "test -f package.json",
+      "readOnly": true
+    },
+    {
+      "cmd": "[ -d src ]",
+      "readOnly": true
+    },
+    {
+      "cmd": "[[ -d src ]]",
+      "readOnly": true
+    },
+    {
+      "cmd": "[[ -d src && -f x ]]",
+      "readOnly": true
+    },
+    {
+      "cmd": "jq . package.json",
+      "readOnly": true
+    },
+    {
+      "cmd": "jq -r .name package.json",
+      "readOnly": true
+    },
+    {
+      "cmd": "ls -la",
+      "readOnly": true
+    },
+    {
+      "cmd": "cat README.md",
+      "readOnly": true
+    },
+    {
+      "cmd": "head -n 20 f",
+      "readOnly": true
+    },
+    {
+      "cmd": "wc -l f",
+      "readOnly": true
+    },
+    {
+      "cmd": "stat f",
+      "readOnly": true
+    },
+    {
+      "cmd": "env",
+      "readOnly": true
+    },
+    {
+      "cmd": "printenv PATH",
+      "readOnly": true
+    },
+    {
+      "cmd": "date",
+      "readOnly": true
+    },
+    {
+      "cmd": "date +%s",
+      "readOnly": true
+    },
+    {
+      "cmd": "pwd",
+      "readOnly": true
+    },
+    {
+      "cmd": "echo hi",
+      "readOnly": true
+    },
+    {
+      "cmd": "nl -ba f",
+      "readOnly": true
+    },
+    {
+      "cmd": "df -h .",
+      "readOnly": true
+    },
+    {
+      "cmd": "du -sh target",
+      "readOnly": true
+    },
+    {
+      "cmd": "ps -axo pid,command",
+      "readOnly": true
+    },
+    {
+      "cmd": "shasum -a 256 f",
+      "readOnly": true
+    },
+    {
+      "cmd": "sha256sum f",
+      "readOnly": true
+    },
+    {
+      "cmd": "md5 f",
+      "readOnly": true
+    },
+    {
+      "cmd": "cmp a b",
+      "readOnly": true
+    },
+    {
+      "cmd": "od -c f",
+      "readOnly": true
+    },
+    {
+      "cmd": "xxd f",
+      "readOnly": true
+    },
+    {
+      "cmd": "hostname",
+      "readOnly": true
+    },
+    {
+      "cmd": "rg -n foo src",
+      "readOnly": true
+    },
+    {
+      "cmd": "grep -rn foo src",
+      "readOnly": true
+    },
+    {
+      "cmd": "find . -name \"*.ts\"",
+      "readOnly": true
+    },
+    {
+      "cmd": "sort f",
+      "readOnly": true
+    },
+    {
+      "cmd": "tree -L 2",
+      "readOnly": true
+    },
+    {
+      "cmd": "uniq f",
+      "readOnly": true
+    },
+    {
+      "cmd": "sed -n '1,80p' f",
+      "readOnly": true
+    },
+    {
+      "cmd": "sed -n 1,80p f",
+      "readOnly": true
+    },
+    {
+      "cmd": "sed -n '455,520p' plugin/x.cjs",
+      "readOnly": true
+    },
+    {
+      "cmd": "sed 's/a/b/g' f",
+      "readOnly": true
+    },
+    {
+      "cmd": "sed -n '/start/,/end/p' f",
+      "readOnly": true
+    },
+    {
+      "cmd": "sed -e '1d' -e '$d' f",
+      "readOnly": true
+    },
+    {
+      "cmd": "awk 'NR<5' f",
+      "readOnly": true
+    },
+    {
+      "cmd": "awk '{print $1}' f",
+      "readOnly": true
+    },
+    {
+      "cmd": "awk -F: '$3 > 100 { print $1 }' /etc/passwd",
+      "readOnly": true
+    },
+    {
+      "cmd": "sqlite3 -readonly db.sqlite 'select count(*) from t'",
+      "readOnly": true
+    },
+    {
+      "cmd": "git status",
+      "readOnly": true
+    },
+    {
+      "cmd": "git log --oneline -5",
+      "readOnly": true
+    },
+    {
+      "cmd": "git show HEAD:README.md",
+      "readOnly": true
+    },
+    {
+      "cmd": "git diff HEAD~1",
+      "readOnly": true
+    },
+    {
+      "cmd": "git worktree list --porcelain",
+      "readOnly": true
+    },
+    {
+      "cmd": "git check-ignore -v .local/x",
+      "readOnly": true
+    },
+    {
+      "cmd": "git merge-base a b",
+      "readOnly": true
+    },
+    {
+      "cmd": "git rev-list --count a..b",
+      "readOnly": true
+    },
+    {
+      "cmd": "git grep -n foo",
+      "readOnly": true
+    },
+    {
+      "cmd": "git ls-remote origin",
+      "readOnly": true
+    },
+    {
+      "cmd": "git show-ref",
+      "readOnly": true
+    },
+    {
+      "cmd": "git config --get user.name",
+      "readOnly": true
+    },
+    {
+      "cmd": "git config --list",
+      "readOnly": true
+    },
+    {
+      "cmd": "git branch --show-current",
+      "readOnly": true
+    },
+    {
+      "cmd": "git branch -a",
+      "readOnly": true
+    },
+    {
+      "cmd": "git remote -v",
+      "readOnly": true
+    },
+    {
+      "cmd": "git tag -l",
+      "readOnly": true
+    },
+    {
+      "cmd": "git -C /repo status",
+      "readOnly": true
+    },
+    {
+      "cmd": "git --no-pager log --oneline -5",
+      "readOnly": true
+    },
+    {
+      "cmd": "git -c color.ui=always diff",
+      "readOnly": true
+    },
+    {
+      "cmd": "git status 2>/dev/null",
+      "readOnly": true
+    },
+    {
+      "cmd": "GIT_PAGER=cat git log -1",
+      "readOnly": true
+    },
+    {
+      "cmd": "cat f | jq .a | head -3",
+      "readOnly": true
+    },
+    {
+      "cmd": "cd x && git log",
+      "readOnly": true
+    },
+    {
+      "cmd": "ls # ; rm x",
+      "readOnly": true
+    },
+    {
+      "cmd": "(cat x 2>/dev/null || true)",
+      "readOnly": true
+    },
+    {
+      "cmd": "(cd x && git show-ref)",
+      "readOnly": true
+    },
+    {
+      "cmd": "if test -f x; then cat x; fi",
+      "readOnly": true
+    },
+    {
+      "cmd": "if [ -d a ]; then ls a; elif test -f b; then cat b; else pwd; fi",
+      "readOnly": true
+    },
+    {
+      "cmd": "for f in a b; do wc -l \"$f\"; done",
+      "readOnly": true
+    },
+    {
+      "cmd": "while read line; do echo \"$line\"; done",
+      "readOnly": true
+    },
+    {
+      "cmd": "{ git status; git ls-remote origin; } 2>/dev/null",
+      "readOnly": true
+    },
+    {
+      "cmd": "env X=1 ls",
+      "readOnly": true
+    },
+    {
+      "cmd": "nice -n 5 ls",
+      "readOnly": true
+    },
+    {
+      "cmd": "timeout 5 cat f",
+      "readOnly": true
+    },
+    {
+      "cmd": "time ls",
+      "readOnly": true
+    },
+    {
+      "cmd": "xargs -a list cat",
+      "readOnly": true
+    },
+    {
+      "cmd": "find . -name \"*.md\" | xargs wc -l",
+      "readOnly": true
+    },
+    {
+      "cmd": "cargo fmt --check",
+      "readOnly": true
+    },
+    {
+      "cmd": "cargo fmt --all -- --check",
+      "readOnly": true
+    },
+    {
+      "cmd": "cargo check",
+      "readOnly": true
+    },
+    {
+      "cmd": "gh pr view 5",
+      "readOnly": true
+    },
+    {
+      "cmd": "gh api repos/o/r/issues",
+      "readOnly": true
+    },
+    {
+      "cmd": "gh run view 1 --log",
+      "readOnly": true
+    },
+    {
+      "cmd": "clawket project resolve --cwd /x",
+      "readOnly": true
+    },
+    {
+      "cmd": "clawket task view T",
+      "readOnly": true
+    },
+    {
+      "cmd": "clawket task list --help",
+      "readOnly": true
+    },
+    {
+      "cmd": "cmux identify --json",
+      "readOnly": true
+    },
+    {
+      "cmd": "cmux read-screen --surface s",
+      "readOnly": true
+    },
+    {
+      "cmd": "cmux list-workspaces",
+      "readOnly": true
+    },
+    {
+      "cmd": "git hash-object f",
+      "readOnly": true
+    },
+    {
+      "cmd": "curl -sS -D - -o /dev/null http://127.0.0.1:4173/",
+      "readOnly": true
+    },
+    {
+      "cmd": "curl -fsS http://127.0.0.1:19500/openapi.json",
+      "readOnly": true
+    },
+    {
+      "cmd": "lsof -nP -iTCP -sTCP:LISTEN",
+      "readOnly": true
+    },
+    {
+      "cmd": "rustup toolchain list",
+      "readOnly": true
+    },
+    {
+      "cmd": "rustc --version",
+      "readOnly": true
+    },
+    {
+      "cmd": "rustfmt --edition 2024 --check a.rs",
+      "readOnly": true
+    },
+    {
+      "cmd": "security find-identity -v -p codesigning",
+      "readOnly": true
+    },
+    {
+      "cmd": "cmux top --processes",
+      "readOnly": true
+    },
+    {
+      "cmd": "for app in a b; do rg --files \"apps/$app/src\"; done",
+      "readOnly": true
+    },
+    {
+      "cmd": "git log \"origin/$BR\"",
+      "readOnly": true
+    },
+    {
+      "cmd": "sdi task brief TASK-1",
+      "readOnly": true
+    },
+    {
+      "cmd": "sdi task create --help",
+      "readOnly": true
+    },
+    {
+      "cmd": "sdi task help create",
+      "readOnly": true
+    },
+    {
+      "cmd": "sdi task list ROUND-1",
+      "readOnly": true
+    },
+    {
+      "cmd": "sdi plan list",
+      "readOnly": true
+    },
+    {
+      "cmd": "export PATH=\"$P/bin:$PATH\"; sdi plan list",
+      "readOnly": true
+    },
+    {
+      "cmd": "cd /repo; export PATH=\"$P/bin:$PATH\"; sdi plan create P SC-1",
+      "readOnly": true
+    },
+    {
+      "cmd": "PATH=/opt/sdi/bin:$PATH sdi plan list",
+      "readOnly": true
+    },
+    {
+      "cmd": "sdi scenario create P SC-1 --given \"a user (admin) exists\" --when \"x\" --then \"y\"",
+      "readOnly": true
+    },
+    {
+      "cmd": "echo hi > f",
+      "readOnly": false
+    },
+    {
+      "cmd": "echo hi >> f",
+      "readOnly": false
+    },
+    {
+      "cmd": "ls | tee f",
+      "readOnly": false
+    },
+    {
+      "cmd": "sed -i '' 's/a/b/' f",
+      "readOnly": false
+    },
+    {
+      "cmd": "sed -i.bak s/a/b/ f",
+      "readOnly": false
+    },
+    {
+      "cmd": "sed -n 'w out' f",
+      "readOnly": false
+    },
+    {
+      "cmd": "sed -n '1e rm -rf x' f",
+      "readOnly": false
+    },
+    {
+      "cmd": "sed 's/a/b/w out' f",
+      "readOnly": false
+    },
+    {
+      "cmd": "sed 's/a/b/e' f",
+      "readOnly": false
+    },
+    {
+      "cmd": "sed '1r other' f",
+      "readOnly": false
+    },
+    {
+      "cmd": "find . -delete",
+      "readOnly": false
+    },
+    {
+      "cmd": "find . -exec rm {} ;",
+      "readOnly": false
+    },
+    {
+      "cmd": "find . -fprint out",
+      "readOnly": false
+    },
+    {
+      "cmd": "find . -fls out",
+      "readOnly": false
+    },
+    {
+      "cmd": "ls | xargs rm",
+      "readOnly": false
+    },
+    {
+      "cmd": "xargs rm < list",
+      "readOnly": false
+    },
+    {
+      "cmd": "echo -delete | xargs find .",
+      "readOnly": false
+    },
+    {
+      "cmd": "echo $(rm -rf x)",
+      "readOnly": false
+    },
+    {
+      "cmd": "echo `rm x`",
+      "readOnly": false
+    },
+    {
+      "cmd": "eval rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "bash -c \"rm x\"",
+      "readOnly": false
+    },
+    {
+      "cmd": "sh -c \"rm x\"",
+      "readOnly": false
+    },
+    {
+      "cmd": "env X=1 rm -rf x",
+      "readOnly": false
+    },
+    {
+      "cmd": "env rm -rf x",
+      "readOnly": false
+    },
+    {
+      "cmd": "env -i bash",
+      "readOnly": false
+    },
+    {
+      "cmd": "env -S \"rm x\"",
+      "readOnly": false
+    },
+    {
+      "cmd": "command rm -rf x",
+      "readOnly": false
+    },
+    {
+      "cmd": "command -p rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "command -v jq; command rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "type jq && rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "nice rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "timeout 5 rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "time rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "jq . a > f",
+      "readOnly": false
+    },
+    {
+      "cmd": "sqlite3 db 'delete from t'",
+      "readOnly": false
+    },
+    {
+      "cmd": "sqlite3 -readonly db '.shell rm x'",
+      "readOnly": false
+    },
+    {
+      "cmd": "sqlite3 -readonly db \"select writefile('x','y')\"",
+      "readOnly": false
+    },
+    {
+      "cmd": "sqlite3 -readonly db",
+      "readOnly": false
+    },
+    {
+      "cmd": "awk 'BEGIN{system(\"rm x\")}'",
+      "readOnly": false
+    },
+    {
+      "cmd": "awk '{print > \"out\"}' f",
+      "readOnly": false
+    },
+    {
+      "cmd": "awk '{print | \"sh\"}' f",
+      "readOnly": false
+    },
+    {
+      "cmd": "awk -i inplace '{print}' f",
+      "readOnly": false
+    },
+    {
+      "cmd": "git checkout main",
+      "readOnly": false
+    },
+    {
+      "cmd": "git reset --hard",
+      "readOnly": false
+    },
+    {
+      "cmd": "git config user.name x",
+      "readOnly": false
+    },
+    {
+      "cmd": "git config set user.name x",
+      "readOnly": false
+    },
+    {
+      "cmd": "git branch -D feat",
+      "readOnly": false
+    },
+    {
+      "cmd": "git branch new",
+      "readOnly": false
+    },
+    {
+      "cmd": "git tag -d v1",
+      "readOnly": false
+    },
+    {
+      "cmd": "git tag v2",
+      "readOnly": false
+    },
+    {
+      "cmd": "git remote add o u",
+      "readOnly": false
+    },
+    {
+      "cmd": "git -c core.pager=\"rm -rf x\" log",
+      "readOnly": false
+    },
+    {
+      "cmd": "git -c core.pager='touch PWNED' log",
+      "readOnly": false
+    },
+    {
+      "cmd": "git -c alias.st=\"!rm x\" st",
+      "readOnly": false
+    },
+    {
+      "cmd": "git -c core.pager=./evil.sh log",
+      "readOnly": false
+    },
+    {
+      "cmd": "git -c core.fsmonitor=./evil status",
+      "readOnly": false
+    },
+    {
+      "cmd": "git -c diff.external=./x diff",
+      "readOnly": false
+    },
+    {
+      "cmd": "git diff --output=f",
+      "readOnly": false
+    },
+    {
+      "cmd": "git log --output=f",
+      "readOnly": false
+    },
+    {
+      "cmd": "git diff --ext-diff",
+      "readOnly": false
+    },
+    {
+      "cmd": "git grep -Ovim foo",
+      "readOnly": false
+    },
+    {
+      "cmd": "git push",
+      "readOnly": false
+    },
+    {
+      "cmd": "git stash",
+      "readOnly": false
+    },
+    {
+      "cmd": "cat <(rm x)",
+      "readOnly": false
+    },
+    {
+      "cmd": "diff <(ls) <(ls)",
+      "readOnly": false
+    },
+    {
+      "cmd": "cat <<EOF > f\nx\nEOF",
+      "readOnly": false
+    },
+    {
+      "cmd": "ls\nrm -rf x",
+      "readOnly": false
+    },
+    {
+      "cmd": "ls\ntouch PWNED",
+      "readOnly": false
+    },
+    {
+      "cmd": "git status\ngit push",
+      "readOnly": false
+    },
+    {
+      "cmd": "git status\r\nrm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "test -f x && rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "true; rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "echo ok & rm x",
+      "readOnly": false
+    },
+    {
+      "cmd": "ls &",
+      "readOnly": false
+    },
+    {
+      "cmd": "(rm x)",
+      "readOnly": false
+    },
+    {
+      "cmd": "if true; then rm x; fi",
+      "readOnly": false
+    },
+    {
+      "cmd": "a=(1 2)",
+      "readOnly": false
+    },
+    {
+      "cmd": "f() { ls; }",
+      "readOnly": false
+    },
+    {
+      "cmd": "((x=1))",
+      "readOnly": false
+    },
+    {
+      "cmd": "GIT_PAGER=./evil git log",
+      "readOnly": false
+    },
+    {
+      "cmd": "GIT_EXTERNAL_DIFF=./x git diff",
+      "readOnly": false
+    },
+    {
+      "cmd": "LD_PRELOAD=/tmp/x.so ls",
+      "readOnly": false
+    },
+    {
+      "cmd": "DYLD_INSERT_LIBRARIES=/tmp/x ls",
+      "readOnly": false
+    },
+    {
+      "cmd": "export GIT_PAGER=./evil; git log",
+      "readOnly": false
+    },
+    {
+      "cmd": "PATH=/tmp/evil:$PATH ls",
+      "readOnly": false
+    },
+    {
+      "cmd": "export PATH=/tmp/evil:$PATH; ls",
+      "readOnly": false
+    },
+    {
+      "cmd": "for PATH in /tmp; do ls; done",
+      "readOnly": false
+    },
+    {
+      "cmd": "BASH_ENV=./x ls",
+      "readOnly": false
+    },
+    {
+      "cmd": "rg --pre \"rm x\" foo",
+      "readOnly": false
+    },
+    {
+      "cmd": "rg --pre=./evil foo .",
+      "readOnly": false
+    },
+    {
+      "cmd": "sort -o f f",
+      "readOnly": false
+    },
+    {
+      "cmd": "sort --output=f f",
+      "readOnly": false
+    },
+    {
+      "cmd": "tree -o out",
+      "readOnly": false
+    },
+    {
+      "cmd": "date -s 2020",
+      "readOnly": false
+    },
+    {
+      "cmd": "date 0101000020",
+      "readOnly": false
+    },
+    {
+      "cmd": "hostname evil",
+      "readOnly": false
+    },
+    {
+      "cmd": "uniq in out",
+      "readOnly": false
+    },
+    {
+      "cmd": "xxd in out",
+      "readOnly": false
+    },
+    {
+      "cmd": "file -C -m magic",
+      "readOnly": false
+    },
+    {
+      "cmd": "printf -v PATH /tmp",
+      "readOnly": false
+    },
+    {
+      "cmd": "gh api repos/o/r/issues -f title=x",
+      "readOnly": false
+    },
+    {
+      "cmd": "gh api -F a=b repos/o/r/labels",
+      "readOnly": false
+    },
+    {
+      "cmd": "gh api --input body.json repos/o/r/issues",
+      "readOnly": false
+    },
+    {
+      "cmd": "gh api -X POST repos/o/r/issues",
+      "readOnly": false
+    },
+    {
+      "cmd": "gh run download 1",
+      "readOnly": false
+    },
+    {
+      "cmd": "gh release download v1",
+      "readOnly": false
+    },
+    {
+      "cmd": "gh pr merge 5",
+      "readOnly": false
+    },
+    {
+      "cmd": "cargo fmt",
+      "readOnly": false
+    },
+    {
+      "cmd": "cargo clippy --fix",
+      "readOnly": false
+    },
+    {
+      "cmd": "cargo build",
+      "readOnly": false
+    },
+    {
+      "cmd": "clawket task update T --status done",
+      "readOnly": false
+    },
+    {
+      "cmd": "cmux send hi",
+      "readOnly": false
+    },
+    {
+      "cmd": "cmux new-workspace",
+      "readOnly": false
+    },
+    {
+      "cmd": "cmux close-window --window 1",
+      "readOnly": false
+    },
+    {
+      "cmd": "git hash-object -w f",
+      "readOnly": false
+    },
+    {
+      "cmd": "curl -o out http://x",
+      "readOnly": false
+    },
+    {
+      "cmd": "curl -sSo out http://x",
+      "readOnly": false
+    },
+    {
+      "cmd": "curl -X POST http://x",
+      "readOnly": false
+    },
+    {
+      "cmd": "curl -d a=b http://x",
+      "readOnly": false
+    },
+    {
+      "cmd": "curl -O http://x/f",
+      "readOnly": false
+    },
+    {
+      "cmd": "rustup update",
+      "readOnly": false
+    },
+    {
+      "cmd": "rustc main.rs",
+      "readOnly": false
+    },
+    {
+      "cmd": "rustfmt a.rs",
+      "readOnly": false
+    },
+    {
+      "cmd": "security delete-keychain x",
+      "readOnly": false
+    },
+    {
+      "cmd": "rg $PAT src",
+      "readOnly": false
+    },
+    {
+      "cmd": "find \"$D\" -name x",
+      "readOnly": false
+    },
+    {
+      "cmd": "sed -n \"1,${n}p\" f",
+      "readOnly": false
+    },
+    {
+      "cmd": "node -e \"console.log(1)\"",
+      "readOnly": false
+    },
+    {
+      "cmd": "sdi task create ROUND-1 T-1 desc",
+      "readOnly": false
+    },
+    {
+      "cmd": "sdi task complete TASK-1 --evidence x",
+      "readOnly": false
+    },
+    {
+      "cmd": "sdi task start TASK-1",
+      "readOnly": false
+    }
+  ]
+}

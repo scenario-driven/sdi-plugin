@@ -1,0 +1,674 @@
+{
+  "source": "crates/cli/src/cli.rs",
+  "commands": {
+    "daemon": {
+      "aliases": [],
+      "subcommands": {
+        "start": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "stop": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "status": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "doctor": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "project": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "by-cwd": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "update": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "disable": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "enable": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "delete": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "cwd-attach": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "cwd-detach": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "plan": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "update": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "approve": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "complete": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "active": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "context": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "req": {
+      "aliases": [
+        "requirement"
+      ],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "update": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "delete": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "scenario": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "update": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "confirm": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "retire": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "unretire": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "search": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "claim": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "release": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "round": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "activate": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "complete": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "baseline": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "result": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "results": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "active": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "task": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "brief": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "start": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "block": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "cancel": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "complete": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "decompose": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "ancestors": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "descendants": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "subtree": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "relations": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "relate": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "unrelate": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "lease": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "heartbeat": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "release": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "lease-info": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "stats": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "preflight": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "decision": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "supersede": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "rollback": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "knowledge": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "update": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "delete": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "search": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "comment": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "update": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "delete": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "question": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "answer": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "run": {
+      "aliases": [],
+      "subcommands": {
+        "verify": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "status": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "budget": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "release-budget": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "start": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "finish": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "view": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "usage": {
+      "aliases": [],
+      "subcommands": {
+        "record": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "rollup": {
+          "aliases": [
+            "plan"
+          ],
+          "subcommands": null
+        }
+      }
+    },
+    "dashboard": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "handoff": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "next": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "timeline": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "board": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "wiki": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "summary": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "metrics": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "replay": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "export": {
+      "aliases": [],
+      "subcommands": {
+        "plans": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "knowledge": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "import": {
+      "aliases": [],
+      "subcommands": {
+        "plans": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "knowledge": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "autonomy": {
+      "aliases": [],
+      "subcommands": {
+        "set": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "get": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "circuit-breaker": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "agent-note": {
+      "aliases": [],
+      "subcommands": {
+        "append": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "handoffs": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "ack": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "retire": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "consensus": {
+      "aliases": [],
+      "subcommands": {
+        "status": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "pattern": {
+      "aliases": [],
+      "subcommands": {
+        "create": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "show": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "transition": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "abort": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "tree": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "chore": {
+      "aliases": [],
+      "subcommands": {
+        "list": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "done": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    },
+    "mcp": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "init": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "backup": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "restore": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "config": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "log": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "watch": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "completions": {
+      "aliases": [],
+      "subcommands": null
+    },
+    "bypass": {
+      "aliases": [],
+      "subcommands": {
+        "arm": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "disarm": {
+          "aliases": [],
+          "subcommands": null
+        },
+        "status": {
+          "aliases": [],
+          "subcommands": null
+        }
+      }
+    }
+  }
+}
