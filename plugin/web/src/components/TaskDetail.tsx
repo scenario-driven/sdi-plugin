@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Task, TaskStatus, Scenario, ScenarioResult, ScenarioEvidence } from '../types/entities';
+import type { Task, TaskStatus, Scenario, SubmittableScenarioResult, ScenarioEvidence } from '../types/entities';
 import { getJson, postJson, DaemonError } from '../lib/api';
 import { toastError, toastSuccess } from '../lib/toast';
 import { Badge, Button, Input, Textarea, Label, Select } from './ui';
@@ -20,11 +20,12 @@ const STATUS_VARIANT: Record<TaskStatus, 'default' | 'primary' | 'warning' | 'da
 };
 
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'blocked', 'done', 'cancelled'];
-const RESULTS: ScenarioResult[] = ['passing', 'failing', 'impacted', 'retired'];
+// needs_verification is daemon-assigned on carry-over and cannot be submitted.
+const RESULTS: SubmittableScenarioResult[] = ['passing', 'failing', 'impacted', 'retired'];
 
 interface EvidenceRow {
   scenarioId: string;
-  result: ScenarioResult;
+  result: SubmittableScenarioResult;
   evidenceRef: string;
   note: string;
 }
@@ -239,7 +240,7 @@ export function TaskDetail({ taskId, onClose, refreshKey }: TaskDetailProps) {
                       <Select
                         value={row.result}
                         onChange={(e) =>
-                          setEvidenceRows((rows) => rows.map((r, i) => (i === idx ? { ...r, result: e.target.value as ScenarioResult } : r)))
+                          setEvidenceRows((rows) => rows.map((r, i) => (i === idx ? { ...r, result: e.target.value as SubmittableScenarioResult } : r)))
                         }
                       >
                         {RESULTS.map((r) => (

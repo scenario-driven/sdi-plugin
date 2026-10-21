@@ -21,6 +21,7 @@ const RESULT_VARIANT: Record<ScenarioResultRow['result'], 'success' | 'danger' |
   failing: 'danger',
   impacted: 'warning',
   retired: 'default',
+  needs_verification: 'warning',
 };
 
 export function RoundDetail({ roundId, onClose, refreshKey }: RoundDetailProps) {

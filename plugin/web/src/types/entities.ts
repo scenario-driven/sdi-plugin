@@ -3,7 +3,11 @@
 
 export type PlanStatus = 'draft' | 'active' | 'completed';
 export type ScenarioStatus = 'draft' | 'confirmed';
-export type ScenarioResult = 'passing' | 'failing' | 'impacted' | 'retired';
+/** Verdicts an agent or user may submit as task evidence. */
+export type SubmittableScenarioResult = 'passing' | 'failing' | 'impacted' | 'retired';
+/** Every verdict the daemon reports. `needs_verification` is daemon-assigned:
+ *  a carried-over pass whose run evidence is stale. It is never submitted. */
+export type ScenarioResult = SubmittableScenarioResult | 'needs_verification';
 export type RoundStatus = 'planning' | 'active' | 'completed';
 export type RoundMode = 'strict-regression' | 'forward-only';
 export type InFlightPolicy = 'pause' | 'abort' | 'continue-on-noimpact';
