@@ -8,6 +8,16 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.10.1] - 2026-10-21
+
+### Fixed
+- **Codex installs ship the binaries and dashboard bundle.** The `dist` branch
+  now carries the Codex marketplace manifest (`.agents/plugins/`) alongside the
+  Claude Code one, so a Codex marketplace added with `--ref dist` installs the
+  same tree as Claude Code. A marketplace pinned to `main` received source only,
+  which left the plugin without `sdi`/`sdid` binaries and reported the dashboard
+  as "not built" even while the daemon served it.
+
 ## [0.10.0] - 2026-10-21
 
 ### Added
