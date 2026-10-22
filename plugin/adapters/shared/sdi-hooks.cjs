@@ -18,6 +18,7 @@ const http = require('http');
 const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
 const { classifyBash } = require('./bash-classifier.cjs');
+const { evaluateCommandPolicy } = require('./command-policy.cjs');
 const cliTree = require('../../scripts/cli-tree.cjs');
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1748,7 +1749,7 @@ function emitBypassWarning(gate, toolName, bypass, extra) {
 // PreToolUse: three gates, evaluated in order.
 //   1. D21 delegation gate — main session (no agent_id) cannot call execution
 //      tools. Edit/Write/MultiEdit/NotebookEdit always blocked; Bash blocked
-//      unless command matches the read-only whitelist. Sub-agents must have an
+//      unless command is read-only or matches a project command exception. Sub-agents must have an
 //      agent_type registered in plugin/agents/ (rogue-specialist guard).
 //   2. Active-task gate — block Edit/Write/Bash without a task in_progress.
 //   3. Autonomy gate (D14/D17/D18) — consult `/autonomy_policies/resolve`
@@ -1808,6 +1809,13 @@ async function runPreToolUse(input) {
   const isShellTool = toolName === 'Bash' || toolName === 'Monitor';
   const bashCmd = isShellTool ? String((input && input.tool_input && input.tool_input.command) || '') : null;
   const shellVerdict = isShellTool ? classifyBash(bashCmd) : null;
+  const commandPolicy = isShellTool ? evaluateCommandPolicy(bashCmd, { cwd, project }) : null;
+  if (commandPolicy) {
+    for (const diagnostic of commandPolicy.diagnostics) {
+      process.stderr.write(`[sdi] command policy ${diagnostic.source}: ${diagnostic.reason}; no command exceptions applied.\n`);
+      appendHookLog('pre_tool_use_command_policy_invalid', diagnostic);
+    }
+  }
   // File edits and non-read-only shell are the only actions that APPLY a
   // change; Agent/Task/SendMessage are the communication substrate (D19) and
   // read-only shell changes nothing.
@@ -1821,6 +1829,13 @@ async function runPreToolUse(input) {
           tool: toolName,
           reason: 'read-only-bash',
           cmd: bashCmd.slice(0, 200),
+        });
+      } else if (commandPolicy.allowedByPolicy) {
+        blocked = false;
+        appendHookLog('pre_tool_use_delegation_allow', {
+          tool: toolName,
+          reason: 'project-command-policy',
+          matches: commandPolicy.matches,
         });
       }
     }
@@ -1844,7 +1859,8 @@ async function runPreToolUse(input) {
           ? `[sdi] D21 delegation gate: main session may not run a mutating ${toolName} command. ` +
             `Not read-only: ${shellVerdict.reason}` +
             (shellVerdict.failingSegment ? ` (segment: "${shellVerdict.failingSegment.slice(0, 120)}")` : '') +
-            `. Delegate it to a specialist sub-agent via the Agent tool, or split the read-only part into its own command.`
+            `. Delegate it to a specialist sub-agent via the Agent tool, or split the read-only part into its own command. ` +
+            `Project command exceptions use permissions.allow in .sdi/settings.json or .sdi/settings.local.json.`
           : `[sdi] D21 delegation gate: main session may not call ${toolName}. ` +
             `Delegate to a specialist sub-agent via the Agent tool.`;
         emitDeny(reason);

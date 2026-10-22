@@ -71,7 +71,7 @@ Clawket v3.0은 LLM 네이티브 작업 관리 + 로컬 RAG 도구다. 워크플
 | D18 | Circuit breaker | 사용자는 언제든 즉시 모든 autonomy mode 를 L3(always ask) 로 강등 가능. 트리거는 UI 단일 액션, 즉시 발효. inflight 결정은 next gate 에서 적용. |
 | D19 | Substrate 항시 작동 | M1~M5(§5 Layer 2.5) 는 autonomy mode 와 독립적으로 항상 작동. autonomy mode 는 합의된 결정의 사용자 게이트 위치만 통제. 단순 task delegation 만 일어나는 패턴은 anti-pattern. |
 | D20 | Consensus 게이트 | 단일 agent 결정 = L3 max(항상 사용자 확인). multi-agent consensus(≥2 agent 일치) = autonomy mode 에 따라 L4/L5 unlock. dissensus(결정 충돌) = mode 무관 항상 사용자 escalation. |
-| D21 | Delegation 강제 | 메인 세션은 plan/decompose/dispatch 만. execution 도구(`Edit`/`Write`/`NotebookEdit`/mutating `Bash`) 는 PreToolUse hook 에서 차단 → specialist sub-agent 위임 강제. D13 의 메커니컬 enforcement 면. |
+| D21 | Delegation 강제 | 메인 세션은 plan/decompose/dispatch 를 담당하고 execution 도구는 specialist 에 위임한다. 사용자 command policy 와 일치하는 shell 명령만 D21 예외이며 다른 게이트와 identity 제한은 유지한다. [예외 계약](design/command-policy.md). |
 | D22 | CollaborationPattern 1등 시민 | 7번째 1등 시민 entity. `kind` ∈ {workflow, graph, swarm, agents-as-tools, direct}, `applies_to` ∈ {plan, requirement, scenario, task, decision, round}. lifecycle = pending → active → converged \| dissensus \| aborted. AWS 4패턴 (D15) 의 entity 표현. |
 | D23 | Pattern provenance | 모든 work entity (plan/requirement/scenario/task/decision/round) 는 `produced_via_pattern_id` 컬럼을 보유 (nullable FK → collaboration_pattern). `direct` 패턴은 메인 1인극 명시 마커 — anti-pattern 인지 가능. |
 | D24 | Pattern 재귀 | `parent_pattern_id` 자기참조 FK + depth cap (default 3). DAG 만 허용 (cycle 차단). 한 패턴이 sub-pattern 을 spawn 가능 — 패턴 자체가 또 다른 패턴의 산출물이 될 수 있음. |
@@ -128,13 +128,13 @@ AWS 의 4가지 multi-agent 패턴 — **Workflow**(고정 순서), **Graph**(DA
 
 autonomy 의 자율성은 "합의 후 게이트" 단위이지 "단일 의견" 단위가 아니다. consensus / dissensus 의 entity 표현은 §3 의 Decision.kind 필드로 처리한다.
 
-### D21. Mandatory Delegation Gate — execution 은 항상 specialist sub-agent
+### D21. Mandatory Delegation Gate — specialist execution 과 명시적 shell 예외
 
-orchestrator (메인 세션) 는 **plan / decompose / dispatch** 만 수행한다. 실제 코드·문서 변경, mutating shell, 외부 부수효과는 **반드시 Layer 2 specialist sub-agent 에 위임** 해야 한다. 메인 세션이 execution 도구를 직접 호출하면 PreToolUse hook 이 거부한다.
+orchestrator (메인 세션) 는 **plan / decompose / dispatch** 를 담당한다. 실제 코드·문서 변경과 일반 execution 은 **Layer 2 specialist sub-agent 에 위임** 한다. 사용자가 [프로젝트 command policy](design/command-policy.md)에 등록한 shell 명령은 D21 제한의 명시적 예외다. 허용한 명령의 실행·쓰기 효과는 사용자 책임이며, 예외는 specialist identity 나 편집 도구 권한을 부여하지 않고 다른 적용 게이트를 유지한다.
 
-- **메커니컬 enforcement**: PreToolUse hook 에서 `hookInput.agent_id` 부재 = 메인 세션 → execution 도구 (`Edit`, `Write`, `NotebookEdit`, mutating `Bash`) 차단. `agent_id` 존재 = Agent 도구로 spawn 된 sub-agent → 통과. 신호는 Claude Code 공식 hook contract (`code.claude.com/docs/en/hooks`).
+- **메커니컬 enforcement**: PreToolUse hook 에서 `hookInput.agent_id` 부재 = 메인 세션 → execution 도구 (`Edit`, `Write`, `NotebookEdit`, policy 예외가 없는 mutating `Bash`) 차단. `agent_id` 존재 = Agent 도구로 spawn 된 sub-agent → 통과. 신호는 Claude Code 공식 hook contract (`code.claude.com/docs/en/hooks`).
 - **read-only / planning 도구는 항상 허용**: `Read`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `Agent`, `TaskCreate/Update/List`, `SendMessage`, `ScheduleWakeup`, MCP read-only — 메인이 분해 / 위임 수행에 필요.
-- **read-only Bash 허용**: `git status`, `cargo check`, `pnpm typecheck` 등 부수효과 없는 명령. 화이트리스트 매칭 통과 시 메인도 직접 실행 가능. 매칭 실패 = 차단 → specialist 위임 필요.
+- **read-only Bash 허용**: `git status`, `cargo check`, `pnpm typecheck` 등 부수효과 없는 명령. 화이트리스트 매칭 통과 시 메인도 직접 실행 가능. read-only 판정과 별개로 프로젝트 command policy 의 예외를 적용하며, 둘 다 허용하지 않으면 차단 → specialist 위임 필요.
 - **specialist 정합성**: sub-agent 의 `agent_type` 은 AgentSpec (§3.8) 에 등록된 specialist 이름과 일치해야 한다. 미등록 type 으로 spawn 된 sub-agent 의 execution 도 차단 (rogue agent 방지).
 - **L3 (circuit breaker / 신중 모드) 우회**: Layer 3 circuit breaker 가 트리거되면 메인에 한해 임시로 차단 해제 (사용자가 직접 통제 모드). 단 모든 차단 해제 호출은 `audit=manual-override` 로 활동 로그에 적재.
 - **emergency bypass**: 권장 surface 는 `sdi bypass arm --reason "<짧은 사유>"` — daemon-친화 CLI 가 `~/.cache/sdi/bypass-once` 에 JSON 마커(`{reason, armed_at, expires_at, ttl_seconds}`) 를 쓴다. 한 마커가 변경성 PreToolUse 게이트 전체(D21 위임, 활성 태스크, D29 클레임 겹침) 를 다음 한 번의 도구 호출 동안 해제하고 hook 이 honor 직전 파일을 삭제. TTL 기본 60초 (`--ttl <초>`), 만료 마커는 정리만 되고 게이트는 열지 않음. `sdi` 는 D21 read-only Bash 화이트리스트에 있어 메인 세션이 직접 무장 가능 — 우회 substrate 가 우회를 다시 위임에 가두는 self-deadlock 을 구조적으로 차단. `sdi bypass status` 로 상태 / TTL 잔여 / reason 확인, `sdi bypass disarm` 으로 제거(멱등). 매 무장 + 소비는 stderr 경고 + 게이트별 audit 이벤트(`pre_tool_use_delegation_bypass`, `pre_tool_use_active_task_bypass`, `pre_tool_use_claim_bypass`) 로 적재. 본 surface 도달이 불가능한 환경(예: 셸 rc 에 export 가 강제된 CI) 용 startup-time fallback: `SDI_DELEGATION_BYPASS=1` env-var — Claude Code 를 해당 env 가 export 된 셸에서 새로 띄울 때만 작동. 인라인 `VAR=1 cmd` 프리픽스는 hook spawn 전에 expand 되지 않아 닿지 않음. routine bypass 는 protocol violation — audit 대상.
@@ -836,13 +836,13 @@ Layer 1 의 책임 분리 (allowed / forbidden) 를 **PreToolUse hook 에서 메
 
 | 분류 | 도구 | 메인 처리 |
 |---|---|---|
-| **차단 (execution)** | `Edit`, `Write`, `NotebookEdit`, mutating `Bash` (화이트리스트 미통과) | 거부 → specialist 위임 |
+| **차단 (execution)** | `Edit`, `Write`, `NotebookEdit`, mutating `Bash` (read-only 판정 및 command policy 예외 미통과) | 거부 → specialist 위임 |
 | **허용 (read-only)** | `Read`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, MCP read tools | 통과 |
 | **허용 (read-only Bash)** | `git status`, `git log`, `git diff`, `cargo check`, `cargo clippy`, `pnpm typecheck`, `pnpm lint`, `ls`, `cat`, `head`, `tail`, `grep`, `find` (no `-delete`) | 화이트리스트 매칭 시 통과 |
 | **허용 (orchestration)** | `Agent`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `ScheduleWakeup`, `Skill` | 통과 |
 | **허용 (MCP write — Clawket / SDI 자체)** | `clawket task ...`, `sdi ...` 류 MCP tool 및 Bash 호출 | 통과 (메타 워크 관리는 차단 대상 아님) |
 
-mutating Bash 판정은 화이트리스트 (read-only) + 블랙리스트 (`destructive-patterns.json` 의 카탈로그) 의 교집합. 둘 다에 안 잡히는 회색 영역은 기본 차단 → 사용자가 명시 등록.
+shell classifier 의 read-only 판정과 사용자 command policy 의 실행 허용은 독립적이다. [Command policy 계약](design/command-policy.md)이 설정 소유권·로딩·인자 매칭·복합 명령·프로젝트 경계를 정의한다. 예외는 메인 shell 위임 제한에만 적용하고 활성 태스크·클레임·자율성 등 다른 게이트를 해제하지 않는다.
 
 **Sub-agent 측 처리**:
 - `hookInput.agent_id` 가 있으면 위 차단을 적용하지 않는다. specialist 는 자기 영역에서 자유롭게 execution.
@@ -1101,7 +1101,7 @@ AgentSpec.system_prompt 변경은 decision-kind = `agent-spec-change` 로 분류
 12. **Dissensus mode 무관 escalate**: Decision `kind=dissensus` 가 적재되면, plan 의 autonomy mode (L3/L4/L5) 와 무관하게 사람 게이트로 즉시 escalate. L5 plan 도 dissensus 는 자동 적용 대상이 아니다. circuit breaker (Layer 3) 가 트리거된 경우도 동일 — mode 우회 불가.
 13. **Layer 1 결정 권한 금지**: orchestrator 가 시나리오 분해 / 구현 방식 선택 / disruption 해결안 채택 / Decision 본문 작성 중 하나라도 시도하면 거부. 이들은 Layer 2 specialist 간 합의 (M3) 에서만 발생해야 한다.
 14. **architecture / schema / naming-canonical L4 강제**: 이 3개 scope 의 Decision 적용 시 mode 가 L5 로 설정되어 있어도 L4 게이트 (timed auto-apply) 로 강제 강등. L5 즉시 적용 경로로 우회 불가.
-15. **Delegation gate (D21) 메커니컬 enforcement**: 메인 세션 (`hookInput.agent_id` 부재) 에서 `Edit` / `Write` / `NotebookEdit` 호출 시 PreToolUse hook 이 거부. mutating Bash (화이트리스트 미통과 + 부수효과 가능) 도 거부. Agent 도구로 spawn 된 sub-agent (`hookInput.agent_id` 존재) 는 통과. 미등록 `agent_type` 의 sub-agent execution 은 `rogue-specialist` 코드로 거부. 메인 차단 우회 경로는 두 surface: (a) `sdi bypass arm --reason "<짧은 사유>" [--ttl <초>]` — 실행 중 세션용 primary CLI verb, XDG-cache 마커, one-shot (TTL 기본 60초, 만료 마커는 정리 only / 게이트 미개방), 한 마커가 변경성 게이트 전체(D21 / 활성 태스크 / D29) 를 동시 해제 + 게이트별 audit 이벤트(`pre_tool_use_delegation_bypass`, `pre_tool_use_active_task_bypass`, `pre_tool_use_claim_bypass`) 적재; (b) `SDI_DELEGATION_BYPASS=1` env (startup-time only — Claude Code 를 해당 env export 셸에서 새로 띄울 때만 작동, 인라인 `VAR=1 cmd` 는 닿지 않음). 별도로 circuit breaker (Layer 3) 트리거 시 메인 차단이 세션 단위로 임시 해제되며 audit log 가 `audit=circuit-override` 로 적재된다. 모든 경로가 activity log 적재.
+15. **Delegation gate (D21) 메커니컬 enforcement**: 메인 세션 (`hookInput.agent_id` 부재) 에서 `Edit` / `Write` / `NotebookEdit` 호출 시 PreToolUse hook 이 거부. mutating Bash (read-only 판정 및 [command policy](design/command-policy.md) 예외 미통과) 도 거부. 정책 예외는 D21 shell 제한에만 적용하며 read-only 분류·다른 게이트·specialist identity 를 바꾸지 않는다. Agent 도구로 spawn 된 sub-agent (`hookInput.agent_id` 존재) 는 통과. 미등록 `agent_type` 의 sub-agent execution 은 `rogue-specialist` 코드로 거부. 메인 차단 우회 경로는 두 surface: (a) `sdi bypass arm --reason "<짧은 사유>" [--ttl <초>]` — 실행 중 세션용 primary CLI verb, XDG-cache 마커, one-shot (TTL 기본 60초, 만료 마커는 정리 only / 게이트 미개방), 한 마커가 변경성 게이트 전체(D21 / 활성 태스크 / D29) 를 동시 해제 + 게이트별 audit 이벤트(`pre_tool_use_delegation_bypass`, `pre_tool_use_active_task_bypass`, `pre_tool_use_claim_bypass`) 적재; (b) `SDI_DELEGATION_BYPASS=1` env (startup-time only — Claude Code 를 해당 env export 셸에서 새로 띄울 때만 작동, 인라인 `VAR=1 cmd` 는 닿지 않음). 별도로 circuit breaker (Layer 3) 트리거 시 메인 차단이 세션 단위로 임시 해제되며 audit log 가 `audit=circuit-override` 로 적재된다. 모든 경로가 activity log 적재.
 16. **Pattern provenance (D22, D23) NOT NULL**: 신규 work entity (plan/requirement/scenario/task/decision/round) 생성 시 `produced_via_pattern_id` 가 NOT NULL. 메인이 명시 ID 없이 생성 시도 시 daemon 이 자동으로 `kind='direct'` CollaborationPattern row 를 만들고 그 ID 부여 + AutonomyPolicy 자동 L3 cap + 활동 로그 `audit=direct-pattern-marker` 적재. 마이그레이션 시점 legacy row 만 NULL 허용.
 17. **Pattern shape gate (D26, D27b)**: CollaborationPattern.lifecycle `pending → active` 전이 시 kind 별 shape validation 통과 강제. workflow: `steps_json` len ≥ 2; graph: `reviewers_json` 의 (AgentSpec.name, AgentSpec.stance) tuple distinct ≥ 2; swarm: `fan_out_json` len ≥ 2; agents-as-tools: `peer_registration_json` len ≥ 1. 미통과 시 pending 에 머무름 — active 전이 거부. `direct` 만 shape 검증 면제 (자동 L3 cap 부담).
 18. **Graph consensus sybil 차단 (D26)**: Decision.kind='consensus' 적재 시 `proposers_json` 의 (AgentSpec.name, AgentSpec.stance) tuple distinct ≥ 2 강제. 동일 (name, stance) 가 2회 등재되면 거부. AgentSpec 의 stance ∈ {proposer, devil_advocate, schema_guardian, performance_reviewer, security_reviewer, neutral}. 같은 `impl-coder` 2 인스턴스 (둘 다 stance=proposer) 는 consensus 자격 0 — 진짜 다양성 없음.

@@ -52,7 +52,7 @@ Two non-first-class persistent entities back the multi-agent substrate: **AgentN
 - **D18 — circuit breaker always on.** One UI action demotes every policy row to L3 immediately; in-flight decisions apply at the next gate.
 - **D19 — substrate runs mode-independent.** M1 blackboard, M2 hand-off, M3 negotiation, M4 scenario-as-contract, M5 self-organization keep working in any mode; mode only positions the user gate on consensus.
 - **D20 — consensus is the gate unit.** Single-agent decision = L3 max. Multi-agent consensus unlocks L4/L5. Dissensus always escalates regardless of mode.
-- **D21 — mandatory delegation gate.** Orchestrator (main session) is forbidden from calling execution tools (`Edit`/`Write`/`NotebookEdit`/mutating `Bash`). PreToolUse hook detects `hookInput.agent_id` absence and blocks the call — the only legitimate path is `Agent`-spawned specialist sub-agents. This is D13's mechanical enforcement face: the anti-pattern is structurally impossible, not just documented.
+- **D21 — mandatory delegation gate.** Orchestrator (main session) delegates execution tools (`Edit`/`Write`/`NotebookEdit`/mutating `Bash`); explicitly configured project command exceptions apply only to shell delegation. PreToolUse blocks unconfigured main execution; native specialist dispatch supplies the identity for implementation. Project command exceptions do not grant that identity.
 - **D22 — CollaborationPattern as the seventh entity.** AWS's four patterns (Workflow / Graph / Swarm / Agents-as-Tools) become persistent DB rows with lifecycle (pending → active → converged | dissensus | aborted). `direct` is the anti-pattern marker, not an escape.
 - **D23 — pattern provenance is NOT NULL.** Every new work entity carries `produced_via_pattern_id`; main sessions that omit it get an auto `direct` row with a red dashboard badge + L3 cap + audit log.
 - **D24 — pattern recursion via DAG.** `parent_pattern_id` self-FK, depth ≤ `AutonomyPolicy.pattern_depth_cap` (default 3). A pattern's step can spawn sub-patterns; cycles are blocked.
@@ -63,6 +63,30 @@ Two non-first-class persistent entities back the multi-agent substrate: **AgentN
 - **D29 — multi-session resource claims.** Scenario.claimed_resources_json (path globs) + claim_status give the daemon a decision-router role: cross-session overlap is blocked at PreToolUse with a merge-or-wait prompt. Optional `plan_single_session_lock` for high-conflict plans.
 
 The full L3/L4/L5 semantics, scope matrix, circuit-breaker triggers, delegation-gate tool classification, and pattern integrity rules are spelled out in **[`docs/PRD.md`](./docs/PRD.md)** §3.7, §3.9, §5 Layer 0 / 1.5 / 2.6 / 2.7 / 2.8 / 3.
+
+---
+
+## Project command exceptions
+
+Add shell commands that the main session may execute to the registered project
+root's `.sdi/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": ["orca skills get orchestration", "orca orchestration send *"]
+  }
+}
+```
+
+Use `.sdi/settings.local.json` for personal additions and exclude it from Git.
+Both files' lists merge and reload on each invocation in Claude Code and Codex.
+A command without a wildcard matches exactly; terminal ` *` permits additional
+arguments. Users own the allowed commands' execution and write effects.
+Exceptions affect only shell delegation, retain other gates, and do not grant
+editor access or specialist identity. Native host permissions remain separate.
+See the [command policy contract](docs/design/command-policy.md) for matching
+boundaries and the [external orchestration procedure](docs/COMPATIBILITY.md#supported-execution-procedure).
 
 ---
 

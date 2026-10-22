@@ -29,7 +29,7 @@ Canonical spec: [`../docs/PRD.md`](../docs/PRD.md) (decisions D1–D29).
 ## Specialist agents
 
 The plugin ships 11 specialist agents under `agents/`. Multi-agent collaboration
-is the body of SDI (D13), so the orchestrator never executes — it delegates.
+is the body of SDI (D13), so the orchestrator delegates implementation to specialists.
 
 | Agent | Role |
 |---|---|
@@ -60,7 +60,19 @@ The hook chain layered on top of Claude Code:
 D21 delegation gate: the orchestrator (main session) is blocked from calling
 execution tools (`Edit` / `Write` / `MultiEdit` / `NotebookEdit` / mutating
 `Bash`). Only `Agent`-spawned specialists carry the `hookInput.agent_id` that
-satisfies the gate.
+satisfies the native delegation path; project command exceptions provide the
+explicit shell-only alternative described below.
+
+Project command exceptions are configured in the owning project's
+`.sdi/settings.json` or Git-excluded `.sdi/settings.local.json`, under
+`permissions.allow`. Both host adapters merge and reload these lists on each
+invocation. Exact commands and terminal ` *` argument-prefix rules may permit
+main-session shell execution; users own all effects of those allowed commands.
+These exceptions do not change read/write classification, grant editor access
+or specialist identity, or remove other applicable gates. Native host permission
+settings remain independent. See the
+[command policy contract](../docs/design/command-policy.md) and
+[external orchestration procedure](../docs/COMPATIBILITY.md#supported-execution-procedure).
 
 D26 pattern integrity (advisory): two complementary triggers steer the session
 toward a real CollaborationPattern before work fans out under the L3-capped

@@ -47,6 +47,23 @@ invariants:
    the daemon; the plugin only **reads** the port file. See
    [ARCHITECTURE.md](./ARCHITECTURE.md#data-location-lm-8-invariant).
 
+## Project command policy
+
+The [command policy contract](design/command-policy.md) owns configuration,
+matching boundaries, and user responsibility for allowed command effects.
+Both host adapters share the following enforcement points:
+
+| Responsibility | Implementation |
+|---|---|
+| Resolve owning registered root, load and validate both settings files | `plugin/adapters/shared/command-policy.cjs`: `resolvePolicyRoot`, `loadCommandPolicy` |
+| Match parsed argument vectors and supported compound segments | `plugin/adapters/shared/command-policy.cjs`: `evaluateCommandPolicy`; shared lexer in `bash-classifier.cjs` |
+| Apply main-shell delegation exception and record matched rules | `plugin/adapters/shared/sdi-hooks.cjs`: `runPreToolUse` |
+
+Policy permission remains separate from read-only classification. A match
+changes only the main session's shell delegation decision; editor tools,
+external-worker identity, and other applicable gates retain their normal rules.
+Native host permission files are independent and are not imported.
+
 ## PRD §6 acceptance criteria — enforcement map
 
 | # | Criterion                          | Enforcement point                     | Status        |

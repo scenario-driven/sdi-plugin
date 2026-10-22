@@ -39,6 +39,47 @@ API is the only coupling point — any break to the wire shape on a consumed
 route is a workspace major bump here, while `sdi-desktop` tags move on their
 own cadence in their own repo.
 
+## Project command exceptions and external orchestration
+
+Claude Code and Codex share the [project command policy](design/command-policy.md).
+Projects declare exceptions in `.sdi/settings.json`; personal additions use the
+Git-excluded `.sdi/settings.local.json`. The two `permissions.allow` arrays are
+combined on each invocation. Native host permission files remain independent.
+
+A matching command passes only the main-session shell delegation restriction.
+Users are responsible for the execution and write effects of their allowed
+commands. A policy match does not relabel a mutating command as read-only,
+grant editor access, authenticate a specialist, or remove active-task, resource,
+autonomy, or other applicable gates.
+
+For example, users may explicitly permit Orca guide retrieval, queue consumption,
+acknowledgment, message delivery, worker start, or completion reporting. These
+operations have different effects: retrieval inspects data, queue consumption
+and acknowledgment change delivery state, messaging enqueues data, and worker
+start/completion change task lifecycle state. Configure each required command
+and argument prefix rather than treating all Orca commands as reads. The policy
+contract defines exact and terminal ` *` matching, compound-command boundaries,
+project isolation, and invalid-configuration behavior.
+
+### Supported execution procedure
+
+Run a supported Claude Code or Codex host as the external coordinating session.
+Configure only the shell commands that this project intends that main session
+to execute. The session reads the project contract and uses native specialist
+dispatch for implementation and independent verification. Specialists check their
+task brief, project, and workspace; recorded SDI runs supply acceptance evidence.
+The coordinator may use policy-authorized shell commands to communicate the
+result through its external orchestration tool.
+
+Command permission does not establish an external-worker identity protocol.
+Copied IDs, environment variables, active-task hints, and declared specialist
+types do not authenticate an external worker or bind it to a task. An ordinary
+external session retains main-session editing restrictions. Implementation
+requires the native specialist identity supplied by the host; external queue or
+task identifiers do not replace it. SDI's native delegation boundary remains
+consistent with [the external-protocol scope](PRD.md#d15-aws-4패턴-내장-a2a-v1-제외).
+Gate disabling, bypasses, and fabricated identities are not integration steps.
+
 ## Breaking-change gates
 
 Any change to one of the following triggers a workspace **major** bump:

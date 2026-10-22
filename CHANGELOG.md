@@ -8,6 +8,20 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.11.0] - 2026-10-22
+
+### Added
+- **Project command exceptions.** Both host adapters read `permissions.allow`
+  from `.sdi/settings.json` and `.sdi/settings.local.json`. Exact commands and
+  terminal ` *` argument-prefix rules allow explicitly selected shell commands
+  through the main-session delegation restriction. Shared and personal entries
+  merge, and each invocation reloads them from the owning project root.
+- Policy diagnostics identify invalid settings and matched rules. Allowed
+  commands retain their actual read/write classification; users own their
+  effects. Exceptions do not grant editor access or external-worker identity,
+  and other applicable gates remain in force. See the
+  [command policy contract](docs/design/command-policy.md).
+
 ## [0.10.1] - 2026-10-21
 
 ### Fixed

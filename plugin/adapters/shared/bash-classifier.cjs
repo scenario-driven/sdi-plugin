@@ -61,6 +61,8 @@ const COMPOUND_OPENERS = {
 // expansion whose run-time value is unknown.
 function lex(src) {
   const segments = [];
+  const syntax = { operators: false, redirects: false, compounds: false, comments: false, invalidChain: false };
+  let pendingOperator = null;
   let cur = { words: [], start: 0 };
   let i = 0;
   const n = src.length;
@@ -79,6 +81,11 @@ function lex(src) {
   const endChain = (at, next) => {
     endSegment(at, next);
     afterClose = false;
+  };
+  const chainOperator = (operator) => {
+    syntax.operators = true;
+    if (cur.words.length === 0 && !afterClose) syntax.invalidChain = true;
+    pendingOperator = operator;
   };
   const fail = (reason) => {
     const lineEnd = src.slice(i).search(/[;&|\n\r]/);
@@ -145,7 +152,7 @@ function lex(src) {
 
   function readWord() {
     const start = i;
-    const word = { value: '', raw: '', quoted: false, dynamic: false, glob: false };
+    const word = { value: '', raw: '', quoted: false, dynamic: false, glob: false, expanding: false };
     while (i < n) {
       const c = src[i];
       if (' \t\n\r;|&<>()'.includes(c)) break;
@@ -178,6 +185,7 @@ function lex(src) {
       if (c === '`') throw new LexError('command substitution (backtick)');
       if (c === '$') {
         if (src[i + 1] === "'") {
+          word.expanding = true;
           // ANSI-C quoting: literal text with backslash escapes.
           let j = i + 2;
           while (j < n && src[j] !== "'") j += src[j] === '\\' ? 2 : 1;
@@ -188,6 +196,7 @@ function lex(src) {
           continue;
         }
         if (src[i + 1] === '"') {
+          word.expanding = true;
           i += 2;
           readDoubleQuoted(word);
           continue;
@@ -196,6 +205,7 @@ function lex(src) {
         continue;
       }
       if ('*?['.includes(c)) word.glob = true;
+      if (c === '{' || (c === '~' && word.value.length === 0)) word.expanding = true;
       word.value += c;
       i += 1;
     }
@@ -215,12 +225,14 @@ function lex(src) {
         continue;
       }
       if (c === '\n' || c === '\r') {
+        syntax.operators = true;
         if (dbracket) return fail('unterminated `[[`');
         endChain(i, i + 1);
         i += 1;
         continue;
       }
       if (c === '#') {
+        syntax.comments = true;
         // A word-initial `#` starts a comment the shell never executes.
         while (i < n && src[i] !== '\n' && src[i] !== '\r') i += 1;
         continue;
@@ -241,28 +253,33 @@ function lex(src) {
       } else {
         const two = src.slice(i, i + 2);
         if (two === '&&' || two === '||') {
+          chainOperator(two);
           endChain(i, i + 2);
           i += 2;
           continue;
         }
         if (two === ';;' || two === ';&') return fail('`case` statement syntax');
         if (c === ';') {
+          chainOperator(c);
           endChain(i, i + 1);
           i += 1;
           continue;
         }
         if (two === '|&') {
+          chainOperator(two);
           endChain(i, i + 2);
           i += 2;
           continue;
         }
         if (c === '|') {
+          chainOperator(c);
           endChain(i, i + 1);
           i += 1;
           continue;
         }
         const rm = REDIRECT_RE.exec(src.slice(i));
         if (rm) {
+          syntax.redirects = true;
           const op = rm[2];
           i += rm[0].length;
           if (op === '<<' || op === '<<-') return fail('heredoc');
@@ -278,6 +295,7 @@ function lex(src) {
         }
         if (c === '&') return fail('background execution `&`');
         if (c === '(') {
+          syntax.compounds = true;
           if (src[i + 1] === '(') return fail('arithmetic command `((…))`');
           // A subshell opens only in command position, separated from any
           // preceding word — `a=(…)` arrays and `f() {…}` definitions fail.
@@ -298,10 +316,12 @@ function lex(src) {
         }
       }
       const word = readWord();
+      pendingOperator = null;
       if (afterClose) return fail(`unexpected word \`${word.raw}\` after a compound command`);
       if (!dbracket && atCmdStart && !word.quoted) {
         const kw = COMPOUND_OPENERS[word.value];
         if (kw) {
+          syntax.compounds = true;
           const top = stack[stack.length - 1];
           if (kw.requires && top !== kw.requires) return fail(`\`${word.value}\` without a matching opener`);
           if (kw.pop) stack.pop();
@@ -330,8 +350,9 @@ function lex(src) {
   }
   if (dbracket) return fail('unterminated `[[`');
   if (stack.length > 0) return fail(`unterminated compound command (open: ${stack.join(', ')})`);
+  if (pendingOperator && pendingOperator !== ';') syntax.invalidChain = true;
   endSegment(n, n);
-  return { segments };
+  return { segments, syntax };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1540,4 +1561,4 @@ function classifyBash(cmd) {
   return { readOnly: true, reason: 'every segment is read-only', failingSegment: null };
 }
 
-module.exports = { classifyBash, _internals: { lex, sedScriptVerdict, awkProgramVerdict, COMMANDS } };
+module.exports = { classifyBash, _internals: { lex, classifySimple, sedScriptVerdict, awkProgramVerdict, COMMANDS } };

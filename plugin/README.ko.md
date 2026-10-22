@@ -25,7 +25,7 @@
 
 ## 전문가 에이전트
 
-플러그인은 `agents/` 아래에 11개의 전문가 에이전트를 제공한다. 멀티 에이전트 협업이 SDI 의 본체이므로(D13), 오케스트레이터는 결코 실행하지 않는다 — 위임한다.
+플러그인은 `agents/` 아래에 11개의 전문가 에이전트를 제공한다. 멀티 에이전트 협업이 SDI 의 본체이므로(D13), 오케스트레이터는 구현을 전문가에게 위임한다.
 
 | 에이전트 | 역할 |
 |---|---|
@@ -53,7 +53,28 @@ Claude Code / Codex 위에 얹힌 훅 체인:
 | `PostToolUse` | 활성 시나리오 / 태스크에 파일 변경을 기록; `Edit`, `Write`, `MultiEdit`, `NotebookEdit` 에 매칭. |
 | `SubagentStart` / `SubagentStop` | 서브에이전트 실행을 활성 시나리오에 바인딩; 종료 시 결과 요약을 영속화. |
 
-D21 위임 게이트: 오케스트레이터(메인 세션) 는 실행 도구(`Edit` / `Write` / `MultiEdit` / `NotebookEdit` / 변경성 `Bash`) 호출이 차단된다. `Agent` 로 스폰된 전문가만이 게이트를 만족시키는 `hookInput.agent_id` 를 갖는다.
+D21 위임 게이트: 메인 세션의 편집 도구와 설정되지 않은 변경성 `Bash` 호출은
+차단한다. 네이티브 전문가 디스패치가 `hookInput.agent_id`를 제공하며,
+프로젝트 명령 예외는 명시적으로 설정한 shell 명령에만 적용한다.
+
+프로젝트 명령 예외는 소유 프로젝트의 `.sdi/settings.json` 또는 Git에서 제외한
+`.sdi/settings.local.json`의 `permissions.allow`에 설정한다.
+
+```json
+{
+  "permissions": {
+    "allow": ["orca skills get orchestration", "orca orchestration send *"]
+  }
+}
+```
+
+두 호스트 어댑터는 매 호출마다 두 목록을 합쳐 다시 읽는다. 정확한 명령 또는
+끝의 ` *` 인자 접두사 규칙으로 메인 shell 실행을 허용하며, 허용한 명령의 모든
+실행·쓰기 효과는 사용자 책임이다. 예외는 읽기·쓰기 분류를 바꾸거나 편집 도구
+권한·전문가 identity를 부여하지 않으며 다른 게이트를 유지한다.
+호스트 자체 권한 설정은 별개다.
+[명령 정책 계약](../docs/design/command-policy.md)과
+[외부 오케스트레이션 절차](../docs/COMPATIBILITY.md#supported-execution-procedure)를 참조한다.
 
 D26 패턴 무결성 (권고): 두 개의 상호보완 트리거가, 작업이 L3 로 제한되는 `direct` 마커 아래로 분기되기 전에 세션을 실제 CollaborationPattern 으로 유도한다.
 

@@ -46,3 +46,6 @@ plugin/web/node_modules/
 plugin/web/dist/
 plugin/web/*.tsbuildinfo
 plugin/web/.vite/
+
+# Personal project command permissions
+.sdi/settings.local.json

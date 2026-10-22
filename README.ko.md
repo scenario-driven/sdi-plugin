@@ -52,7 +52,7 @@ SDI 는 TDD(1990년대) 와 BDD(2000년대) 의 LLM 시대 후속이다. 계보�
 - **D18 — 서킷 브레이커 상시 작동.** UI 액션 하나가 모든 정책 행을 즉시 L3 로 강등한다; 처리 중인 결정은 다음 게이트에서 적용된다.
 - **D19 — 기반은 모드 독립으로 작동.** M1 블랙보드, M2 핸드오프, M3 협상, M4 시나리오-계약, M5 자기조직화는 어떤 모드에서도 계속 작동한다; 모드는 합의에 대한 사용자 게이트 위치만 정한다.
 - **D20 — 합의가 게이트 단위.** 단일 에이전트 결정 = L3 최대. 멀티 에이전트 합의가 L4/L5 를 해제한다. dissensus 는 모드와 무관하게 항상 에스컬레이션된다.
-- **D21 — 강제 위임 게이트.** 오케스트레이터(메인 세션) 는 실행 도구(`Edit`/`Write`/`NotebookEdit`/변경성 `Bash`) 호출이 금지된다. PreToolUse 훅이 `hookInput.agent_id` 부재를 감지해 호출을 차단한다 — 유일하게 정당한 경로는 `Agent` 로 스폰된 전문가 서브에이전트뿐이다. 이것이 D13 의 기계적 강제 면모다: 안티패턴이 문서상으로만이 아니라 구조적으로 불가능해진다.
+- **D21 — 강제 위임 게이트.** 메인 세션은 실행 도구(`Edit`/`Write`/`NotebookEdit`/변경성 `Bash`)를 전문가에게 위임한다. PreToolUse 훅은 설정되지 않은 메인 실행을 차단하며, 사용자 프로젝트 명령 예외는 shell 위임 제한에만 적용한다. 네이티브 전문가 디스패치가 구현에 필요한 identity를 제공하고, 명령 예외는 그 identity를 부여하지 않는다.
 - **D22 — 일곱 번째 엔티티로서의 CollaborationPattern.** AWS 의 4대 패턴(Workflow / Graph / Swarm / Agents-as-Tools) 이 라이프사이클(pending → active → converged | dissensus | aborted) 을 가진 영속 DB 행이 된다. `direct` 는 안티패턴 마커이지 탈출구가 아니다.
 - **D23 — 패턴 출처는 NOT NULL.** 모든 신규 작업 엔티티가 `produced_via_pattern_id` 를 갖는다; 이를 누락한 메인 세션은 빨간 대시보드 배지 + L3 상한 + 감사 로그가 붙은 자동 `direct` 행을 받는다.
 - **D24 — DAG 를 통한 패턴 재귀.** `parent_pattern_id` self-FK, depth ≤ `AutonomyPolicy.pattern_depth_cap` (기본 3). 패턴의 스텝이 서브패턴을 스폰할 수 있다; 사이클은 차단된다.
@@ -63,6 +63,30 @@ SDI 는 TDD(1990년대) 와 BDD(2000년대) 의 LLM 시대 후속이다. 계보�
 - **D29 — 멀티세션 리소스 클레임.** Scenario.claimed_resources_json (경로 glob) + claim_status 가 데몬에 결정 라우터 역할을 부여한다: 세션 간 겹침은 PreToolUse 에서 merge-or-wait 프롬프트와 함께 차단된다. 충돌이 잦은 플랜을 위한 선택적 `plan_single_session_lock`.
 
 전체 L3/L4/L5 의미론, 스코프 매트릭스, 서킷 브레이커 트리거, 위임 게이트 도구 분류, 패턴 무결성 규칙은 **[`docs/PRD.md`](./docs/PRD.md)** §3.7, §3.9, §5 Layer 0 / 1.5 / 2.6 / 2.7 / 2.8 / 3 에 상세히 기술되어 있다.
+
+---
+
+## 프로젝트 명령 예외
+
+메인 세션이 실행할 shell 명령을 등록된 프로젝트 루트의
+`.sdi/settings.json`에 추가한다.
+
+```json
+{
+  "permissions": {
+    "allow": ["orca skills get orchestration", "orca orchestration send *"]
+  }
+}
+```
+
+개인 예외는 `.sdi/settings.local.json`에 추가하고 Git에서 제외한다.
+Claude Code와 Codex 모두 매 호출마다 두 파일의 목록을 합쳐 다시 읽는다.
+와일드카드 없는 명령은 정확히 일치해야 하며, 끝의 ` *`는 추가 인자를 허용한다.
+허용한 명령의 실행·쓰기 효과는 사용자 책임이다. 예외는 shell 위임 제한에만
+적용하고 다른 게이트를 유지하며, 편집 도구 권한이나 전문가 identity를 부여하지
+않는다. 호스트 자체 권한 설정은 별개다.
+자세한 매칭 경계는 [명령 정책 계약](docs/design/command-policy.md)을,
+외부 도구와의 병행 절차는 [외부 오케스트레이션 안내](docs/COMPATIBILITY.md#supported-execution-procedure)를 참조한다.
 
 ---
 
