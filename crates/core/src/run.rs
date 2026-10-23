@@ -111,6 +111,9 @@ pub struct Run {
     pub failure_class: Option<FailureClass>,
     #[serde(default)]
     pub failure_signature: Option<String>,
+    /// Computed cause provenance and the signature actually charged to the budget.
+    #[serde(default)]
+    pub failure_identity: Option<serde_json::Value>,
     #[serde(default)]
     pub error_class: Option<String>,
     #[serde(default)]

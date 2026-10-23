@@ -13,11 +13,12 @@
 //! - **Failure class** — who is at fault when a run fails. Only the product
 //!   class means "the code under test is wrong"; harness / environment / spec
 //!   failures must not be booked against the product.
-//! - **Failure signature** — a stable identity for "the same cause": contract
-//!   id + failing test id + normalized error class + top in-repo frame. Line
-//!   numbers, durations, addresses and ordering noise are normalized away so a
-//!   retry of the same defect lands on the same signature no matter which task
-//!   name it runs under.
+//! - **Failure cause** — a versioned identity derived from the primary
+//!   actionable diagnostic, independently of classification and test wrappers.
+//!   Legacy signatures remain available for immutable historical provenance.
+
+mod cause;
+pub use cause::{derive_failure_cause, FailureCauseIdentity};
 
 use crate::error::{DomainError, DomainResult};
 use crate::ids::{Id, Timestamp};

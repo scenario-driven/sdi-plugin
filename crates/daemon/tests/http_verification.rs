@@ -567,7 +567,7 @@ async fn harness_failures_do_not_consume_product_budget_but_cap_themselves() {
 }
 
 #[tokio::test]
-async fn caller_overrides_class_and_signature() {
+async fn caller_class_override_keeps_signature_hint_as_provenance() {
     let f = fixture(1).await;
     let s0 = &f.scenarios[0];
     let r = f
@@ -578,7 +578,14 @@ async fn caller_overrides_class_and_signature() {
         )
         .await;
     assert_eq!(r["failure_class"], "spec");
-    assert_eq!(r["failure_signature"], "caller:ambiguous-then");
+    assert!(r["failure_signature"]
+        .as_str()
+        .unwrap()
+        .starts_with("sig:v2:fallback:"));
+    assert_eq!(
+        r["failure_identity"]["caller_hint"],
+        "caller:ambiguous-then"
+    );
     // A success cannot carry a failure class.
     let started = f
         .api

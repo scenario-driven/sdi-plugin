@@ -68,6 +68,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "verification integrity: run fingerprints, retry budgets, fixed baseline",
         MIGRATION_018_VERIFICATION_INTEGRITY,
     ),
+    (
+        19,
+        "failure cause provenance",
+        MIGRATION_019_FAILURE_IDENTITY,
+    ),
 ];
 
 const MIGRATION_001_CORE: &str = include_str!("./migrations/001_core.sql");
@@ -93,6 +98,7 @@ const MIGRATION_016_ORACLE_LAYER: &str = include_str!("./migrations/016_oracle_l
 const MIGRATION_017_PLAN_FLOWS: &str = include_str!("./migrations/017_plan_flows.sql");
 const MIGRATION_018_VERIFICATION_INTEGRITY: &str =
     include_str!("./migrations/018_verification_integrity.sql");
+const MIGRATION_019_FAILURE_IDENTITY: &str = include_str!("./migrations/019_failure_identity.sql");
 
 /// Apply any pending migrations against `conn`. Idempotent.
 pub fn ensure_schema(conn: &Connection) -> DomainResult<()> {
@@ -446,6 +452,57 @@ mod tests {
             .unwrap();
         assert_eq!(cap, 3);
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn migration_019_preserves_failure_history_and_totals() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, label TEXT NOT NULL);",
+        )
+        .unwrap();
+        for (version, label, sql) in MIGRATIONS.iter().filter(|(v, _, _)| *v <= 18) {
+            conn.execute_batch(sql).unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations(version, label) VALUES (?1, ?2)",
+                rusqlite::params![version, label],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO projects(id,key,name,slug,created_at,updated_at)
+                 VALUES ('project','history','history','history','2026-01-01','2026-01-01');
+             INSERT INTO plans(id,project_id,short_code,title,status,created_at,updated_at)
+                 VALUES ('plan','project','history','history','active','2026-01-01','2026-01-01');
+             INSERT INTO scenarios(id,plan_id,short_code,given,when_clause,then_clause,created_at,updated_at)
+                 VALUES ('scenario','plan','history','g','w','t','2026-01-01','2026-01-01');
+             INSERT INTO runs(id,plan_id,scenario_id,actor,started_at,finished_at,result,payload,
+                 exit_code,report_path,report_sha256,failure_class,failure_signature,error_class)
+                 VALUES ('run','plan','scenario','agent','2026-01-01','2026-01-01','failure',
+                 '{\"original\":true}',1,'reports/original.log','original-digest','product','sig:legacy','assertion');
+             INSERT INTO retry_budgets(plan_id,scenario_id,failure_class,failure_signature,count,
+                 total_failures,first_run_id,last_run_id,last_failed_at)
+                 VALUES ('plan','scenario','product','sig:legacy',3,7,'run','run','2026-01-01');",
+        )
+        .unwrap();
+        let snapshot = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap();
+        let run_sql = "SELECT json_array(result,payload,exit_code,report_path,report_sha256,
+            failure_class,failure_signature,error_class) FROM runs WHERE id='run'";
+        let budget_sql = "SELECT json_array(plan_id,scenario_id,failure_class,failure_signature,
+            count,total_failures,first_run_id,last_run_id,last_failed_at,released_by_decision_id,
+            released_at) FROM retry_budgets";
+        let original_run = snapshot(run_sql);
+        let original_budget = snapshot(budget_sql);
+
+        ensure_schema(&conn).unwrap();
+        ensure_schema(&conn).unwrap();
+
+        assert_eq!(snapshot(run_sql), original_run);
+        assert_eq!(snapshot(budget_sql), original_budget);
+        let provenance: Option<String> = conn
+            .query_row("SELECT failure_identity_json FROM runs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(provenance, None);
     }
 
     // 010 upgrade path: a populated pre-010 database (global short_code

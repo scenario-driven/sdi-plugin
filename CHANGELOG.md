@@ -8,6 +8,19 @@ Scope: commands, hooks, MCP read tools, and breaking wire-shape changes. The
 workspace `[workspace.package].version` is the single source of truth and is
 mirrored by the plugin manifest (`plugin/.claude-plugin/plugin.json`).
 
+## [0.11.1] - 2026-10-23
+
+### Fixed
+- Verification retry budgets distinguish primary compiler and startup causes
+  while grouping repeated causes across volatile diagnostic locations and
+  work identifiers. Failure classification remains independent of identity.
+- Structured executions derive authoritative cause identity; caller signature
+  hints cannot reset counters. Unknown diagnostics use an explicit fallback.
+- Persisted identity provenance, conservative compatibility accounting and
+  atomic completion preserve existing retry limits, exhausted budgets and
+  historical verification evidence. See the
+  [retry cause identity contract](docs/design/retry-cause-identity.md).
+
 ## [0.11.0] - 2026-10-22
 
 ### Added

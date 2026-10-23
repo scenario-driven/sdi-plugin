@@ -126,12 +126,13 @@ of two kinds, and they are handled differently:
 
 The retry budget is owned by the daemon, not by the loop's own counter:
 
-- **Keyed by failure signature.** The daemon derives a signature from the
-  scenario, the failure class, the failing test id, the normalized error and
-  the top in-repo frame. Every failure with the same signature counts against
-  **one** budget for that scenario — cancelling, re-creating, or renaming the
-  task does not reset it. A genuinely different failure gets its own
-  signature and its own budget.
+- **Keyed by primary cause.** The daemon derives a versioned identity from
+  the scenario, failure class and normalized primary actionable diagnostic.
+  Unsupported output uses an explicit coarse fallback. Renaming tasks or
+  wrapper tests does not reset a counter; outstanding legacy or fallback
+  authority remains conservative. Each failed execution charges one counter.
+  See the [cause identity contract](https://github.com/scenario-driven/sdi-plugin/blob/main/docs/design/retry-cause-identity.md)
+  for normalization, provenance and compatibility rules.
 - **Cap.** The plan's autonomy policy sets the cap
   (`sdi autonomy set <PRJ-ID> --scope plan --plan-id <PLAN-ID> --mode <M>
   --retry-budget-cap <N>`); the default is 3 failures per signature. Inspect

@@ -29,8 +29,8 @@ use sdi_core::ids::{now, Id, IdKind};
 use sdi_core::run::{RelationKind, Run, RunResult, TaskRelation};
 use sdi_core::task::{Task, TaskStatus};
 use sdi_core::verification::{
-    caller_signature, classify, failure_signature, sha256_hex, ExecOutcome, FailureClass,
-    SpawnError,
+    caller_signature, classify, derive_failure_cause, failure_signature, sha256_hex, ExecOutcome,
+    FailureClass, SpawnError,
 };
 use sdi_db::repo::retry_budget as budget_repo;
 use sdi_db::repo::round as round_repo;
@@ -233,6 +233,7 @@ async fn start_run(
         report_sha256: None,
         failure_class: None,
         failure_signature: None,
+        failure_identity: None,
         error_class: None,
         failing_test: None,
         duration_ms: None,
@@ -272,7 +273,7 @@ struct FinishRunBody {
     /// Caller override of the classified failure class.
     #[serde(default)]
     failure_class: Option<String>,
-    /// Caller-provided failure signature (namespaced `caller:`).
+    /// Advisory hint for executions; explicit signature for manual runs.
     #[serde(default)]
     failure_signature: Option<String>,
     #[serde(default)]
@@ -294,7 +295,7 @@ impl FinishRunBody {
 /// failure summaries print last). The digest always covers the whole file.
 const REPORT_SCAN_BYTES: u64 = 4 * 1024 * 1024;
 
-fn read_report(path: &std::path::Path) -> DomainResult<(String, String)> {
+fn read_report(path: &std::path::Path) -> DomainResult<(String, String, bool)> {
     use std::io::{Read, Seek, SeekFrom};
     let bytes = std::fs::read(path)
         .map_err(|e| DomainError::Validation(format!("read report {}: {e}", path.display())))?;
@@ -312,6 +313,7 @@ fn read_report(path: &std::path::Path) -> DomainResult<(String, String)> {
     Ok((
         format!("sha256:{digest}"),
         String::from_utf8_lossy(&tail).into_owned(),
+        len > REPORT_SCAN_BYTES,
     ))
 }
 
@@ -320,7 +322,7 @@ async fn finish_run(
     Path(id): Path<String>,
     Json(b): Json<FinishRunBody>,
 ) -> ApiResult<Json<Value>> {
-    let conn = state.conn()?;
+    let mut conn = state.conn()?;
     let rid = Id::from(id);
     let run = repo::get_run(&conn, &rid)?;
     if run.finished_at.is_some() {
@@ -352,7 +354,7 @@ async fn finish_run(
             .map(SpawnError::from_str)
             .transpose()?,
     };
-    let (report_sha256, output) = match run.report_path.as_deref() {
+    let (report_sha256, output, report_scan_truncated) = match run.report_path.as_deref() {
         Some(p) if std::path::Path::new(p).is_file() => {
             let path = std::path::Path::new(p);
             if !path.starts_with(&state.paths.state) {
@@ -361,10 +363,10 @@ async fn finish_run(
                 ))
                 .into());
             }
-            let (d, t) = read_report(path)?;
-            (Some(d), t)
+            let (d, t, truncated) = read_report(path)?;
+            (Some(d), t, truncated)
         }
-        _ => (None, String::new()),
+        _ => (None, String::new(), false),
     };
     let cwd = run.cwd.as_deref().map(std::path::PathBuf::from);
     let top = cwd.as_deref().and_then(workspace::toplevel);
@@ -412,34 +414,91 @@ async fn finish_run(
     } else {
         class
     };
-    let signature = if class.is_failure() {
-        Some(match b.failure_signature.as_deref() {
-            Some(raw) => caller_signature(raw)?,
-            None => {
-                let contract_id = match (&run.scenario_id, &run.command) {
-                    (Some(s), _) => s.to_string(),
-                    (None, Some(c)) => c.join(" "),
-                    (None, None) => run
-                        .task_id
-                        .as_ref()
-                        .map(|t| t.to_string())
-                        .unwrap_or_default(),
-                };
-                failure_signature(
-                    &contract_id,
-                    class,
-                    classification.failing_test.as_deref(),
-                    &classification.error_class,
-                    classification.top_frame.as_deref(),
-                )
-            }
+    let execution = run.command.is_some()
+        || b.exit_code.is_some()
+        || b.signal.is_some()
+        || b.timed_out.is_some()
+        || b.spawn_error.is_some();
+    let caller_hint = b
+        .failure_signature
+        .as_deref()
+        .map(caller_signature)
+        .transpose()?;
+    let contract_id = match (&run.scenario_id, &run.command) {
+        (Some(s), _) => s.to_string(),
+        (None, Some(c)) => c.join(" "),
+        (None, None) => run
+            .task_id
+            .as_ref()
+            .map(|t| t.to_string())
+            .unwrap_or_default(),
+    };
+    let computed = (class.is_failure() && execution).then(|| {
+        derive_failure_cause(
+            &contract_id,
+            class,
+            &classification.error_class,
+            if report_scan_truncated { "" } else { &output },
+            &in_repo,
+        )
+    });
+    // Serialize selection, terminal state and the single debit. A failed debit
+    // must leave the run unfinished so a retry cannot lose its accounting.
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(sdi_db::map_sqlite_err)?;
+    let bridge = match (&computed, &run.plan_id, &run.scenario_id) {
+        (Some(identity), Some(plan), Some(scn)) => budget_repo::compatibility_bucket(
+            &tx,
+            plan,
+            scn,
+            class,
+            identity.signature.starts_with("sig:v2:fallback:"),
+        )?,
+        _ => None,
+    };
+    let signature = if let Some(identity) = &computed {
+        Some(
+            bridge
+                .as_ref()
+                .map(|b| b.failure_signature.clone())
+                .unwrap_or_else(|| identity.signature.clone()),
+        )
+    } else if class.is_failure() {
+        Some(match caller_hint.as_deref() {
+            // Only the daemon may mint a diagnosed identity. Manual hints
+            // remain coarse compatibility authority even if they mimic it.
+            Some(raw) if raw.starts_with("sig:v2:") => format!("caller:{raw}"),
+            Some(raw) => raw.to_owned(),
+            None => failure_signature(
+                &contract_id,
+                class,
+                classification.failing_test.as_deref(),
+                &classification.error_class,
+                classification.top_frame.as_deref(),
+            ),
         })
     } else {
         None
     };
+    let failure_identity = computed.as_ref().map(|identity| {
+        json!({
+            "computed": {"version": identity.version, "basis": identity.basis,
+                "diagnostic": identity.diagnostic, "signature": identity.signature},
+            "scope": "primary-only",
+            "diagnostic_unavailable": report_scan_truncated.then_some("report-scan-truncated"),
+            "booked_signature": signature,
+            "caller_hint": caller_hint,
+            "compatibility_bridge": bridge.as_ref().map(|_| {
+                if identity.signature.starts_with("sig:v2:fallback:") {
+                    "diagnostic-unavailable"
+                } else { "outstanding-coarse-budget" }
+            }),
+        })
+    });
 
     repo::finish_structured(
-        &conn,
+        &tx,
         &rid,
         &RunFinish {
             result: Some(result),
@@ -454,6 +513,7 @@ async fn finish_run(
             report_sha256,
             failure_class: Some(class),
             failure_signature: signature,
+            failure_identity,
             error_class: class
                 .is_failure()
                 .then(|| classification.error_class.clone()),
@@ -461,8 +521,9 @@ async fn finish_run(
             duration_ms: b.duration_ms,
         },
     )?;
-    let fresh = repo::get_run(&conn, &rid)?;
-    let budget = verification::book_failure(&conn, &fresh)?;
+    let fresh = repo::get_run(&tx, &rid)?;
+    let budget = verification::book_failure(&tx, &fresh)?;
+    tx.commit().map_err(sdi_db::map_sqlite_err)?;
     state.publish(EventEnvelope {
         kind: "run.finished".into(),
         entity_id: Some(fresh.id.to_string()),

@@ -19,7 +19,7 @@ const RUN_COLS: &str =
     "id, task_id, actor, session_id, started_at, finished_at, result, notes, payload, \
      plan_id, round_id, scenario_id, command_json, cwd, input_globs_json, tool_versions_json, \
      input_fingerprint, exit_code, signal, timed_out, spawn_error, report_path, report_sha256, \
-     failure_class, failure_signature, error_class, failing_test, duration_ms";
+     failure_class, failure_signature, error_class, failing_test, duration_ms, failure_identity_json";
 
 fn conv_err(idx: usize, e: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
@@ -73,6 +73,10 @@ fn row_to_run(row: &Row<'_>) -> rusqlite::Result<Run> {
         error_class: s_opt(row, 25)?,
         failing_test: s_opt(row, 26)?,
         duration_ms: row.get::<_, Option<i64>>(27)?,
+        failure_identity: s_opt(row, 28)?
+            .map(|raw| serde_json::from_str(&raw))
+            .transpose()
+            .map_err(|e| conv_err(28, e))?,
     })
 }
 
@@ -84,7 +88,7 @@ pub fn insert_run(conn: &Connection, run: &Run) -> DomainResult<()> {
     conn.execute(
         &format!(
             "INSERT INTO runs({RUN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,\
-             ?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)"
+             ?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29)"
         ),
         params![
             run.id.as_str(),
@@ -115,6 +119,9 @@ pub fn insert_run(conn: &Connection, run: &Run) -> DomainResult<()> {
             run.error_class,
             run.failing_test,
             run.duration_ms,
+            run.failure_identity
+                .as_ref()
+                .map(serde_json::Value::to_string),
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -236,6 +243,7 @@ pub struct RunFinish {
     pub report_sha256: Option<String>,
     pub failure_class: Option<FailureClass>,
     pub failure_signature: Option<String>,
+    pub failure_identity: Option<serde_json::Value>,
     pub error_class: Option<String>,
     pub failing_test: Option<String>,
     pub duration_ms: Option<i64>,
@@ -250,8 +258,8 @@ pub fn finish_structured(conn: &Connection, id: &Id, f: &RunFinish) -> DomainRes
             "UPDATE runs SET finished_at = ?1, result = ?2, notes = COALESCE(?3, notes), \
                  exit_code = ?4, signal = ?5, timed_out = ?6, spawn_error = ?7, \
                  report_sha256 = ?8, failure_class = ?9, failure_signature = ?10, \
-                 error_class = ?11, failing_test = ?12, duration_ms = ?13 \
-             WHERE id = ?14 AND finished_at IS NULL",
+                 error_class = ?11, failing_test = ?12, duration_ms = ?13, failure_identity_json = ?14 \
+             WHERE id = ?15 AND finished_at IS NULL",
             params![
                 fmt_ts(now()),
                 result.to_string(),
@@ -266,6 +274,7 @@ pub fn finish_structured(conn: &Connection, id: &Id, f: &RunFinish) -> DomainRes
                 f.error_class,
                 f.failing_test,
                 f.duration_ms,
+                f.failure_identity.as_ref().map(serde_json::Value::to_string),
                 id.as_str(),
             ],
         )

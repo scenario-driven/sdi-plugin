@@ -941,6 +941,7 @@ mod tests {
             report_sha256: None,
             failure_class: Some(sdi_core::verification::FailureClass::None),
             failure_signature: None,
+            failure_identity: None,
             error_class: None,
             failing_test: None,
             duration_ms: Some(1),

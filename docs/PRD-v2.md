@@ -80,6 +80,8 @@ round 는 더 이상 수동 진행 레코드가 아니라 **결정적 오케스�
 - **바깥 루프 — 명세 수렴**: L0→L1→L2 를 돌며 "(Persona×Capability) 미커버 / flow 단계 미커버 GWT / 미해소 OPEN / 미질문 결정지점" 이 0 이 될 때까지 loop-until-dry. 매 회 completeness-critic 이 "무엇이 빠졌나" 판정.
 - **안쪽 루프 — 구현 수렴**: oracle(L2)에 대고 decompose→impl→test→verdict 를 돌리고, `failing/impacted` 면 bounded N회 재시도 또는 escalate, 전부 pass 면 round complete, 이전 round 대비 회귀 검출 시 **자동으로 다음 round open**.
 
+재시도 예산은 실패 분류와 구분되는 대표 원인 식별자로 계산한다. [Retry cause identity](design/retry-cause-identity.md)가 진단·정규화·증거·기존 예산의 보수적 연결 계약을 정의한다.
+
 **D32 — 완전성 oracle = SSoT 문서 그래프 (자체 네이티브). [D-α=B]**
 "완전한 제품 정의" 를 SDI 네이티브 엔티티 그래프로 보유한다. ssot-studio 의 검증된 모델(노드별 4축 측면 + `OPEN` 마커 + dangling-edge 0 = 완전)을 흡수하되, **외부 ssot-studio 를 소비(A)하거나 세 도구를 통합(C)하지 않고 SDI 자체 모델(B)로** 둔다. *근거*: ① self-containment — 모든 SDI 프로젝트가 SSoT 레포 없이 동작해야 한다. ② D35 질문엔진이 ssot-studio 의 OPEN-채움 메커니즘의 *상위호환*이라 외부 의존이 불필요. ③ C(통합)는 Clawket/SDI/ssot 3도구 병합이라는 별도 전략 결정이므로 본 PRD 가 단독으로 못박지 않는다 (미래 옵션으로 열어둠).
 완전성 두 축(ssot-studio `verify.mjs:74-145` 계승):

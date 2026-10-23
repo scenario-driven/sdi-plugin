@@ -128,6 +128,54 @@ pub fn list(
     Ok(out)
 }
 
+/// Outstanding coarse identities retain their accounting authority until an
+/// explicit release. A diagnosis cannot silently repartition old failures.
+pub fn compatibility_bucket(
+    conn: &Connection,
+    plan_id: &Id,
+    scenario_id: &Id,
+    class: FailureClass,
+    diagnostic_unavailable: bool,
+) -> DomainResult<Option<RetryBudget>> {
+    let mut budgets = Vec::new();
+    for budget in list(conn, plan_id, Some(scenario_id))? {
+        if budget.failure_class != class || budget.count == 0 {
+            continue;
+        }
+        // The first run owns the bucket's provenance. A later bridged diagnosis
+        // cannot turn an originally coarse counter into a precise one.
+        let diagnosed = if !diagnostic_unavailable
+            && budget.failure_signature.starts_with("sig:v2:")
+            && !budget.failure_signature.starts_with("sig:v2:fallback:")
+        {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM runs WHERE id = ?1 AND plan_id = ?2 \
+                 AND scenario_id = ?3 AND failure_class = ?4 AND failure_signature = ?5 \
+                 AND CASE WHEN json_valid(failure_identity_json) THEN \
+                   json_extract(failure_identity_json, '$.computed.version') = 2 \
+                   AND json_extract(failure_identity_json, '$.computed.basis') = 'primary-diagnostic' \
+                   AND json_extract(failure_identity_json, '$.computed.signature') = ?5 \
+                 ELSE 0 END)",
+                params![budget.first_run_id.as_ref().map(Id::as_str), plan_id.as_str(),
+                    scenario_id.as_str(), class.to_string(), budget.failure_signature],
+                |row| row.get::<_, bool>(0),
+            ).map_err(map_sqlite_err)?
+        } else {
+            false
+        };
+        if !diagnosed {
+            budgets.push(budget);
+        }
+    }
+    budgets.sort_by(|a, b| {
+        b.exhausted
+            .cmp(&a.exhausted)
+            .then_with(|| b.count.cmp(&a.count))
+            .then_with(|| a.failure_signature.cmp(&b.failure_signature))
+    });
+    Ok(budgets.into_iter().next())
+}
+
 /// Exhausted budgets for any of `scenario_ids` in the plan.
 pub fn exhausted_for(
     conn: &Connection,
